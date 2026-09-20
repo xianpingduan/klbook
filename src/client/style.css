@@ -85,6 +85,12 @@ select:focus-visible, textarea:focus-visible { outline: 3px solid #ceac53; outli
 .save-actions button { margin-right: 0; }
 .file-picker { padding: 30px; border: 2px dashed #b7cab9; border-radius: 16px; background: #f8faf5; }
 .file-picker input { background: white; }
+.capture-inputs { display: grid; gap: 12px; }
+.capture-inputs .file-picker { padding: 18px; margin: 0; }
+.capture-queue { list-style: none; padding: 0; }
+.capture-queue li { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid #dbcfa8; padding: 10px 0; }
+.capture-queue span { min-width: 0; overflow-wrap: anywhere; }
+.capture-queue button { margin: 0; flex-shrink: 0; }
 .source-manager { margin-top: 24px; }
 .source-form { max-width: 620px; padding: 20px 24px; background: #f8faf5; border-radius: 14px; margin: 24px 0; }
 .source-form h2 { margin-top: 0; font-size: 18px; }

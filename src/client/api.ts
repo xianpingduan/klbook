@@ -36,7 +36,8 @@ export class FamilyApi {
     } catch { throw new Error('无法连接家庭电脑，请确认电脑已开机且服务运行，再重试'); }
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
-      throw new ApiError(response.status, typeof detail.message === 'string' ? detail.message : '请求失败，请重试');
+      const unavailable = response.status === 502 || response.status === 504;
+      throw new ApiError(response.status, typeof detail.message === 'string' ? detail.message : unavailable ? '家庭电脑上的服务暂时不可达，请确认服务运行后重试' : '请求失败，请重试');
     }
     return response;
   }

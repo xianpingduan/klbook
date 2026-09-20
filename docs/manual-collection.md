@@ -4,7 +4,7 @@
 
 ## 图片与存储
 
-- 接受 JPEG、PNG、静态 WebP；每张最多 15 MiB、4000 万像素。后端按真实内容解码，不依赖扩展名或请求 MIME。HEIC、批量、跨页由后续采集任务处理。
+- 接受 JPEG、PNG、静态 WebP；每张最多 15 MiB、4000 万像素。后端按真实内容解码，不依赖扩展名或请求 MIME。批量采集见 [#4 说明](lan-capture.md)；HEIC 需先导出 JPEG，跨页关联由 #5 实现。
 - 使用 sharp 0.35.4 解码，依赖随锁文件安装，不另装图片服务。原始页保留上传字节及 SHA-256；单独生成最长边 2800 像素的 WebP 预览，按 EXIF 调整方向。原图的 EXIF 等信息仍在原文件中。
 - `width/height` 表示按 EXIF 摆正后的原始页尺寸；题目区使用这一坐标系下的归一化矩形 `x/y/width/height`（0～1）。裁剪只存坐标，绝不覆盖原件。
 - 文件位于 `KLBOOK_DATA_DIR/attachments/pages/<服务端生成的 UUID>/`，包含 `original` 与 `preview`。路径和上传文件名无关，客户端通过鉴权接口获取 Blob。

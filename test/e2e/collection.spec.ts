@@ -84,7 +84,7 @@ test('写入失败和响应丢失后保留材料，重开及重复保存不会�
     await expect(page.getByRole('alert')).toContainText('图片未能完整保存');
     await expect(page.getByText('已同步到家庭资料库', { exact: true })).toHaveCount(0);
     await page.reload();
-    await expect(page.getByText('还有一张图片等待上传', { exact: true })).toBeVisible();
+    await expect(page.getByText('还有 1 张图片等待上传', { exact: true })).toBeVisible();
     await rm(join(dataDir, 'attachments', 'pages'));
     await page.route('**/api/v1/collection/drafts', async route => {
       await route.fetch({ maxRetries: 1 }); await route.abort();
@@ -138,7 +138,7 @@ test('设备暂存不可用时，返回列表仍保留内存图片，修复存�
     await page.getByLabel('选择题目图片').setInputFiles({ name: '仍在页面里的材料.png', mimeType: 'image/png', buffer: image });
     await expect(page.getByRole('alert')).toContainText('本设备暂存失败');
     await page.getByRole('button', { name: '返回列表' }).click();
-    await expect(page.getByText('还有一张图片等待上传', { exact: true })).toBeVisible();
+    await expect(page.getByText('还有 1 张图片等待上传', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '继续上传' })).toBeEnabled();
     await page.evaluate(() => new Promise<void>((resolve, reject) => {
       const request = indexedDB.deleteDatabase('klbook-device-drafts');
