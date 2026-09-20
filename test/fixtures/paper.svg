@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="800" viewBox="0 0 640 800">
+  <rect width="640" height="800" fill="#fffdf5"/>
+  <g fill="#26352d" font-family="sans-serif">
+    <text x="42" y="65" font-size="28">Math practice - page 3</text>
+    <text x="42" y="140" font-size="25">1. 7 x 8 =</text>
+    <text x="245" y="142" fill="#275faa" font-size="30" transform="rotate(-3 245 142)">54</text>
+    <path d="M294 114 L328 153 M327 115 L295 153" fill="none" stroke="#bd4032" stroke-width="4"/>
+    <text x="345" y="142" fill="#bd4032" font-size="27">56</text>
+    <text x="42" y="290" font-size="25">2. Find the perimeter.</text>
+    <path d="M100 335 H380 V485 H100 Z" fill="none" stroke="#26352d" stroke-width="3"/>
+    <text x="206" y="326" font-size="22">8 cm</text>
+    <text x="390" y="416" font-size="22">5 cm</text>
+    <text x="45" y="575" font-size="25">3. Complete the table.</text>
+    <path d="M45 610 H560 V730 H45 Z M45 670 H560 M210 610 V730 M390 610 V730" stroke="#26352d" stroke-width="2" fill="none"/>
+    <text x="95" y="650" font-size="24">x</text><text x="280" y="650" font-size="24">6</text><text x="465" y="650" font-size="24">7</text>
+    <text x="95" y="710" font-size="24">8</text><text x="275" y="710" font-size="24" fill="#275faa">48</text><text x="460" y="710" font-size="24" fill="#275faa">56</text>
+  </g>
+</svg>

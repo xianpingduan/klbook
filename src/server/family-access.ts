@@ -1,6 +1,6 @@
-import Database from 'better-sqlite3';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import type Database from 'better-sqlite3';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Device, Home, LoginInput, RecoveryInput, SetupInput } from '../shared/contracts.ts';
 import { digest, hashPassword, newSecret, verifyPassword } from './secrets.ts';
@@ -26,49 +26,11 @@ export class FamilyAccess {
   private setupPath: string;
   private now: () => number;
 
-  constructor(dataDir: string, now = Date.now) {
-    if (!isAbsolute(dataDir)) throw new Error('KLBOOK_DATA_DIR 必须是绝对路径');
-    mkdirSync(dataDir, { recursive: true });
-    mkdirSync(join(dataDir, 'attachments'), { recursive: true });
+  constructor(db: Database.Database, dataDir: string, now = Date.now) {
     this.setupPath = join(dataDir, 'setup-code.txt');
     this.now = now;
-    this.db = new Database(join(dataDir, 'family.sqlite'));
+    this.db = db;
     try {
-      this.db.pragma('foreign_keys = ON');
-      this.db.pragma('journal_mode = WAL');
-      this.db.pragma('synchronous = FULL');
-      this.db.pragma('busy_timeout = 5000');
-      const version = this.db.pragma('user_version', { simple: true });
-      if (typeof version !== 'number' || version < 0 || version > 3) throw new Error('资料库版本比当前程序新，请使用匹配的程序');
-      if (version === 0) this.db.transaction(() => {
-        this.db.exec(`
-          CREATE TABLE family (
-            singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
-            libraryId TEXT NOT NULL, learnerId TEXT NOT NULL, learnerName TEXT NOT NULL,
-            accountId TEXT NOT NULL, username TEXT NOT NULL, passwordHash TEXT NOT NULL, recoveryHash TEXT NOT NULL
-          );
-          CREATE TABLE sessions (
-            id TEXT PRIMARY KEY, tokenHash TEXT NOT NULL UNIQUE, deviceName TEXT NOT NULL,
-            createdAt INTEGER NOT NULL, expiresAt INTEGER NOT NULL
-          );
-          PRAGMA user_version = 1;
-        `);
-      })();
-      if (version < 2) this.db.transaction(() => {
-        this.db.exec(`
-          CREATE TABLE parentGrants (
-            tokenHash TEXT PRIMARY KEY, sessionId TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-            expiresAt INTEGER NOT NULL
-          );
-          PRAGMA user_version = 2;
-        `);
-      })();
-      if (version < 3) this.db.transaction(() => {
-        this.db.exec(`
-          CREATE TABLE attempts (key TEXT PRIMARY KEY, count INTEGER NOT NULL, expiresAt INTEGER NOT NULL);
-          PRAGMA user_version = 3;
-        `);
-      })();
       if (!this.family()) {
         try { writeFileSync(this.setupPath, newSecret(), { flag: 'wx', mode: 0o600 }); }
         catch (error) { if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error; }
@@ -79,7 +41,6 @@ export class FamilyAccess {
     }
   }
 
-  close() { this.db.close(); }
   private family() { return this.db.prepare<[], Family>('SELECT * FROM family WHERE singleton = 1').get(); }
   info() { return { app: 'klbook' as const, apiVersion: 1 as const, initialized: Boolean(this.family()) }; }
 

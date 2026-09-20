@@ -1,6 +1,7 @@
 import type { Device, Home, LoginInput, ParentGrant, RecoveryInput, ServerInfo, SessionResult, SetupInput } from '../shared/contracts.ts';
 import type { ClientPlatform, SavedCredential } from './platform.ts';
 import { serverOrigin } from './platform.ts';
+import type { Question, QuestionEdit, QuestionList, Subject } from '../shared/collection.ts';
 
 export class ApiError extends Error {
   status: number;
@@ -24,20 +25,37 @@ export class FamilyApi {
     api.credential = await platform.credentials.read(target);
     return { api, info };
   }
-  private async request<T>(path: string, method = 'GET', body?: unknown, grant?: string): Promise<T> {
+  private async send(path: string, options: RequestInit = {}): Promise<Response> {
     let response: Response;
     try {
       response = await this.platform.request(`${this.target}/api/v1${path}`, {
-        method, body: body === undefined ? undefined : JSON.stringify(body),
-        headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(this.credential ? { Authorization: `Bearer ${this.credential.token}` } : {}), ...(grant ? { 'X-Parent-Authorization': grant } : {}) },
-        credentials: 'omit', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(10000)
+        ...options, headers: { ...options.headers, ...(this.credential ? { Authorization: `Bearer ${this.credential.token}` } : {}) },
+        credentials: 'omit', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(30000)
       });
     } catch { throw new Error('无法连接家庭电脑，请确认电脑已开机且服务运行，再重试'); }
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
       throw new ApiError(response.status, typeof detail.message === 'string' ? detail.message : '请求失败，请重试');
     }
+    return response;
+  }
+  private async request<T>(path: string, method = 'GET', body?: unknown, grant?: string): Promise<T> {
+    const response = await this.send(path, {
+      method, body: body === undefined ? undefined : JSON.stringify(body),
+      headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(grant ? { 'X-Parent-Authorization': grant } : {}) }
+    });
     return response.status === 204 ? undefined as T : response.json();
+  }
+  subjects() { return this.request<Subject[]>('/collection/subjects'); }
+  questions(state: 'draft' | 'collected', offset = 0) { return this.request<QuestionList>(`/collection/questions?state=${state}&offset=${offset}`); }
+  question(id: string) { return this.request<Question>(`/collection/questions/${encodeURIComponent(id)}`); }
+  saveQuestion(id: string, input: QuestionEdit) { return this.request<Question>(`/collection/questions/${encodeURIComponent(id)}`, 'PUT', input); }
+  async uploadImage(file: Blob, operationId: string): Promise<Question> {
+    const response = await this.send('/collection/drafts', { method: 'POST', body: file, headers: { 'Content-Type': ['image/jpeg', 'image/png', 'image/webp'].includes(file.type) ? file.type : 'image/png', 'Idempotency-Key': operationId } });
+    return response.json();
+  }
+  async pageImage(pageId: string, variant: 'original' | 'preview') {
+    return (await this.send(`/collection/pages/${encodeURIComponent(pageId)}/${variant}`)).blob();
   }
   info() { return this.request<ServerInfo>('/info'); }
   setup(input: SetupInput) { return this.request<SessionResult>('/setup', 'POST', input); }

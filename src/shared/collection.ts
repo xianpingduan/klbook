@@ -1,0 +1,19 @@
+export interface Subject { id: string; name: string }
+export interface Region { x: number; y: number; width: number; height: number }
+export interface OriginalPage {
+  id: string; mimeType: string; byteLength: number; sha256: string; width: number; height: number;
+}
+export interface Question {
+  id: string; libraryId: string; learnerId: string; revision: number;
+  state: 'draft' | 'collected'; syncState: 'synced'; subjectId: string | null; region: Region | null;
+  source: string; pageNumber: string; questionNumber: string; note: string;
+  createdAt: number; updatedAt: number; collectedAt: number | null;
+  originalPage: OriginalPage;
+}
+export interface QuestionList { items: Question[]; total: number; offset: number; limit: number }
+export interface QuestionEdit {
+  operationId: string; expectedRevision: number; state: 'draft' | 'collected';
+  subjectId: string | null; region: Region | null;
+  source: string; pageNumber: string; questionNumber: string; note: string;
+}
+export const MAX_IMAGE_BYTES = 15 * 1024 * 1024;

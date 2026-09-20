@@ -1,6 +1,6 @@
 # 错题集（klbook）
 
-面向家庭的小学生错题收集应用。当前完成 [任务 #2](https://github.com/xianpingduan/klbook/issues/2)：本地家庭账号、设备登录、家长管理和账号恢复。拍照收集等功能按后续任务实现。
+面向家庭的小学生错题收集应用。已实现本地家庭账号、设备登录、家长管理、账号恢复，以及电脑手动收集错题：上传图片、框题、选学科、保存并找回原始页。
 
 ## 本机启动
 
@@ -39,6 +39,14 @@ npm.cmd start
 
 当前开发入口只监听本机 `127.0.0.1`。手机局域网 HTTPS 入口、证书和 Windows 常驻服务由 [#4](https://github.com/xianpingduan/klbook/issues/4) 等部署任务实现；此入口不等同于手机安装包。
 
+## 收集一道错题
+
+登录后点击“收集一道错题”，选择一张 JPEG、PNG 或静态 WebP 图片（最多 15 MiB、4000 万像素）。拖动框住题目，或点击“选择整页”，选好学科即可保存。来源、页码、题号、备注可留空，也可日后在详情中补充。
+
+尚未整理完可“保存草稿”，之后从草稿列表继续。已收集列表可打开详情及完整原始页，原图中的作答和批改不会被裁剪覆盖。上传失败会保留待传图片，连接恢复后重新打开页面可继续上传；完整离线能力仍在后续 #9 实现。
+
+当前不需要配置识别、语音或 AI 服务。图片、数据库均保存在上述本地数据目录。接口与重试约定见[手动收集设计](docs/manual-collection.md)。
+
 ## 家长管理与恢复
 
 - 每台设备用家长账号、密码登录后，只获得日常会话，默认持续 30 天；退出、撤销、恢复账号会提前使它失效。
@@ -67,7 +75,8 @@ npm.cmd test
 ## 项目导航
 
 - [本地账号设计与 API](docs/authentication.md)
-- [本次实现验证记录](docs/verification/issue-2.md)
+- [手动收集设计与 API](docs/manual-collection.md)
+- [账号验证记录](docs/verification/issue-2.md) / [收集验证记录](docs/verification/issue-3.md)
 - [技术选型](docs/technical-selection.md)
 - [规格](docs/spec-collection-v1.md) / [开发任务](docs/development-tickets.md)
 - [Android APK / iOS App Store 后续计划](docs/mobile-delivery.md)
