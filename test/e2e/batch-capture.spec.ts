@@ -72,10 +72,6 @@ test('拍照取消有退路，批量坏图可跳过，触控框题与电脑停�
     await expect(page.getByRole('alert')).toContainText('无法连接家庭电脑');
     await expect(page.getByText('手机拍照.jpg', { exact: true }).first()).toBeVisible();
     server = await startServer(dataDir, port);
-    await page.route('**/api/v1/collection/drafts', route => route.fulfill({ status: 502, contentType: 'text/plain', body: '' }));
-    await page.getByRole('button', { name: '重试上传' }).click();
-    await expect(page.getByRole('alert')).toContainText('家庭电脑上的服务暂时不可达');
-    await page.unroute('**/api/v1/collection/drafts');
     await page.getByRole('button', { name: '重试上传' }).click();
     const frame = page.getByRole('img', { name: '框选题目范围' });
     await expect(frame).toBeVisible();

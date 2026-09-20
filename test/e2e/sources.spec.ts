@@ -23,9 +23,11 @@ test('家长独立管理来源并安全重试，孩子下拉选择，来源停�
     };
     await manage();
     await page.getByLabel('来源名称', { exact: true }).fill('课堂小测');
+    await expect(page.getByLabel('来源名称', { exact: true })).toHaveValue('课堂小测');
     await page.route('**/api/v1/admin/sources/*', async route => { await route.fetch({ maxRetries: 1 }); await route.abort(); });
     await page.getByRole('button', { name: '添加来源', exact: true }).click();
     await expect(page.getByRole('alert')).toContainText('无法连接家庭电脑');
+    await expect(page.getByLabel('来源名称', { exact: true })).toHaveValue('课堂小测');
     await page.unroute('**/api/v1/admin/sources/*');
     await page.getByRole('button', { name: '添加来源', exact: true }).click();
     await expect(page.getByRole('button', { name: '改名 课堂小测', exact: true })).toHaveCount(1);

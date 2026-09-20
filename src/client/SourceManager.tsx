@@ -7,7 +7,7 @@ export function SourceManager({ api, grant, onAccessError }: { api: FamilyApi; g
   const [sources, setSources] = useState<Source[]>([]);
   const [editing, setEditing] = useState<Source>();
   const [name, setName] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [refresh, setRefresh] = useState(0);
