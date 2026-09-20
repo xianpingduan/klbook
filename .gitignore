@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.scratch/
+test-results/
+playwright-report/
+.env
+*.sqlite*
+*.db*
+setup-code.txt
