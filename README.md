@@ -1,4 +1,4 @@
-# 错题集
+# 错题集（klbook）
 
 面向家庭的小学生错题收集应用。当前完成 [任务 #2](https://github.com/xianpingduan/klbook/issues/2)：本地家庭账号、设备登录、家长管理和账号恢复。拍照收集等功能按后续任务实现。
 
