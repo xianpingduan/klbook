@@ -83,7 +83,7 @@ SQLite 适合应用本地存储，但 WAL 仍只有一个写者，且数据库�
 
 ### 部署与测试
 
-- 开发时可用 Vite dev server；生产构建由 Caddy 提供静态文件并代理回环地址上的 Fastify。Caddy 为局域网名称/IP 提供 HTTPS，各设备需实际信任根证书。
+- 开发时可用 Vite dev server；#4 的生产入口由 Caddy 提供 HTTPS，并将页面和 API 统一转发给回环地址上的 Fastify，沿用后端静态文件及响应头规则。各设备需实际信任根证书，步骤见[局域网采集](lan-capture.md)。
 - Caddy 和后端以 Windows 自动服务运行；后端包装器采用 WinSW，设置服务账户、数据权限、重启策略和日志；证书、服务安装在 #4/#22 落实。本次没有运行生产服务。
 - 默认不增加 Redis、RabbitMQ 或 MinIO。后台作业状态先持久化到 SQLite，由本地工作循环执行；到具体任务再验证失败重试、租约与停用行为。
 - 测试使用真实隔离数据库和目录，从公开 API/浏览器验证初始化、登录、重启、撤销、恢复、管理越权；仅替换外部识别/转写/AI 服务。设备暂存用真实浏览器存储测，不以存储 mock 代替。
@@ -103,7 +103,7 @@ SQLite 适合应用本地存储，但 WAL 仍只有一个写者，且数据库�
 | better-sqlite3 / SQLite | 13.0.3 / 3.53.4（实际加载查询） |
 | Playwright | 1.63.0 |
 | Capacitor core / cli / android / ios | 8.5.2（已查官方包元数据，未安装或构建验证） |
-| Caddy / WinSW | [2.11.4](https://github.com/caddyserver/caddy/releases/tag/v2.11.4) / [2.12.0](https://github.com/winsw/winsw/releases/tag/v2.12.0)，已查稳定发布，尚未安装验证 |
+| Caddy / WinSW | [2.11.4](https://github.com/caddyserver/caddy/releases/tag/v2.11.4) / [2.12.0](https://github.com/winsw/winsw/releases/tag/v2.12.0)；#4 已校验并运行 Caddy，严格 TLS 探针通过，真机信任待验收；WinSW 在 #22 实施 |
 
 Vite 的 Node 要求为 20.19+ / 22.12+，本机 24.19.0 满足范围；驱动及其他包同时用严格引擎检查和实际加载验证，不能只凭主版本推断兼容。[Vite 要求](https://vite.dev/guide/)
 
