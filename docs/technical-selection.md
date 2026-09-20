@@ -1,6 +1,6 @@
 # 收集版基础技术选型
 
-日期：2026-09-18。对应 [任务 #2：确定基础技术方案并跑通本地家庭登录](https://github.com/xianpingduan/klbook/issues/2)。本记录先完成该任务的选型部分；家庭登录、恢复、设备撤销和权限验收完成后，才能关闭 #2。
+日期：2026-09-18；实现补充：2026-09-20。对应 [任务 #2：确定基础技术方案并跑通本地家庭登录](https://github.com/xianpingduan/klbook/issues/2)。选型后的家庭登录、恢复、设备撤销和权限实现见[账号设计](authentication.md)与[验证记录](verification/issue-2.md)；可复现启动见根目录 [README](../README.md)。本记录中 9 月 18 日的兼容性探针仍只代表当时选型验证。
 
 ## 1. 选型结论
 

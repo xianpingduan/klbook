@@ -1,0 +1,35 @@
+{
+  "name": "klbook",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24.19.0 <25" },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build && tsc -p tsconfig.server.json",
+    "start": "node dist/node/server/main.js",
+    "dev:server": "node --watch src/server/main.ts",
+    "dev:web": "vite --host 127.0.0.1",
+    "test:api": "node --test test/api/*.test.ts",
+    "test:e2e": "playwright test",
+    "test": "npm run test:api && npm run test:e2e"
+  },
+  "dependencies": {
+    "@fastify/cors": "11.3.0",
+    "@fastify/static": "10.1.4",
+    "better-sqlite3": "13.0.3",
+    "fastify": "5.12.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "24.13.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.0"
+  }
+}
