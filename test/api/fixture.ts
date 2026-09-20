@@ -1,13 +1,15 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { createApp } from '../../src/server/app.ts';
 import type { SessionResult } from '../../src/shared/contracts.ts';
 
 export const password = 'family password 123';
 export const auth = (token: string, grant?: string) => ({ authorization: `Bearer ${token}`, ...(grant ? { 'x-parent-authorization': grant } : {}) });
 export async function familyFixture() {
-  const dataDir = await mkdtemp(join(tmpdir(), 'klbook-api-'));
+  const parent = process.env.KLBOOK_TEST_DATA_PARENT ?? tmpdir();
+  if (!isAbsolute(parent)) throw new Error('KLBOOK_TEST_DATA_PARENT must be absolute');
+  const dataDir = await mkdtemp(join(parent, 'klbook-api-'));
   let now = Date.now();
   const app = createApp({ dataDir, now: () => now });
   const setupCode = (await readFile(join(dataDir, 'setup-code.txt'), 'utf8')).trim();

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import sharp from 'sharp';
@@ -120,7 +120,8 @@ test('真实附件写入故障与材料缺失不发布半道题，恢复目录�
     assert.equal(retried.statusCode, 201, retried.body);
     const draft = retried.json();
     const originalPath = join(storagePath, draft.originalPage.id, 'original');
-    await rename(originalPath, `${originalPath}.held`);
+    const originalBytes = await readFile(originalPath);
+    await rm(originalPath);
     try {
       assert.equal((await f.app.inject(input)).statusCode, 503);
       const save = await f.app.inject({ method: 'PUT', url: `/api/v1/collection/questions/${draft.id}`, headers: auth(f.first.token), payload: {
@@ -129,7 +130,7 @@ test('真实附件写入故障与材料缺失不发布半道题，恢复目录�
       assert.equal(save.statusCode, 503);
       assert.equal((await f.app.inject({ url: '/api/v1/collection/questions?state=collected', headers: auth(f.first.token) })).json().total, 0);
       assert.equal((await f.app.inject({ url: `/api/v1/collection/questions/${draft.id}`, headers: auth(f.first.token) })).json().revision, 1);
-    } finally { await rename(`${originalPath}.held`, originalPath); }
+    } finally { await writeFile(originalPath, originalBytes, { flag: 'wx' }); }
     const restored = await f.app.inject(input);
     assert.equal(restored.statusCode, 201);
     assert.equal(restored.json().id, draft.id);

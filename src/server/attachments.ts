@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { mkdir, open, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { AccessError } from './family-access.ts';
@@ -25,18 +25,21 @@ export class Attachments {
       mimeType = formats[meta.format]!;
       preview = await image.autoOrient().resize({ width: 2800, height: 2800, fit: 'inside', withoutEnlargement: true }).webp({ quality: 90 }).toBuffer();
     } catch { throw new AccessError(422, '图片无法读取，请选择完整的 JPEG、PNG 或静态 WebP 图片（不超过 4000 万像素）'); }
-    const staging = join(this.root, `.upload-${id}`);
+    // A fresh UUID directory is private until CollectionStore commits its database reference.
+    // Do not rely on directory rename: the deployed Windows data location can reject it with EXDEV.
+    const unpublished = join(this.root, id);
+    let created = false;
     try {
       await mkdir(this.root, { recursive: true });
-      await mkdir(staging);
+      await mkdir(unpublished);
+      created = true;
       for (const [name, content] of [['original', bytes], ['preview', preview]] as const) {
-        const file = await open(join(staging, name), 'wx');
+        const file = await open(join(unpublished, name), 'wx');
         try { await file.writeFile(content); await file.sync(); }
         finally { await file.close(); }
       }
-      await rename(staging, join(this.root, id));
     } catch {
-      await rm(staging, { recursive: true, force: true }).catch(() => {});
+      if (created) await rm(unpublished, { recursive: true, force: true }).catch(() => {});
       throw new AccessError(503, '图片未能完整保存。请保留当前材料，检查家庭电脑的磁盘空间和数据目录后重试');
     }
     return { id, libraryId, mimeType, byteLength: bytes.length, sha256: fileHash(bytes), previewSha256: fileHash(preview), width, height };
