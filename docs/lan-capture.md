@@ -43,7 +43,21 @@ npm start
 - 网关目录：`C:\Users\dcy\Documents\ChatGPT\错题集\.scratch\lan-gateway`。
 - 公共证书：该目录下 `klbook-root.crt`；本次文件 SHA-256 为 `C84CF078B58C98723E506817E519511F75BC25D75B4CA9186440094C7002DC32`。
 - Caddy 位于项目 `.scratch\tools\caddy\caddy.exe`；压缩包 SHA-256 为 `1708333f79e274c7697285afe6d592ab39314e0b131e9ec6bea08ad27df62ebf`，与 GitHub 官方资产 digest 一致。
-- 后端和网关已启动。严格证书及主机名校验下，本机 HTTPS 健康请求返回 200、合法网页来源预检返回 204。尚需管理员放行单条防火墙规则及各设备信任证书后验证真实局域网可达性。
+- 首次启动时，严格证书及主机名校验下，本机 HTTPS 健康请求返回 200、合法网页来源预检返回 204。后续防火墙及真机准备进展见下节。
+
+### 安卓真机环境准备（2026-09-20 晚间）
+
+用户选择先验证安卓 Chrome。重新核对后恢复了已退出的后端和网关，沿用同一资料库和根证书。管理员已执行并回读防火墙规则：只允许 Caddy 程序、WLAN 网卡、本机 `192.168.3.208`、远端 `LocalSubnet` 的 TCP 8443 与临时准备页 TCP 8080。
+
+安卓设备连同一家庭 Wi-Fi，先用 Chrome 打开 **http://192.168.3.208:8080**，下载 `klbook-root.crt`；在系统设置中搜索“CA 证书”或“安装证书”，选择 CA 证书并安装下载文件，随后打开 **https://192.168.3.208:8443** 登录。设备设置路径随品牌和系统不同，型号未提供时不假定某一菜单路径。Google 给出的凭据设置入口可供定位：[证书设置说明](https://support.google.com/pixelphone/answer/2844832?hl=en)。
+
+临时准备页仅开放 `/`、`/index.html`、`/klbook-root.crt`，不代理 API，也不提供数据目录；已验证 API 路径和私钥路径返回 404，下载证书与原公共证书字节完全一致。证书 SHA-256 指纹（证书 DER 内容，区别于上文 PEM 文件摘要）：
+
+`C4:4D:2E:34:BA:A5:6D:48:2C:BB:06:0E:0D:74:F2:7B:F9:30:7B:71:68:F2:D5:31:34:D0:D0:69:78:29:03:CF`
+
+本次发现 Windows PowerShell 5.1 默认读取无 BOM 的 UTF-8 JSON 时会误解中文路径；网关启动、停止及防火墙脚本已显式使用 UTF-8 读取。准备页文件、管理员执行结果和验证日志位于本机 `.scratch/device-validation/`；原网关配置备份为 `.scratch/lan-gateway/Caddyfile.before-device-validation`。
+
+准备页用于本次设备安装，真机确认完成后可恢复该备份配置并重启网关，再在管理员 PowerShell 仅删除规则 `Klbook-LAN-HTTPS-192.168.3.208-8080`；保留 8443 应用访问。当前尚未收到安卓设备的实际访问及采集结果。
 
 ## 真机检查清单
 

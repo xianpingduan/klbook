@@ -2,7 +2,7 @@ param([Parameter(Mandatory=$true)][string]$GatewayDir)
 $ErrorActionPreference = 'Stop'
 $gateway = (Resolve-Path -LiteralPath $GatewayDir).Path
 $recordPath = Join-Path $gateway 'process.json'
-$record = Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json
+$record = Get-Content -LiteralPath $recordPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $process = Get-Process -Id $record.pid -ErrorAction SilentlyContinue
 if ($process) {
     if ($process.StartTime.ToUniversalTime().Ticks.ToString() -ne $record.startedTicks -or $process.Path -ne $record.executable) { throw 'Process identity changed; leaving it running' }

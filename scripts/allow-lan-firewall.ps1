@@ -2,8 +2,8 @@
 param([Parameter(Mandatory=$true)][string]$GatewayDir)
 $ErrorActionPreference = 'Stop'
 $gateway = (Resolve-Path -LiteralPath $GatewayDir).Path
-$settings = Get-Content -LiteralPath (Join-Path $gateway 'settings.json') -Raw | ConvertFrom-Json
-$record = Get-Content -LiteralPath (Join-Path $gateway 'process.json') -Raw | ConvertFrom-Json
+$settings = Get-Content -LiteralPath (Join-Path $gateway 'settings.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$record = Get-Content -LiteralPath (Join-Path $gateway 'process.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $interface = Get-NetIPAddress -IPAddress $settings.address -AddressFamily IPv4 -ErrorAction Stop
 $name = 'Klbook-LAN-HTTPS-{0}-{1}' -f $settings.address, $settings.port
 if (Get-NetFirewallRule -Name $name -ErrorAction SilentlyContinue) { throw 'This rule already exists. Review it before changing it.' }

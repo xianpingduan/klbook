@@ -5,10 +5,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $exe = (Resolve-Path -LiteralPath $CaddyExe).Path
 $gateway = (Resolve-Path -LiteralPath $GatewayDir).Path
-$settings = Get-Content -LiteralPath (Join-Path $gateway 'settings.json') -Raw | ConvertFrom-Json
+$settings = Get-Content -LiteralPath (Join-Path $gateway 'settings.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $recordPath = Join-Path $gateway 'process.json'
 if (Test-Path -LiteralPath $recordPath) {
-    $record = Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json
+    $record = Get-Content -LiteralPath $recordPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $running = Get-Process -Id $record.pid -ErrorAction SilentlyContinue
     if ($running -and $running.StartTime.ToUniversalTime().Ticks.ToString() -eq $record.startedTicks) { throw 'This LAN gateway is already running' }
 }
