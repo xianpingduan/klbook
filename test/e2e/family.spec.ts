@@ -90,6 +90,6 @@ test('手机尺寸页面登录、家长验证与设备撤销，恢复账号后�
     await expect(parentPage.getByTestId('library-id')).toHaveText(initial.library.id);
     expect((await request.get(`${server.url}/api/v1/home`, { headers: { Authorization: `Bearer ${initial.token}` } })).status()).toBe(401);
     expect(await parentPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await parentPage.screenshot({ path: 'test-results/home-mobile.png', fullPage: true });
+    await parentPage.screenshot({ path: `test-results/home-mobile-${test.info().project.name}.png`, fullPage: true });
   } finally { await Promise.allSettled([parent.close(), child.close()]); await server.stop(); await rm(dataDir, { recursive: true, force: true }); }
 });

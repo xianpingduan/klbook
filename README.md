@@ -54,10 +54,13 @@ npm.cmd start
 ```powershell
 npm.cmd run typecheck
 npm.cmd run build
+npx.cmd playwright install firefox webkit
 npm.cmd test
 ```
 
-浏览器测试使用本机 Microsoft Edge；运行时自动创建、清理独立临时数据库，并启动隐藏的测试后端进程。浏览器测试依赖最新生产构建，请先 build。`npm.cmd run test:api` 可单独运行 API 测试；`npm.cmd run test:e2e` 单独运行浏览器流程。
+浏览器测试使用本机 Microsoft Edge（Chromium）及 Playwright 的 Firefox、WebKit。上面的浏览器安装命令首次需要联网，浏览器保存在 Playwright 用户缓存中；不替换系统浏览器。测试自动创建、清理独立临时数据库，并启动隐藏的测试后端进程。浏览器测试依赖最新生产构建，请先 build。`npm.cmd run test:api` 可单独运行 API 测试；`npm.cmd run test:e2e` 单独运行浏览器流程。
+
+本机 npm 12 可能提示阻止 better-sqlite3 的原生重编译脚本；已验证 Windows x64 可直接使用此版本随包提供的二进制。无需为消除提示而放开全局安装脚本权限；以真实数据库测试结果为准。
 
 交互开发可在两个终端分别运行 `npm.cmd run dev:server` 和 `npm.cmd run dev:web`，使用 Vite 提示的地址。正式可复现启动使用上面的 build/start。
 

@@ -20,7 +20,7 @@ export class FamilyApi {
     const api = new FamilyApi(platform, target, null);
     // Probe without credentials, even when the device remembers a session.
     const info = await api.info();
-    if (info.app !== 'klbook' || info.apiVersion !== 1) throw new Error('此服务与当前客户端不兼容');
+    if (info.app !== 'klbook' || info.apiVersion !== 1 || typeof info.initialized !== 'boolean') throw new Error('此服务与当前客户端不兼容');
     api.credential = await platform.credentials.read(target);
     return { api, info };
   }

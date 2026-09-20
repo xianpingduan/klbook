@@ -47,7 +47,7 @@ export function App({ platform }: { platform: ClientPlatform }) {
   }
   async function signedIn(result: SessionResult) {
     if (!await api!.remember(result)) setNotice('此浏览器无法保存登录状态；本次可以使用，关闭后需重新登录。');
-    setHome(result);
+    setHome({ account: result.account, library: result.library, session: result.session });
     if (result.recoveryCode) { setRecoveryCode(result.recoveryCode); setAcknowledged(false); setScreen('save-code'); }
     else setScreen('home');
   }

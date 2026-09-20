@@ -94,6 +94,7 @@ export class FamilyAccess {
   }
 
   private newSession(deviceName: string) {
+    this.db.prepare('DELETE FROM sessions WHERE expiresAt <= ?').run(this.now());
     const token = newSecret();
     const session = { id: randomUUID(), tokenHash: digest(token), deviceName, createdAt: this.now(), expiresAt: this.now() + 30 * 86400000 };
     this.db.prepare('INSERT INTO sessions VALUES (@id, @tokenHash, @deviceName, @createdAt, @expiresAt)').run(session);

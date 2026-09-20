@@ -33,7 +33,7 @@ export function browserPlatform(): ClientPlatform {
         if (!raw) return null;
         try {
           const value: Partial<SavedCredential> = JSON.parse(raw);
-          if (value.target === target && typeof value.libraryId === 'string' && typeof value.accountId === 'string' && typeof value.token === 'string') return value as SavedCredential;
+          if (value.target === target && typeof value.libraryId === 'string' && typeof value.accountId === 'string' && typeof value.token === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value.token)) return value as SavedCredential;
         } catch { /* A damaged credential is treated as signed out. */ }
         localStorage.removeItem(`klbook.credential:${target}`);
         return null;
