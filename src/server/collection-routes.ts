@@ -23,7 +23,8 @@ export function collectionRoutes(app: FastifyInstance, access: FamilyAccess, col
     routes.get<{ Params: { id: string } }>('/questions/:id', async request => collection.get(access.home(token(request.headers.authorization)).library.id, request.params.id));
     routes.put<{ Params: { id: string }; Body: QuestionEdit }>('/questions/:id', { schema: {
       params: { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } },
-      body: { type: 'object', required: ['operationId', 'expectedRevision', 'state', 'subjectId', 'region', 'source', 'pageNumber', 'questionNumber', 'note'], additionalProperties: false,
+      body: { type: 'object', required: ['operationId', 'expectedRevision', 'state', 'subjectId', 'region', 'pageNumber', 'questionNumber', 'note'], additionalProperties: false,
+        oneOf: [{ required: ['sourceId'] }, { required: ['source'] }],
         properties: {
           operationId: { type: 'string', format: 'uuid' }, expectedRevision: { type: 'integer', minimum: 1 }, state: { enum: ['draft', 'collected'] },
           subjectId: { type: ['string', 'null'], minLength: 1, maxLength: 64 },
@@ -31,7 +32,7 @@ export function collectionRoutes(app: FastifyInstance, access: FamilyAccess, col
             x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 },
             width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 }
           } }] },
-          source: { type: 'string', maxLength: 200 }, pageNumber: { type: 'string', maxLength: 32 }, questionNumber: { type: 'string', maxLength: 32 }, note: { type: 'string', maxLength: 2000 }
+          sourceId: { type: ['string', 'null'], format: 'uuid' }, source: { type: 'string', maxLength: 200 }, pageNumber: { type: 'string', maxLength: 32 }, questionNumber: { type: 'string', maxLength: 32 }, note: { type: 'string', maxLength: 2000 }
         }
       }
     } }, async request => collection.save(() => access.home(token(request.headers.authorization)), request.params.id, request.body));

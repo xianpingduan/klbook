@@ -2,6 +2,7 @@ import type { Device, Home, LoginInput, ParentGrant, RecoveryInput, ServerInfo, 
 import type { ClientPlatform, SavedCredential } from './platform.ts';
 import { serverOrigin } from './platform.ts';
 import type { Question, QuestionEdit, QuestionList, Subject } from '../shared/collection.ts';
+import type { Source, SourceEdit } from '../shared/sources.ts';
 
 export class ApiError extends Error {
   status: number;
@@ -47,6 +48,9 @@ export class FamilyApi {
     return response.status === 204 ? undefined as T : response.json();
   }
   subjects() { return this.request<Subject[]>('/collection/subjects'); }
+  sources() { return this.request<Source[]>('/collection/sources'); }
+  managedSources(grant: string) { return this.request<Source[]>('/admin/sources', 'GET', undefined, grant); }
+  saveSource(grant: string, id: string, input: SourceEdit) { return this.request<Source>(`/admin/sources/${encodeURIComponent(id)}`, 'PUT', input, grant); }
   questions(state: 'draft' | 'collected', offset = 0) { return this.request<QuestionList>(`/collection/questions?state=${state}&offset=${offset}`); }
   question(id: string) { return this.request<Question>(`/collection/questions/${encodeURIComponent(id)}`); }
   saveQuestion(id: string, input: QuestionEdit) { return this.request<Question>(`/collection/questions/${encodeURIComponent(id)}`, 'PUT', input); }

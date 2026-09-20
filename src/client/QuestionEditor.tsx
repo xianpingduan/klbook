@@ -2,13 +2,14 @@ import { useRef, useState } from 'react';
 import type { Question, QuestionEdit, Subject } from '../shared/collection.ts';
 import { ApiError, FamilyApi } from './api.ts';
 import { CropSelector } from './QuestionImage.tsx';
+import type { Source } from '../shared/sources.ts';
 
 function editable(question: Question) {
-  return { subjectId: question.subjectId, region: question.region, source: question.source, pageNumber: question.pageNumber, questionNumber: question.questionNumber, note: question.note };
+  return { subjectId: question.subjectId, region: question.region, sourceId: question.sourceId, pageNumber: question.pageNumber, questionNumber: question.questionNumber, note: question.note };
 }
 
-export function QuestionEditor({ api, question, subjects, onSaved, onBack, onExpired }: {
-  api: FamilyApi; question: Question; subjects: Subject[]; onSaved(question: Question): void; onBack(): void; onExpired(): Promise<void>;
+export function QuestionEditor({ api, question, subjects, sources, onSaved, onBack, onExpired }: {
+  api: FamilyApi; question: Question; subjects: Subject[]; sources: Source[]; onSaved(question: Question): void; onBack(): void; onExpired(): Promise<void>;
 }) {
   const [fields, setFields] = useState(() => editable(question));
   const [busy, setBusy] = useState(false);
@@ -46,7 +47,11 @@ export function QuestionEditor({ api, question, subjects, onSaved, onBack, onExp
         <label>学科<select value={fields.subjectId ?? ''} onChange={event => setFields(current => ({ ...current, subjectId: event.target.value || null }))}><option value="">请选择</option>{subjects.map(subject => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></label>
         <p className="hint">确认范围和学科就可以收集，答案和总结可以以后再补。</p>
         <h2>3. 顺手记一点（选填）</h2>
-        <label>来源（选填）<input value={fields.source} maxLength={200} onChange={event => setFields(current => ({ ...current, source: event.target.value }))} placeholder="例如：练习册、课堂作业" /></label>
+        <label>来源（选填）<select value={fields.sourceId ?? ''} onChange={event => setFields(current => ({ ...current, sourceId: event.target.value || null }))}>
+          <option value="">暂不填写</option>
+          {question.sourceId && !sources.some(source => source.id === question.sourceId) && <option value={question.sourceId} disabled>{question.source}（已停用）</option>}
+          {sources.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}
+        </select></label><p className="hint">需要添加或修改来源时，请返回列表，进入“家长管理 → 来源管理”。</p>
         <div className="two-fields"><label>页码（选填）<input value={fields.pageNumber} maxLength={32} onChange={event => setFields(current => ({ ...current, pageNumber: event.target.value }))} /></label><label>题号（选填）<input value={fields.questionNumber} maxLength={32} onChange={event => setFields(current => ({ ...current, questionNumber: event.target.value }))} /></label></div>
         <label>备注（选填）<textarea value={fields.note} maxLength={2000} rows={3} onChange={event => setFields(current => ({ ...current, note: event.target.value }))} placeholder="想说什么都可以，也可以先留空" /></label>
         <div className="save-actions">{question.state === 'draft' && <button className="quiet" onClick={() => void save('draft')}>保存草稿</button>}<button disabled={!fields.subjectId || !fields.region} onClick={() => void save('collected')}>{busy ? '正在保存…' : question.state === 'draft' ? '保存到错题集' : '保存修改'}</button></div>

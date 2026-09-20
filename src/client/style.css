@@ -85,6 +85,17 @@ select:focus-visible, textarea:focus-visible { outline: 3px solid #ceac53; outli
 .save-actions button { margin-right: 0; }
 .file-picker { padding: 30px; border: 2px dashed #b7cab9; border-radius: 16px; background: #f8faf5; }
 .file-picker input { background: white; }
+.source-manager { margin-top: 24px; }
+.source-form { max-width: 620px; padding: 20px 24px; background: #f8faf5; border-radius: 14px; margin: 24px 0; }
+.source-form h2 { margin-top: 0; font-size: 18px; }
+.source-form button { width: auto; }
+.source-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.source-actions .quiet { margin-right: 0; }
+.source-list { list-style: none; padding: 0; }
+.source-list li { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 0; border-bottom: 1px solid #edf0e9; }
+.source-list li > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+.source-list .source-actions { flex-shrink: 0; }
+.source-list button { margin-top: 0; }
 @media (max-width: 720px) {
   .editor-grid { grid-template-columns: 1fr; }
   .section-heading { flex-direction: column; gap: 12px; }
@@ -92,5 +103,6 @@ select:focus-visible, textarea:focus-visible { outline: 3px solid #ceac53; outli
   .question-list article { grid-template-columns: 100px minmax(0, 1fr); gap: 14px; }
   .question-thumbnail .paper-image, .question-thumbnail .question-crop { height: 100px; }
   .home-summary { padding: 24px; }
+  .source-list li { align-items: flex-start; flex-direction: column; gap: 10px; }
 }
 @media (max-width: 520px) { .shell { padding: 20px 14px; } header { margin-bottom: 24px; } .card { border-radius: 18px; } }

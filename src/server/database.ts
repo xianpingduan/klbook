@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 const migrations = [
   `CREATE TABLE family (
@@ -36,7 +37,29 @@ const migrations = [
     libraryId TEXT NOT NULL, accountId TEXT NOT NULL, operationId TEXT NOT NULL,
     requestHash TEXT NOT NULL, questionId TEXT NOT NULL REFERENCES questions(id),
     PRIMARY KEY(libraryId, accountId, operationId)
-  );`
+  );`,
+  (db: Database.Database) => {
+    db.exec(`CREATE TABLE sources (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+      active INTEGER NOT NULL CHECK(active IN (0, 1)), revision INTEGER NOT NULL CHECK(revision > 0)
+    );
+    ALTER TABLE questions ADD COLUMN sourceId TEXT REFERENCES sources(id);
+    CREATE INDEX questionsBySource ON questions(sourceId);
+    CREATE TABLE sourceOperations (
+      libraryId TEXT NOT NULL, accountId TEXT NOT NULL, operationId TEXT NOT NULL,
+      requestHash TEXT NOT NULL, sourceId TEXT NOT NULL REFERENCES sources(id),
+      PRIMARY KEY(libraryId, accountId, operationId)
+    );`);
+    const add = (name: string) => {
+      db.prepare('INSERT OR IGNORE INTO sources VALUES (?, ?, 1, 1)').run(randomUUID(), name);
+      return db.prepare<[string], { id: string }>('SELECT id FROM sources WHERE name = ?').get(name)!.id;
+    };
+    for (const name of ['课堂作业', '练习册', '试卷', '其他']) add(name);
+    for (const question of db.prepare<[string], { id: string; source: string }>('SELECT id, source FROM questions WHERE source != ?').all('')) {
+      const name = question.source.trim();
+      if (name) db.prepare('UPDATE questions SET sourceId = ? WHERE id = ?').run(add(name), question.id);
+    }
+  }
 ];
 
 export function openDatabase(dataDir: string) {
@@ -53,7 +76,9 @@ export function openDatabase(dataDir: string) {
       const version = db.pragma('user_version', { simple: true });
       if (typeof version !== 'number' || version < 0 || version > migrations.length) throw new Error('资料库版本比当前程序新，请使用匹配的程序');
       for (let index = version; index < migrations.length; index++) {
-        db.exec(migrations[index]!);
+        const migration = migrations[index]!;
+        if (typeof migration === 'string') db.exec(migration);
+        else migration(db);
         db.pragma(`user_version = ${index + 1}`);
       }
     })();

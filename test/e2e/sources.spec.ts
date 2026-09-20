@@ -1,0 +1,66 @@
+import { expect, test } from '@playwright/test';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import sharp from 'sharp';
+import { startServer } from './server.ts';
+
+test('家长独立管理来源并安全重试，孩子下拉选择，来源停用后旧题仍可继续整理', async ({ page, request }) => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'klbook-sources-browser-'));
+  const server = await startServer(dataDir);
+  try {
+    const setupCode = (await readFile(join(dataDir, 'setup-code.txt'), 'utf8')).trim();
+    await request.post(`${server.url}/api/v1/setup`, { data: { setupCode, username: 'parent', password: 'family password 123', learnerName: '小明', deviceName: '设置电脑' } });
+    await page.goto(server.url);
+    await page.getByLabel('家长账号').fill('parent');
+    await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
+    await page.getByRole('button', { name: '登录此设备' }).click();
+    const manage = async () => {
+      await page.getByRole('button', { name: '家长管理', exact: true }).click();
+      await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
+      await page.getByRole('button', { name: '验证并进入管理' }).click();
+      await page.getByRole('button', { name: '来源管理', exact: true }).click();
+    };
+    await manage();
+    await page.getByLabel('来源名称', { exact: true }).fill('课堂小测');
+    await page.route('**/api/v1/admin/sources/*', async route => { await route.fetch({ maxRetries: 1 }); await route.abort(); });
+    await page.getByRole('button', { name: '添加来源', exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText('无法连接家庭电脑');
+    await page.unroute('**/api/v1/admin/sources/*');
+    await page.getByRole('button', { name: '添加来源', exact: true }).click();
+    await expect(page.getByRole('button', { name: '改名 课堂小测', exact: true })).toHaveCount(1);
+    await page.getByRole('button', { name: '结束管理', exact: true }).click();
+    const image = await sharp(await readFile(new URL('../fixtures/paper.svg', import.meta.url))).png().toBuffer();
+    const upload = async () => {
+      await page.getByRole('button', { name: '收集一道错题' }).click();
+      await page.getByLabel('选择题目图片').setInputFiles({ name: '课堂小测.png', mimeType: 'image/png', buffer: image });
+      await expect(page.getByRole('heading', { name: '整理这道题' })).toBeVisible();
+    };
+    await upload();
+    await page.getByRole('button', { name: '选择整页' }).click();
+    await page.getByRole('combobox', { name: '学科', exact: true }).selectOption({ label: '数学' });
+    await page.getByRole('combobox', { name: '来源（选填）', exact: true }).selectOption({ label: '课堂小测' });
+    await page.getByRole('button', { name: '保存到错题集' }).click();
+    await expect(page.getByText('课堂小测', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '返回列表' }).click();
+    await manage();
+    await page.getByRole('button', { name: '改名 课堂小测', exact: true }).click();
+    await page.getByLabel('来源名称', { exact: true }).fill('每周课堂小测');
+    await page.getByRole('button', { name: '保存来源', exact: true }).click();
+    await page.getByRole('button', { name: '停用 每周课堂小测', exact: true }).click();
+    await expect(page.getByRole('button', { name: '启用 每周课堂小测', exact: true })).toBeVisible();
+    await page.screenshot({ path: `test-results/sources-management-${test.info().project.name}.png`, fullPage: true });
+    await page.getByRole('button', { name: '结束管理', exact: true }).click();
+    await page.getByRole('button', { name: '打开错题' }).click();
+    await expect(page.getByText('每周课堂小测', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '补充或更正信息' }).click();
+    await expect(page.getByRole('option', { name: '每周课堂小测（已停用）', exact: true })).toHaveAttribute('disabled', '');
+    await page.getByLabel('备注（选填）').fill('来源停用也可以补充');
+    await page.getByRole('button', { name: '保存修改' }).click();
+    await expect(page.getByText('来源停用也可以补充', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '返回列表' }).click();
+    await upload();
+    await expect(page.getByRole('combobox', { name: '来源（选填）', exact: true })).toHaveValue('');
+    await expect(page.getByRole('option', { name: /每周课堂小测/ })).toHaveCount(0);
+  } finally { await server.stop(); await rm(dataDir, { recursive: true, force: true }); }
+});

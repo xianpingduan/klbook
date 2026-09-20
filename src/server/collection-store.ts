@@ -5,13 +5,15 @@ import type { Question, QuestionEdit, QuestionList, Region, Subject } from '../s
 import { AccessError } from './family-access.ts';
 import { Attachments, fileHash } from './attachments.ts';
 import type { StoredPage } from './attachments.ts';
+import { Sources } from './sources.ts';
 
 interface QuestionRow extends Omit<Question, 'originalPage' | 'region' | 'syncState'> { originalPageId: string; region: string | null }
 export class CollectionStore {
   private db: Database.Database;
   private files: Attachments;
   private now: () => number;
-  constructor(db: Database.Database, dataDir: string, now = Date.now) { this.db = db; this.files = new Attachments(dataDir); this.now = now; }
+  private sources: Sources;
+  constructor(db: Database.Database, dataDir: string, now = Date.now) { this.db = db; this.files = new Attachments(dataDir); this.now = now; this.sources = new Sources(db); }
   subjects(): Subject[] { return this.db.prepare<[], Subject>('SELECT id, name FROM subjects ORDER BY position').all(); }
   private page(libraryId: string, id: string) {
     const page = this.db.prepare<[string, string], StoredPage>('SELECT * FROM originalPages WHERE libraryId = ? AND id = ?').get(libraryId, id);
@@ -23,7 +25,7 @@ export class CollectionStore {
     if (!row) throw new AccessError(404, '找不到这道题');
     const { originalPageId, region, ...rest } = row;
     const { previewSha256: _preview, libraryId: _libraryId, ...originalPage } = this.page(libraryId, originalPageId);
-    return { ...rest, region: region ? JSON.parse(region) as Region : null, originalPage, syncState: 'synced' };
+    return { ...rest, source: rest.sourceId ? this.sources.get(rest.sourceId).name : rest.source, region: region ? JSON.parse(region) as Region : null, originalPage, syncState: 'synced' };
   }
   list(libraryId: string, state: 'draft' | 'collected', offset: number): QuestionList {
     const ids = this.db.prepare<[string, string, number], { id: string }>('SELECT id FROM questions WHERE libraryId = ? AND state = ? ORDER BY createdAt DESC, id LIMIT 50 OFFSET ?').all(libraryId, state, offset);
@@ -77,7 +79,8 @@ export class CollectionStore {
     if (input.state === 'collected' && (!input.subjectId || !input.region)) throw new AccessError(422, '确认题目范围并选择学科后，才能完成收集');
     const content = {
       state: input.state, subjectId: input.subjectId, region: input.region ? { x: input.region.x, y: input.region.y, width: input.region.width, height: input.region.height } : null,
-      source: input.source.trim(), pageNumber: input.pageNumber.trim(), questionNumber: input.questionNumber.trim(), note: input.note.trim()
+      ...(input.sourceId !== undefined ? { sourceId: input.sourceId } : { source: input.source!.trim() }),
+      pageNumber: input.pageNumber.trim(), questionNumber: input.questionNumber.trim(), note: input.note.trim()
     };
     const requestHash = `save:${fileHash(Buffer.from(JSON.stringify({ id, expectedRevision: input.expectedRevision, ...content })))}`;
     // Verify the actual required files before publishing a collected record or acknowledging a retry.
@@ -91,10 +94,18 @@ export class CollectionStore {
       const latest = this.get(home.library.id, id);
       if (latest.state === 'collected' && input.state === 'draft') throw new AccessError(409, '已收集的题目不能改回草稿');
       if (latest.revision !== input.expectedRevision) throw new AccessError(409, '这道题已在其他页面更新。你的修改仍在当前页面，请先重新读取并核对');
+      let selectedSource = input.sourceId ? this.sources.get(input.sourceId) : undefined;
+      if (input.sourceId === undefined && input.source!.trim()) {
+        const name = input.source!.trim();
+        selectedSource = name === latest.source && latest.sourceId ? this.sources.get(latest.sourceId) : this.sources.find(name);
+        if (!selectedSource) throw new AccessError(409, '来源已改为列表选择，请刷新页面后选择已有来源');
+      }
+      if (selectedSource && !selectedSource.active && selectedSource.id !== latest.sourceId) throw new AccessError(422, '此来源已停用，请选择其他来源或留空');
       this.db.prepare(`UPDATE questions SET revision = revision + 1, state = @state, subjectId = @subjectId, region = @region,
-        source = @source, pageNumber = @pageNumber, questionNumber = @questionNumber, note = @note, updatedAt = @updatedAt, collectedAt = @collectedAt
+        sourceId = @sourceId, source = @source, pageNumber = @pageNumber, questionNumber = @questionNumber, note = @note, updatedAt = @updatedAt, collectedAt = @collectedAt
         WHERE id = @id AND libraryId = @libraryId`).run({
         id, libraryId: home.library.id, ...content, region: content.region ? JSON.stringify(content.region) : null,
+        sourceId: selectedSource?.id ?? null, source: selectedSource?.name ?? '',
         updatedAt: this.now(), collectedAt: latest.collectedAt ?? (input.state === 'collected' ? this.now() : null)
       });
       this.db.prepare('INSERT INTO collectionOperations VALUES (?, ?, ?, ?, ?)').run(home.library.id, home.account.id, input.operationId, requestHash, id);

@@ -35,13 +35,13 @@ test('上传、框题、保存草稿、继续收集和补充信息，第二设�
     await page.mouse.move(bounds.x + bounds.width * .87, bounds.y + bounds.height * .22);
     await page.mouse.up();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption({ label: '数学' });
-    await page.getByLabel('来源（选填）').fill('练习册');
+    await page.getByRole('combobox', { name: '来源（选填）', exact: true }).selectOption({ label: '练习册' });
     await page.getByRole('button', { name: '保存草稿' }).click();
     await expect(page.getByRole('status')).toContainText('草稿已保存到家庭资料库');
     await page.getByRole('button', { name: '返回列表' }).click();
     await page.getByRole('button', { name: '草稿', exact: true }).click();
     await page.getByRole('button', { name: '继续整理' }).click();
-    await expect(page.getByLabel('来源（选填）')).toHaveValue('练习册');
+    await expect(page.getByRole('combobox', { name: '来源（选填）', exact: true }).locator('option:checked')).toHaveText('练习册');
     await page.getByRole('button', { name: '保存到错题集' }).click();
     await expect(page.getByRole('heading', { name: '错题详情' })).toBeVisible();
     await expect(page.getByText('已同步到家庭资料库', { exact: true })).toBeVisible();

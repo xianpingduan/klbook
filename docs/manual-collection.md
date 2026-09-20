@@ -16,7 +16,7 @@
 
 ## 身份、修订与重复请求
 
-数据库迁移 4 新增学科、原始页、题目与写入操作表；沿用已有家庭、学习者、账号和会话，不重新初始化。单实例共用一个 SQLite 连接，开启外键、WAL 和 FULL 同步。
+数据库迁移 4 新增学科、原始页、题目与写入操作表，迁移 5 增加[来源管理](source-management.md)并关联既有文字来源；沿用已有家庭、学习者、账号和会话，不重新初始化。单实例共用一个 SQLite 连接，开启外键、WAL 和 FULL 同步。
 
 | 字段 | 约定 |
 | --- | --- |
@@ -43,7 +43,7 @@
 | `GET /pages/:id/original` | 原件字节与实际 MIME |
 | `GET /pages/:id/preview` | 摆正方向的 WebP 预览 |
 
-编辑字段：`operationId, expectedRevision, state, subjectId, region, source, pageNumber, questionNumber, note`。草稿允许 `subjectId/region=null`，选填文本使用空字符串。来源最多 200 字符，页码及题号各 32，备注 2000。400 为格式错误，401 为会话失效，409 为版本或操作冲突，413 为请求过大，415/422 为不支持或不能解码的图片/不满足收集条件，503 为材料存储不可用。
+新版编辑字段：`operationId, expectedRevision, state, subjectId, region, sourceId, pageNumber, questionNumber, note`。草稿允许 `subjectId/region=null`，来源可留空为 `sourceId=null`，其余选填文本使用空字符串。页码及题号各 32 字符，备注 2000。来源名称与旧客户端兼容规则见[来源管理](source-management.md)。400 为格式错误，401 为会话失效，409 为版本或操作冲突，413 为请求过大，415/422 为不支持或不能解码的图片/不满足收集条件，503 为材料存储不可用。
 
 ## 本设备暂存与恢复范围
 

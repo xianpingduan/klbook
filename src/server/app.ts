@@ -6,6 +6,8 @@ import { AccessError, FamilyAccess } from './family-access.ts';
 import { openDatabase } from './database.ts';
 import { CollectionStore } from './collection-store.ts';
 import { collectionRoutes } from './collection-routes.ts';
+import { Sources } from './sources.ts';
+import { sourceRoutes } from './source-routes.ts';
 
 export function createApp(options: { dataDir: string; now?: () => number; allowedOrigins?: string[]; staticDir?: string }) {
   const db = openDatabase(options.dataDir);
@@ -67,6 +69,7 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
     properties: { recoveryCode: text(128), newPassword: text(128, 12), deviceName: text(64) }
   } } }, async (request, reply) => reply.code(201).send(await access.recover(request.body)));
   collectionRoutes(app, access, collection);
+  sourceRoutes(app, access, new Sources(db));
   if (options.staticDir) app.register(staticFiles, { root: options.staticDir, index: 'index.html' });
   return app;
 }

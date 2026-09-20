@@ -129,6 +129,11 @@ export class FamilyAccess {
     this.db.prepare('DELETE FROM parentGrants WHERE tokenHash = ?').run(digest(grant));
   }
 
+  parentHome(token: string, grant: string): Home {
+    this.parent(token, grant);
+    return this.home(token);
+  }
+
   devices(token: string, grant: string): Device[] {
     const current = this.parent(token, grant);
     return this.db.prepare<[number], Session>('SELECT * FROM sessions WHERE expiresAt > ? ORDER BY createdAt, id').all(this.now())

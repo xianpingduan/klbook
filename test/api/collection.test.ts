@@ -157,7 +157,7 @@ test('框题并选学科即可收集，选填信息可补充更正，修订拒�
     assert.equal(collected.json().syncState, 'synced');
     assert.ok(collected.json().collectedAt > draft.createdAt);
     assert.equal(collected.json().note, '');
-    const filled = { ...edit, operationId: randomUUID(), expectedRevision: 2, source: '数学练习册', pageNumber: '3', questionNumber: '1', note: '还没弄懂，先记下来' };
+    const filled = { ...edit, operationId: randomUUID(), expectedRevision: 2, source: '练习册', pageNumber: '3', questionNumber: '1', note: '还没弄懂，先记下来' };
     const saved = await f.app.inject({ method: 'PUT', url: path, headers: auth(f.first.token), payload: filled });
     assert.equal(saved.statusCode, 200, saved.body);
     assert.equal(saved.json().revision, 3);
@@ -172,7 +172,7 @@ test('框题并选学科即可收集，选填信息可补充更正，修订拒�
     try {
       const list = await restarted.inject({ url: '/api/v1/collection/questions?state=collected', headers: auth(second.token) });
       assert.equal(list.json().items[0].id, draft.id);
-      assert.equal(list.json().items[0].source, '数学练习册');
+      assert.equal(list.json().items[0].source, '练习册');
       assert.equal((await restarted.inject({ url: `/api/v1/collection/pages/${draft.originalPage.id}/original`, headers: auth(second.token) })).statusCode, 200);
     } finally { await restarted.close(); }
   } finally { await f.close(); }

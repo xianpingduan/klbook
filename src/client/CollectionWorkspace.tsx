@@ -8,6 +8,7 @@ import { CaptureCache } from './capture-cache.ts';
 import type { PendingCapture } from './capture-cache.ts';
 import { QuestionEditor } from './QuestionEditor.tsx';
 import { QuestionImage } from './QuestionImage.tsx';
+import type { Source } from '../shared/sources.ts';
 
 export function CollectionWorkspace({ api, home, platform, onExpired, onEditing }: {
   api: FamilyApi; home: Home; platform: ClientPlatform; onExpired(): Promise<void>; onEditing(active: boolean): void;
@@ -17,6 +18,7 @@ export function CollectionWorkspace({ api, home, platform, onExpired, onEditing 
   const [state, setState] = useState<'draft' | 'collected'>('collected');
   const [list, setList] = useState<QuestionList>({ items: [], total: 0, offset: 0, limit: 50 });
   const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [sources, setSources] = useState<Source[]>([]);
   const [selected, setSelected] = useState<Question>();
   const [pending, setPending] = useState<PendingCapture>();
   const [busy, setBusy] = useState(false);
@@ -29,12 +31,12 @@ export function CollectionWorkspace({ api, home, platform, onExpired, onEditing 
   useEffect(() => {
     let active = true;
     setBusy(true); setError('');
-    void Promise.all([api.subjects(), api.questions(state), cache.read().catch(failure => {
+    void Promise.all([api.subjects(), api.questions(state), api.sources(), cache.read().catch(failure => {
       if (active) setError(failure instanceof Error ? failure.message : '本设备暂存无法读取，请重新选择图片');
       return undefined;
-    })]).then(([subjects, list, pending]) => {
+    })]).then(([subjects, list, sources, pending]) => {
       if (!active) return;
-      setSubjects(subjects); setList(list); setPending(current => current ?? pending);
+      setSubjects(subjects); setList(list); setSources(sources); setPending(current => current ?? pending);
     }).catch(async failure => {
       if (!active) return;
       if (failure instanceof ApiError && failure.status === 401) { await onExpired(); return; }
@@ -91,7 +93,7 @@ export function CollectionWorkspace({ api, home, platform, onExpired, onEditing 
       }} /></label>}
       {pending && <div className="message"><strong>{pending.name}</strong><p>{busy ? '正在暂存并上传，请稍候…' : '尚未确认同步成功。当前图片已保留，可以重试。'}</p><button disabled={busy} onClick={() => void run(() => upload(pending))}>重试上传</button><button className="quiet" disabled={busy} onClick={() => void run(async () => { await cache.remove(); setPending(undefined); })}>放弃这张图片并重新选择</button></div>}
     </section>}
-    {screen === 'edit' && selected && <QuestionEditor key={selected.id} api={api} question={selected} subjects={subjects} onBack={back} onExpired={onExpired} onSaved={question => { setSelected(question); if (question.state === 'collected') setScreen('detail'); }} />}
+    {screen === 'edit' && selected && <QuestionEditor key={selected.id} api={api} question={selected} subjects={subjects} sources={sources} onBack={back} onExpired={onExpired} onSaved={question => { setSelected(question); if (question.state === 'collected') setScreen('detail'); }} />}
     {screen === 'detail' && selected && <section className="card collection-card">
       <div className="section-heading"><div><p className="eyebrow">{subjectName(selected.subjectId)} · 已收集</p><h1>错题详情</h1></div><button className="quiet" onClick={back}>返回列表</button></div>
       <p className="sync-state">已同步到家庭资料库</p><div className="detail-material"><QuestionImage api={api} page={selected.originalPage} region={selected.region} /></div>

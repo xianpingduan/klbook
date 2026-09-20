@@ -50,6 +50,10 @@
 
 拆分依据和覆盖表见[已确认的拆分方案](../.scratch/collection-v1/proposal.md)；本地另保存了逐项发布正文、发布回执及总核验结果。
 
+## 试用补充需求
+
+2026-09-20 用户要求来源可下拉选择且单独管理，并确认由家长负责新增、改名、停用；已登记 [#27 来源下拉选择与独立管理](https://github.com/xianpingduan/klbook/issues/27)。这是原 24 项之外的明确补充需求，沿用 #3 的收集流程，后续检索任务使用稳定来源身份。实现规则与验证见[来源管理](source-management.md)。
+
 ## 后续移动安装与商店发布
 
 2026-09-18 用户补充最终交付 Android APK 和 iOS App Store App，并确认目前没有 Mac/开发者会员、先预留发布方案。已登记 [后续移动交付里程碑 #26](https://github.com/xianpingduan/klbook/issues/26)，标签为 `needs-triage`；它是后续范围跟踪，尚未细拆为可直接执行的开发任务。
