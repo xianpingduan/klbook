@@ -86,7 +86,9 @@ test('写入失败和响应丢失后保留材料，重开及重复保存不会�
     await page.reload();
     await expect(page.getByText('还有一张图片等待上传', { exact: true })).toBeVisible();
     await rm(join(dataDir, 'attachments', 'pages'));
-    await page.route('**/api/v1/collection/drafts', async route => { await route.fetch(); await route.abort(); });
+    await page.route('**/api/v1/collection/drafts', async route => {
+      await route.fetch({ maxRetries: 1 }); await route.abort();
+    });
     await page.getByRole('button', { name: '继续上传' }).click();
     await expect(page.getByRole('alert')).toContainText('无法连接家庭电脑');
     await page.reload();
@@ -97,7 +99,7 @@ test('写入失败和响应丢失后保留材料，重开及重复保存不会�
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption({ label: '科学' });
     await page.getByLabel('备注（选填）').fill('保存失败也不要丢掉这句话');
     await page.route('**/api/v1/collection/questions/*', async route => {
-      if (route.request().method() === 'PUT') { await route.fetch(); await route.abort(); }
+      if (route.request().method() === 'PUT') { await route.fetch({ maxRetries: 1 }); await route.abort(); }
       else await route.continue();
     });
     await page.getByRole('button', { name: '保存到错题集' }).click();
@@ -112,5 +114,38 @@ test('写入失败和响应丢失后保留材料，重开及重复保存不会�
     expect(list.total).toBe(1);
     expect(list.items[0].revision).toBe(2);
     expect(list.items[0].note).toBe('保存失败也不要丢掉这句话');
+  } finally { await server.stop(); await rm(dataDir, { recursive: true, force: true }); }
+});
+
+test('设备暂存不可用时，返回列表仍保留内存图片，修复存储后可以继续上传', async ({ page, request }) => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'klbook-collection-browser-'));
+  const server = await startServer(dataDir);
+  try {
+    const setupCode = (await readFile(join(dataDir, 'setup-code.txt'), 'utf8')).trim();
+    await request.post(`${server.url}/api/v1/setup`, { data: { setupCode, username: 'parent', password: 'family password 123', learnerName: '小明', deviceName: '设置电脑' } });
+    await page.goto(server.url);
+    // A real incompatible IndexedDB store makes reads/writes fail without replacing the storage adapter.
+    await page.evaluate(() => new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open('klbook-device-drafts', 1);
+      request.onsuccess = () => { request.result.close(); resolve(); };
+      request.onerror = () => reject(request.error);
+    }));
+    await page.getByLabel('家长账号').fill('parent');
+    await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
+    await page.getByRole('button', { name: '登录此设备' }).click();
+    await page.getByRole('button', { name: '收集一道错题' }).click();
+    const image = await sharp(await readFile(new URL('../fixtures/paper.svg', import.meta.url))).png().toBuffer();
+    await page.getByLabel('选择题目图片').setInputFiles({ name: '仍在页面里的材料.png', mimeType: 'image/png', buffer: image });
+    await expect(page.getByRole('alert')).toContainText('本设备暂存失败');
+    await page.getByRole('button', { name: '返回列表' }).click();
+    await expect(page.getByText('还有一张图片等待上传', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '继续上传' })).toBeEnabled();
+    await page.evaluate(() => new Promise<void>((resolve, reject) => {
+      const request = indexedDB.deleteDatabase('klbook-device-drafts');
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    }));
+    await page.getByRole('button', { name: '继续上传' }).click();
+    await expect(page.getByRole('heading', { name: '整理这道题' })).toBeVisible();
   } finally { await server.stop(); await rm(dataDir, { recursive: true, force: true }); }
 });

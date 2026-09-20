@@ -42,8 +42,17 @@ export function browserPlatform(): ClientPlatform {
       async remove(target) { localStorage.removeItem(`klbook.credential:${target}`); }
     },
     drafts: {
-      async put(scope, id, value) { await drafts('readwrite', store => store.put(value, draftKey(scope, id))); },
-      async get(scope, id) { return drafts<Blob | undefined>('readonly', store => store.get(draftKey(scope, id))); },
+      async put(scope, id, value) {
+        // WebKit on Windows cannot persist Blob objects; keep bytes and MIME in one transaction.
+        const stored = { bytes: await value.arrayBuffer(), type: value.type };
+        await drafts('readwrite', store => store.put(stored, draftKey(scope, id)));
+      },
+      async get(scope, id) {
+        const stored = await drafts<Blob | { bytes: ArrayBuffer; type: string } | undefined>('readonly', store => store.get(draftKey(scope, id)));
+        if (!stored || stored instanceof Blob) return stored;
+        if (!(stored.bytes instanceof ArrayBuffer) || typeof stored.type !== 'string') throw new Error('设备暂存数据无法读取');
+        return new Blob([stored.bytes], { type: stored.type });
+      },
       async remove(scope, id) { await drafts('readwrite', store => store.delete(draftKey(scope, id))); }
     },
     request: (url, init) => fetch(url, init)

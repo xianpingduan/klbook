@@ -75,7 +75,6 @@ export class CollectionStore {
     if (input.region && (input.region.x + input.region.width > 1.000001 || input.region.y + input.region.height > 1.000001)) throw new AccessError(422, '题目范围必须在原始页内');
     if (input.subjectId !== null && !this.db.prepare('SELECT 1 FROM subjects WHERE id = ?').get(input.subjectId)) throw new AccessError(422, '请选择有效学科');
     if (input.state === 'collected' && (!input.subjectId || !input.region)) throw new AccessError(422, '确认题目范围并选择学科后，才能完成收集');
-    if (current.state === 'collected' && input.state === 'draft') throw new AccessError(409, '已收集的题目不能改回草稿');
     const content = {
       state: input.state, subjectId: input.subjectId, region: input.region ? { x: input.region.x, y: input.region.y, width: input.region.width, height: input.region.height } : null,
       source: input.source.trim(), pageNumber: input.pageNumber.trim(), questionNumber: input.questionNumber.trim(), note: input.note.trim()
@@ -90,6 +89,7 @@ export class CollectionStore {
       const duplicate = this.replay(home, input.operationId, requestHash);
       if (duplicate) return duplicate;
       const latest = this.get(home.library.id, id);
+      if (latest.state === 'collected' && input.state === 'draft') throw new AccessError(409, '已收集的题目不能改回草稿');
       if (latest.revision !== input.expectedRevision) throw new AccessError(409, '这道题已在其他页面更新。你的修改仍在当前页面，请先重新读取并核对');
       this.db.prepare(`UPDATE questions SET revision = revision + 1, state = @state, subjectId = @subjectId, region = @region,
         source = @source, pageNumber = @pageNumber, questionNumber = @questionNumber, note = @note, updatedAt = @updatedAt, collectedAt = @collectedAt

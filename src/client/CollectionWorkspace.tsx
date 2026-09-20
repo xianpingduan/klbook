@@ -34,7 +34,7 @@ export function CollectionWorkspace({ api, home, platform, onExpired, onEditing 
       return undefined;
     })]).then(([subjects, list, pending]) => {
       if (!active) return;
-      setSubjects(subjects); setList(list); setPending(pending);
+      setSubjects(subjects); setList(list); setPending(current => current ?? pending);
     }).catch(async failure => {
       if (!active) return;
       if (failure instanceof ApiError && failure.status === 401) { await onExpired(); return; }
@@ -70,7 +70,7 @@ export function CollectionWorkspace({ api, home, platform, onExpired, onEditing 
     {notice && <p role="status" className="message">{notice}</p>}
     {screen === 'list' && <section className="card collection-card">
       <div className="section-heading"><div><p className="eyebrow">从一道题开始</p><h2>我的学习材料</h2></div><button disabled={busy} onClick={() => { setError(''); setScreen('upload'); }}>收集一道错题</button></div>
-      {pending && <div className="message"><strong>还有一张图片等待上传</strong><p>{pending.name} · 仅保存在此设备，尚未同步</p><button disabled={busy} onClick={() => { setScreen('upload'); void run(() => upload(pending)); }}>继续上传</button></div>}
+      {pending && <div className="message"><strong>还有一张图片等待上传</strong><p>{pending.name} · 尚未同步，可继续上传</p><button disabled={busy} onClick={() => { setScreen('upload'); void run(() => upload(pending)); }}>继续上传</button></div>}
       <div className="collection-tabs"><button className="quiet" aria-pressed={state === 'collected'} disabled={busy} onClick={() => setState('collected')}>已收集</button><button className="quiet" aria-pressed={state === 'draft'} disabled={busy} onClick={() => setState('draft')}>草稿</button><button className="quiet" disabled={busy} onClick={() => setRefresh(value => value + 1)}>刷新列表</button></div>
       {busy && <p>正在读取材料…</p>}
       {!busy && list.total === 0 && <div className="empty-state"><h3>{state === 'draft' ? '还没有草稿' : '开始收集第一道错题吧'}</h3><p>{state === 'draft' ? '上传图片后，可以先保存草稿，稍后继续整理。' : '选择图片、框住题目、选好学科，就能保存。'}</p></div>}

@@ -89,6 +89,23 @@ test('同时重试只创建一个草稿，操作标识不能挪用到不同内�
   } finally { await f.close(); }
 });
 
+test('草稿写入的响应丢失后，即使另一会话完成收集，原操作仍可重放到最新版本', async () => {
+  const f = await familyFixture();
+  try {
+    const uploaded = await f.app.inject({ method: 'POST', url: '/api/v1/collection/drafts', headers: { ...auth(f.first.token), 'content-type': 'image/png', 'idempotency-key': randomUUID() }, payload: await paperImage() });
+    const path = `/api/v1/collection/questions/${uploaded.json().id}`;
+    const draftEdit = { operationId: randomUUID(), expectedRevision: 1, state: 'draft', subjectId: 'math', region: { x: 0, y: 0, width: 1, height: 1 }, source: '', pageNumber: '', questionNumber: '', note: '稍后整理' };
+    assert.equal((await f.app.inject({ method: 'PUT', url: path, headers: auth(f.first.token), payload: draftEdit })).statusCode, 200);
+    const second = (await f.login('另一设备')).json();
+    const collected = await f.app.inject({ method: 'PUT', url: path, headers: auth(second.token), payload: { ...draftEdit, operationId: randomUUID(), expectedRevision: 2, state: 'collected' } });
+    assert.equal(collected.statusCode, 200, collected.body);
+    const replay = await f.app.inject({ method: 'PUT', url: path, headers: auth(f.first.token), payload: draftEdit });
+    assert.equal(replay.statusCode, 200, replay.body);
+    assert.equal(replay.json().state, 'collected');
+    assert.equal(replay.json().revision, 3);
+  } finally { await f.close(); }
+});
+
 test('真实附件写入故障与材料缺失不发布半道题，恢复目录后可用同一操作重试', async () => {
   const f = await familyFixture();
   try {
