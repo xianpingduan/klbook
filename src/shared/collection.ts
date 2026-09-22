@@ -1,5 +1,9 @@
 export interface Subject { id: string; name: string }
 export interface Region { x: number; y: number; width: number; height: number }
+export function validQuestionRegion(region: Region | null): region is Region {
+  return !!region && Object.values(region).every(Number.isFinite) && region.x >= 0 && region.y >= 0 && region.width > 0 && region.height > 0
+    && region.x + region.width <= 1.000001 && region.y + region.height <= 1.000001;
+}
 export interface OriginalPage {
   id: string; mimeType: string; byteLength: number; sha256: string; width: number; height: number;
 }

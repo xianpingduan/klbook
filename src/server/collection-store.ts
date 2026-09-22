@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import type { Home } from '../shared/contracts.ts';
 import type { Question, QuestionEdit, QuestionList, Region, Subject } from '../shared/collection.ts';
+import { validQuestionRegion } from '../shared/collection.ts';
 import { AccessError } from './family-access.ts';
 import { Attachments, fileHash } from './attachments.ts';
 import type { StoredPage } from './attachments.ts';
@@ -74,7 +75,7 @@ export class CollectionStore {
   async save(authorize: () => Home, id: string, input: QuestionEdit) {
     const home = authorize();
     const current = this.get(home.library.id, id);
-    if (input.region && (input.region.x + input.region.width > 1.000001 || input.region.y + input.region.height > 1.000001)) throw new AccessError(422, '题目范围必须在原始页内');
+    if (input.region && !validQuestionRegion(input.region)) throw new AccessError(422, '题目范围必须在原始页内');
     if (input.subjectId !== null && !this.db.prepare('SELECT 1 FROM subjects WHERE id = ?').get(input.subjectId)) throw new AccessError(422, '请选择有效学科');
     if (input.state === 'collected' && (!input.subjectId || !input.region)) throw new AccessError(422, '确认题目范围并选择学科后，才能完成收集');
     const content = {

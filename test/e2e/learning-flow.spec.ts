@@ -164,7 +164,10 @@ test('服务列表读取失败仍能看见本机材料，取消不删除已接�
     await page.getByRole('button', { name: '收集', exact: true }).click();
     let uploadId = '';
     await page.route('**/api/v1/collection/drafts', async route => {
-      uploadId = (await (await route.fetch()).json()).id;
+      // WebKit's interception does not expose a File-backed request body; replay the chosen fixture bytes.
+      const accepted = await route.fetch({ postData: f.image });
+      expect(accepted.status()).toBe(201);
+      uploadId = (await accepted.json()).id;
       await route.abort();
     });
     await expect(page.getByLabel('选择题目图片')).toBeEnabled();
@@ -190,6 +193,7 @@ test('服务列表读取失败仍能看见本机材料，取消不删除已接�
 test('更正校验失败不离开，保存后离开不降级，切管理页面先保护编辑内容', async ({ page, request }) => {
   const f = await fixture(request);
   try {
+    await page.clock.install();
     await login(page, `${f.url}/admin/materials`);
     await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
     await page.getByRole('button', { name: '验证并进入管理' }).click();
@@ -211,6 +215,16 @@ test('更正校验失败不离开，保存后离开不降级，切管理页面�
     await dialog.getByRole('button', { name: '继续编辑' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('science');
     await page.getByLabel('备注（选填）').fill('离开之前保留');
+    await page.clock.fastForward(5 * 60 * 1000 + 10);
+    await expect(page.getByRole('heading', { name: '验证家长身份' })).toBeVisible();
+    await page.getByRole('button', { name: '返回错题集', exact: true }).click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('button', { name: '保存后离开' })).toBeDisabled();
+    await dialog.getByRole('button', { name: '继续编辑' }).click();
+    await page.clock.setFixedTime(new Date());
+    await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
+    await page.getByRole('button', { name: '验证并进入管理' }).click();
+    await expect(page.getByLabel('备注（选填）')).toHaveValue('离开之前保留');
     await page.getByRole('button', { name: '结束管理', exact: true }).click();
     await expect(dialog).toBeVisible();
     await dialog.getByRole('button', { name: '保存后离开' }).click();

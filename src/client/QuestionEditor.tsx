@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Question, QuestionEdit, Subject } from '../shared/collection.ts';
+import { validQuestionRegion } from '../shared/collection.ts';
 import { ApiError, FamilyApi } from './api.ts';
 import { CropSelector, QuestionImage } from './QuestionImage.tsx';
 import type { Source } from '../shared/sources.ts';
@@ -9,8 +11,8 @@ function editable(question: Question) {
   return { subjectId: question.subjectId, region: question.region, sourceId: question.sourceId, pageNumber: question.pageNumber, questionNumber: question.questionNumber, note: question.note };
 }
 
-export function QuestionEditor({ api, question, subjects, sources, onSaved, onBack, onExpired }: {
-  api: FamilyApi; question: Question; subjects: Subject[]; sources: Source[]; onSaved(question: Question): void; onBack(): void; onExpired(): Promise<void>;
+export function QuestionEditor({ api, question, subjects, sources, active, onSaved, onBack, onExpired }: {
+  api: FamilyApi; question: Question; subjects: Subject[]; sources: Source[]; active: boolean; onSaved(question: Question): void; onBack(): void; onExpired(): Promise<void>;
 }) {
   const [fields, setFields] = useState(() => editable(question));
   const [busy, setBusy] = useState(false);
@@ -28,6 +30,7 @@ export function QuestionEditor({ api, question, subjects, sources, onSaved, onBa
   }, [leaving]);
 
   async function save(state: 'draft' | 'collected') {
+    if (!active) return false;
     setBusy(true); setError(''); setNotice('');
     const content = { expectedRevision: question.revision, state, ...fields };
     const fingerprint = JSON.stringify(content);
@@ -45,16 +48,17 @@ export function QuestionEditor({ api, question, subjects, sources, onSaved, onBa
       return false;
     } finally { setBusy(false); }
   }
-  const validRegion = fields.region && Object.values(fields.region).every(Number.isFinite) && fields.region.x >= 0 && fields.region.y >= 0 && fields.region.width > 0 && fields.region.height > 0 && fields.region.x + fields.region.width <= 1 && fields.region.y + fields.region.height <= 1;
+  const validRegion = validQuestionRegion(fields.region);
   return <section className="card collection-card question-editor">
     <div className="section-heading"><div><p className="eyebrow">{step === 'crop' ? '第 1 步 · 确认题目范围' : '第 2 步 · 确认信息'} · {question.state === 'draft' ? '草稿' : '补充信息'}</p><h1>{step === 'crop' ? '框住这道题' : question.state === 'draft' ? '确认并保存' : '补充或更正信息'}</h1></div><button className="quiet" disabled={busy} onClick={() => requestLeave(onBack)}>返回列表</button></div>
     {error && !leaving && <p role="alert" className="message error">{error}</p>}
     {notice && <p role="status" className="message">{notice}</p>}
-    <dialog ref={dialog} className="leave-dialog" aria-labelledby="leave-title" onCancel={event => { event.preventDefault(); if (!busy) setLeaving(undefined); }}>
+    {createPortal(<dialog ref={dialog} className="leave-dialog" aria-labelledby="leave-title" onCancel={event => { event.preventDefault(); if (!busy) setLeaving(undefined); }}>
       <h2 id="leave-title">还有未保存的修改</h2><p>{question.state === 'draft' ? '保存后离开会保留为草稿，稍后可以继续整理。' : '保存后离开会更新这道错题，保留原来的收集时间。'}</p>
+      {!active && <p className="message">管理验证已到期。选择继续编辑，重新验证家长身份后就能保存；也可以放弃本次修改并离开。</p>}
       {error && <p role="alert" className="message error">{error}</p>}
-      <div className="leave-actions"><button autoFocus disabled={busy} onClick={() => setLeaving(undefined)}>继续编辑</button><button className="quiet" disabled={busy} onClick={() => { const proceed = leaving?.proceed; void save(question.state).then(saved => { if (saved) { releaseGuard(); setLeaving(undefined); proceed?.(); } }); }}>{busy ? '正在保存…' : '保存后离开'}</button><button className="quiet" disabled={busy} onClick={() => { const proceed = leaving?.proceed; setFields(editable(question)); baseline.current = JSON.stringify(editable(question)); pending.current = null; releaseGuard(); setLeaving(undefined); proceed?.(); }}>放弃本次修改并离开</button></div>
-    </dialog>
+      <div className="leave-actions"><button autoFocus disabled={busy} onClick={() => setLeaving(undefined)}>继续编辑</button><button className="quiet" disabled={busy || !active} onClick={() => { const proceed = leaving?.proceed; void save(question.state).then(saved => { if (saved) { releaseGuard(); setLeaving(undefined); proceed?.(); } }); }}>{busy ? '正在保存…' : '保存后离开'}</button><button className="quiet" disabled={busy} onClick={() => { const proceed = leaving?.proceed; setFields(editable(question)); baseline.current = JSON.stringify(editable(question)); pending.current = null; releaseGuard(); setLeaving(undefined); proceed?.(); }}>放弃本次修改并离开</button></div>
+    </dialog>, document.querySelector('.app-surface') ?? document.body)}
     {step === 'crop' ? <div className="crop-step"><CropSelector api={api} page={question.originalPage} region={fields.region} disabled={busy} onChange={region => setFields(current => ({ ...current, region }))} /><div className="save-actions"><button disabled={busy || !validRegion} onClick={() => setStep('confirm')}>下一步，选学科</button>{question.state === 'draft' && <button className="quiet" disabled={busy} onClick={() => void save('draft')}>保存草稿</button>}</div></div> : <div className="editor-grid">
       <div className="confirmation-material"><QuestionImage api={api} page={question.originalPage} region={fields.region} /><button className="quiet" disabled={busy} onClick={() => setStep('crop')}>调整题目范围</button></div>
       <div><fieldset disabled={busy}>

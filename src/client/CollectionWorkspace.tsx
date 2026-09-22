@@ -129,7 +129,7 @@ export function CollectionWorkspace({ api, home, platform, path, onExpired, onEd
       {!pending && <CaptureChoices busy={busy || cacheLoading} onChoose={choose} onNotice={setNotice} />}
       {batch && <CaptureQueue batch={batch} busy={busy} onUpload={item => void run(() => upload(item))} onCancel={item => void run(() => cancel(item))} />}
     </section>}
-    {screen === 'edit' && selected && <QuestionEditor key={selected.id} api={api} question={selected} subjects={subjects} sources={sources} onBack={back} onExpired={onExpired} onSaved={question => { setSelected(question); setRefresh(value => value + 1); if (question.state === 'collected') setScreen('detail'); }} />}
+    {screen === 'edit' && selected && <QuestionEditor key={selected.id} api={api} question={selected} subjects={subjects} sources={sources} active={active} onBack={back} onExpired={onExpired} onSaved={question => { setSelected(question); setRefresh(value => value + 1); if (question.state === 'collected') setScreen('detail'); }} />}
     {screen === 'detail' && selected && <section className="card collection-card">
       <div className="section-heading"><div><p className="eyebrow">{subjectName(selected.subjectId)} · 已收集</p><h1>错题详情</h1></div><button className="quiet" disabled={busy} onClick={back}>返回列表</button></div>
       <p className="sync-state">已同步到家庭资料库</p><div className="detail-material"><QuestionImage api={api} page={selected.originalPage} region={selected.region} /></div>
