@@ -1,16 +1,14 @@
-import { useEffect, useState } from 'react';
-import type { FormEvent, ReactNode } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import type { FormEvent } from 'react';
 import type { Home, SessionResult } from '../shared/contracts.ts';
 import type { ClientPlatform } from './platform.ts';
 import { ApiError, FamilyApi } from './api.ts';
-import { ParentPanel } from './ParentPanel.tsx';
-import { CollectionWorkspace } from './CollectionWorkspace.tsx';
+import { AuthenticatedWorkspace } from './AuthenticatedWorkspace.tsx';
+import { SurfaceLayout } from './SurfaceLayout.tsx';
+import { usePage } from './navigation.ts';
 
 function Field({ label, name, type = 'text', value, autoComplete, minLength }: { label: string; name: string; type?: string; value?: string; autoComplete?: string; minLength?: number }) {
   return <label>{label}<input name={name} type={type} defaultValue={value} autoComplete={autoComplete} minLength={minLength} maxLength={name.toLowerCase().includes('password') || name.includes('Code') ? 128 : 64} required /></label>;
-}
-function Frame({ children }: { children: ReactNode }) {
-  return <div className="shell"><header><span className="mark" aria-hidden="true">记</span><div><strong>错题集</strong><span className="caption">一点点整理，一点点进步</span></div></header><main>{children}</main><footer>家庭电脑保存资料 · 日常学习与家长管理分开</footer></div>;
 }
 const value = (data: FormData, name: string) => String(data.get(name) ?? '');
 
@@ -23,8 +21,8 @@ export function App({ platform }: { platform: ClientPlatform }) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
-  const [parentOpen, setParentOpen] = useState(false);
-  const [collecting, setCollecting] = useState(false);
+  const { path, navigate } = usePage();
+  const signedOut = useCallback(async () => { await api?.forget(); setHome(undefined); setScreen('login'); }, [api]);
 
   async function boot() {
     setError(''); setScreen('loading');
@@ -67,7 +65,8 @@ export function App({ platform }: { platform: ClientPlatform }) {
     });
   }
 
-  return <Frame>
+  if (screen === 'home' && home && api) return <AuthenticatedWorkspace key={home.session.id} api={api} home={home} platform={platform} path={path} navigate={navigate} notice={notice} onSignedOut={signedOut} onRecoveryCode={code => { setRecoveryCode(code); setAcknowledged(false); setScreen('save-code'); }} />;
+  return <SurfaceLayout path={path} navigate={navigate}>
     {error && <p role="alert" className="message error">{error}</p>}
     {notice && <p role="status" className="message">{notice}</p>}
     {screen === 'loading' && <section className="card"><h1>连接家庭资料库</h1><p>请保持家庭电脑开机，并运行错题集服务。</p>{error ? <button onClick={() => void boot()}>重新连接</button> : <p role="status">正在连接…</p>}</section>}
@@ -88,14 +87,5 @@ export function App({ platform }: { platform: ClientPlatform }) {
       {screen === 'recovery' && <button className="quiet" disabled={busy} onClick={() => { setError(''); setScreen('login'); }}>返回登录</button>}
     </section>}
     {screen === 'save-code' && <section className="card"><p className="eyebrow">家长专用 · 请单独保管</p><h1>请保存恢复码</h1><p>忘记密码时，用它恢复账号。此码只显示这一次；恢复账号后会生成新码，旧码失效。</p><label>恢复码<input className="recovery-code" readOnly value={recoveryCode} /></label><label className="check"><input type="checkbox" checked={acknowledged} onChange={event => setAcknowledged(event.target.checked)} />我已将恢复码保存在安全的地方</label><button disabled={!acknowledged} onClick={() => { setRecoveryCode(''); setScreen('home'); }}>进入错题集</button></section>}
-    {screen === 'home' && parentOpen && api && <ParentPanel api={api} onClose={() => setParentOpen(false)} onSignedOut={async () => { await api.forget(); setParentOpen(false); setHome(undefined); setScreen('login'); }} onRecoveryCode={code => { setParentOpen(false); setRecoveryCode(code); setAcknowledged(false); setScreen('save-code'); }} />}
-    {screen === 'home' && !parentOpen && home && api && <>
-      <section className="card home-summary">
-        <div className="section-heading"><div><p className="eyebrow">家庭资料库已连接</p><h1>{home.library.learnerName}的错题集</h1><p className="intro">把材料留下来，让每一次整理都有迹可循。</p></div><div className="home-actions"><button disabled={busy || collecting} onClick={() => { setError(''); setParentOpen(true); }}>家长管理</button><button className="quiet" disabled={busy || collecting} onClick={() => void run(async () => { await api.logout(); setHome(undefined); setScreen('login'); })}>退出此设备</button>{collecting && <p className="hint">返回材料列表后可管理设备。</p>}</div></div>
-        <details><summary>家庭和设备信息</summary><dl><div><dt>学习者</dt><dd>{home.library.learnerName}</dd></div><div><dt>家长账号</dt><dd>{home.account.username}</dd></div><div><dt>当前设备</dt><dd>{home.session.deviceName}</dd></div></dl></details>
-        <details><summary>资料库身份</summary><code data-testid="library-id">{home.library.id}</code></details>
-      </section>
-      <CollectionWorkspace api={api} home={home} platform={platform} onEditing={setCollecting} onExpired={async () => { await api.forget(); setCollecting(false); setHome(undefined); setScreen('login'); }} />
-    </>}
-  </Frame>;
+  </SurfaceLayout>;
 }

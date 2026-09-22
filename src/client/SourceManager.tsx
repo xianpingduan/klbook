@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 import type { Source, SourceEdit } from '../shared/sources.ts';
 import { ApiError, FamilyApi } from './api.ts';
 
-export function SourceManager({ api, grant, onAccessError }: { api: FamilyApi; grant: string; onAccessError(error: ApiError): Promise<void> }) {
+export function SourceManager({ api, grant, active = true, onAccessError }: { api: FamilyApi; grant?: string; active?: boolean; onAccessError(error: ApiError): Promise<void> }) {
   const [sources, setSources] = useState<Source[]>([]);
   const [editing, setEditing] = useState<Source>();
   const [name, setName] = useState('');
@@ -14,17 +14,19 @@ export function SourceManager({ api, grant, onAccessError }: { api: FamilyApi; g
   const pending = useRef<{ fingerprint: string; id: string; operationId: string } | null>(null);
 
   useEffect(() => {
-    let active = true;
+    if (!grant || !active) return;
+    let current = true;
     setBusy(true); setError('');
-    void api.managedSources(grant).then(items => { if (active) setSources(items); }).catch(async failure => {
-      if (!active) return;
+    void api.managedSources(grant).then(items => { if (current) setSources(items); }).catch(async failure => {
+      if (!current) return;
       if (failure instanceof ApiError && [401, 403].includes(failure.status)) { await onAccessError(failure); return; }
       setError(failure instanceof Error ? failure.message : '来源读取失败，请重试');
-    }).finally(() => { if (active) setBusy(false); });
-    return () => { active = false; };
-  }, [api, grant, refresh]);
+    }).finally(() => { if (current) setBusy(false); });
+    return () => { current = false; };
+  }, [api, grant, refresh, active]);
 
   async function save(id: string | undefined, input: Omit<SourceEdit, 'operationId'>) {
+    if (!grant || !active) return;
     setBusy(true); setError(''); setNotice('');
     const fingerprint = JSON.stringify({ id, ...input });
     if (pending.current?.fingerprint !== fingerprint) pending.current = { fingerprint, id: id ?? crypto.randomUUID(), operationId: crypto.randomUUID() };

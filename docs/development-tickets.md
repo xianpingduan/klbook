@@ -56,6 +56,17 @@
 
 2026-09-20 用户要求来源可下拉选择且单独管理，并确认由家长负责新增、改名、停用；已登记 [#27 来源下拉选择与独立管理](https://github.com/xianpingduan/klbook/issues/27)。这是原 24 项之外的明确补充需求，沿用 #3 的收集流程，后续检索任务使用稳定来源身份。实现规则与验证见[来源管理](source-management.md)。
 
+## 界面改造补充
+
+2026-09-22 用户确认两端独立布局及 Demo 整体风格，要求精简重复入口并保留首页鼓励语，随后确认按四项任务发布。正式规格为 [#28](https://github.com/xianpingduan/klbook/issues/28)（[本地规格](spec-ui-separation.md)）；四项开发任务已发布并回读核验，均标记 ready-for-agent：
+
+- [#29 独立入口、真实登录与管理概览](https://github.com/xianpingduan/klbook/issues/29)：无前置，是本轮开始位置。
+- [#30 学习端收集、查阅与草稿续接](https://github.com/xianpingduan/klbook/issues/30)：仅依赖 #29。
+- [#31 后台资料整理与来源管理](https://github.com/xianpingduan/klbook/issues/31)：仅依赖 #29。
+- [#32 后台设备、账号恢复与管理退出](https://github.com/xianpingduan/klbook/issues/32)：仅依赖 #29。
+
+四项均已原生关联父规格 #28，共 36 条验收标准、3 条原生前置依赖，详见[界面改造任务索引](ui-separation-tickets.md)。用户已要求实施下一步，#29 正在接入独立入口与真实管理概览，详见[验证记录](verification/issue-29.md)；原有 24 项和 #4 的真机状态保持不变。
+
 ## 后续移动安装与商店发布
 
 2026-09-18 用户补充最终交付 Android APK 和 iOS App Store App，并确认目前没有 Mac/开发者会员、先预留发布方案。已登记 [后续移动交付里程碑 #26](https://github.com/xianpingduan/klbook/issues/26)，标签为 `needs-triage`；它是后续范围跟踪，尚未细拆为可直接执行的开发任务。

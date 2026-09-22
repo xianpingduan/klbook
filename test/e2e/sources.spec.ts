@@ -16,6 +16,7 @@ test('家长独立管理来源并安全重试，孩子下拉选择，来源停�
     await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
     await page.getByRole('button', { name: '登录此设备' }).click();
     const manage = async () => {
+      await page.getByRole('button', { name: '我的', exact: true }).click();
       await page.getByRole('button', { name: '家长管理', exact: true }).click();
       await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
       await page.getByRole('button', { name: '验证并进入管理' }).click();
@@ -34,7 +35,8 @@ test('家长独立管理来源并安全重试，孩子下拉选择，来源停�
     await page.getByRole('button', { name: '结束管理', exact: true }).click();
     const image = await sharp(await readFile(new URL('../fixtures/paper.svg', import.meta.url))).png().toBuffer();
     const upload = async () => {
-      await page.getByRole('button', { name: '收集一道错题' }).click();
+      await page.getByRole('button', { name: '收集', exact: true }).click();
+    await page.getByRole('button', { name: '收集一道错题' }).click();
       await page.getByLabel('选择题目图片').setInputFiles({ name: '课堂小测.png', mimeType: 'image/png', buffer: image });
       await expect(page.getByRole('heading', { name: '整理这道题' })).toBeVisible();
     };
@@ -43,7 +45,7 @@ test('家长独立管理来源并安全重试，孩子下拉选择，来源停�
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption({ label: '数学' });
     await page.getByRole('combobox', { name: '来源（选填）', exact: true }).selectOption({ label: '课堂小测' });
     await page.getByRole('button', { name: '保存到错题集' }).click();
-    await expect(page.getByText('课堂小测', { exact: true })).toBeVisible();
+    await expect(page.getByRole('definition').filter({ hasText: /^课堂小测$/ })).toBeVisible();
     await page.getByRole('button', { name: '返回列表' }).click();
     await manage();
     await page.getByRole('button', { name: '改名 课堂小测', exact: true }).click();
@@ -54,7 +56,7 @@ test('家长独立管理来源并安全重试，孩子下拉选择，来源停�
     await page.screenshot({ path: `test-results/sources-management-${test.info().project.name}.png`, fullPage: true });
     await page.getByRole('button', { name: '结束管理', exact: true }).click();
     await page.getByRole('button', { name: '打开错题' }).click();
-    await expect(page.getByText('每周课堂小测', { exact: true })).toBeVisible();
+    await expect(page.getByRole('definition').filter({ hasText: /^每周课堂小测$/ })).toBeVisible();
     await page.getByRole('button', { name: '补充或更正信息' }).click();
     await expect(page.getByRole('option', { name: '每周课堂小测（已停用）', exact: true })).toHaveAttribute('disabled', '');
     await page.getByLabel('备注（选填）').fill('来源停用也可以补充');

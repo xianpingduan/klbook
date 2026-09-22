@@ -22,7 +22,8 @@ test('上传、框题、保存草稿、继续收集和补充信息，第二设�
       await expect(target.getByRole('heading', { name: '小明的错题集' })).toBeVisible();
     };
     await login(page);
-    await expect(page.getByRole('button', { name: '收集一道错题' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '收集', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '收集', exact: true }).click();
     await page.getByRole('button', { name: '收集一道错题' }).click();
     await page.getByLabel('选择题目图片').setInputFiles({ name: '数学作业.png', mimeType: 'image/png', buffer: image });
     await expect(page.getByRole('heading', { name: '整理这道题' })).toBeVisible();
@@ -79,6 +80,7 @@ test('写入失败和响应丢失后保留材料，重开及重复保存不会�
     await page.getByLabel('家长账号').fill('parent');
     await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
     await page.getByRole('button', { name: '登录此设备' }).click();
+    await page.getByRole('button', { name: '收集', exact: true }).click();
     await page.getByRole('button', { name: '收集一道错题' }).click();
     await page.getByLabel('选择题目图片').setInputFiles({ name: '待恢复的作业.png', mimeType: 'image/png', buffer: image });
     await expect(page.getByRole('alert')).toContainText('图片未能完整保存');
@@ -133,6 +135,7 @@ test('设备暂存不可用时，返回列表仍保留内存图片，修复存�
     await page.getByLabel('家长账号').fill('parent');
     await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
     await page.getByRole('button', { name: '登录此设备' }).click();
+    await page.getByRole('button', { name: '收集', exact: true }).click();
     await page.getByRole('button', { name: '收集一道错题' }).click();
     const image = await sharp(await readFile(new URL('../fixtures/paper.svg', import.meta.url))).png().toBuffer();
     await page.getByLabel('选择题目图片').setInputFiles({ name: '仍在页面里的材料.png', mimeType: 'image/png', buffer: image });

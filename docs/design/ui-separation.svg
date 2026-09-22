@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1520" height="980" viewBox="0 0 1520 980" role="img" aria-labelledby="title desc">
+  <title id="title">错题集：管理端与学习端布局草案</title>
+  <desc id="desc">左侧为具有侧栏、资料概览、待整理草稿和管理入口的家长后台；右侧为具有首页、收集、我的三个底部导航的手机学习端首页。页面内容为设计示例。</desc>
+  <defs>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="140%"><feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#253b5b" flood-opacity="0.08"/></filter>
+    <g id="paper"><rect width="48" height="42" rx="5" fill="#f7f8fa" stroke="#d9e0e8"/><path d="M8 10H39 M8 16H32 M8 31H24" stroke="#b5c1ce" stroke-width="2"/><path d="M28 33L34 21L42 33Z" fill="none" stroke="#7e91a7" stroke-width="1.5"/></g>
+    <g id="camera" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8H8L10 5H16L18 8H23V22H3Z"/><circle cx="13" cy="15" r="4"/></g>
+    <g id="album" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="20" height="19" rx="3"/><circle cx="9" cy="10" r="2"/><path d="M4 20L10 15L14 18L19 12L23 18"/></g>
+    <style>
+      text{font-family:'Microsoft YaHei','PingFang SC',sans-serif;fill:#243349}
+      .muted{fill:#728095}.small{font-size:12px}.label{font-size:14px}.white{fill:white}.bold{font-weight:700}
+    </style>
+  </defs>
+  <rect width="1520" height="980" fill="#f0f3f8"/>
+  <text x="36" y="53" font-size="28" class="bold">错题集 · 管理端与学习端独立布局</text>
+  <text x="36" y="85" font-size="15" class="muted">布局示意 · 示例数据 · 共用家庭资料库，各自拥有导航与页面结构</text>
+  <text x="36" y="133" font-size="17" class="bold">01　家长管理端</text>
+  <text x="252" y="133" font-size="13" class="muted">桌面后台：侧栏导航 / 资料表格 / 独立管理页面</text>
+  <g filter="url(#shadow)">
+    <rect x="32" y="154" width="1024" height="668" rx="16" fill="white"/>
+    <path d="M232 154H1040Q1056 154 1056 170V806Q1056 822 1040 822H232Z" fill="#f6f8fb"/>
+  </g>
+  <path d="M232 154V822" stroke="#e6ebf2"/>
+  <rect x="55" y="180" width="37" height="37" rx="10" fill="#287764"/>
+  <text x="64" y="205" font-size="21" class="white bold">记</text>
+  <text x="102" y="195" font-size="17" class="bold">错题集</text><text x="102" y="215" class="small muted">家长管理</text>
+  <text x="55" y="266" class="small muted">家庭资料</text>
+  <rect x="47" y="281" width="170" height="43" rx="8" fill="#eaf0ff"/>
+  <rect x="64" y="296" width="14" height="13" rx="2" fill="none" stroke="#416bde" stroke-width="1.5"/>
+  <text x="91" y="308" font-size="15" fill="#315bcc" class="bold">管理概览</text>
+  <path d="M65 345H79V358H65Z M69 342V350 M74 342V350" fill="none" stroke="#7a8aa0" stroke-width="1.5"/>
+  <text x="91" y="356" font-size="15">错题资料</text>
+  <rect x="65" y="384" width="14" height="13" rx="2" fill="none" stroke="#7a8aa0"/><text x="91" y="396" font-size="15">来源管理</text>
+  <text x="55" y="451" class="small muted">系统管理</text>
+  <rect x="64" y="477" width="16" height="12" rx="2" fill="none" stroke="#7a8aa0" stroke-width="1.5"/><path d="M67 493H77" stroke="#7a8aa0"/>
+  <text x="91" y="490" font-size="15">设备与账号</text>
+  <path d="M48 755H216" stroke="#e8edf4"/>
+  <circle cx="63" cy="785" r="4" fill="#37957c"/><text x="75" y="789" class="small muted">家庭资料库已连接</text>
+  <path d="M232 217H1056" stroke="#e6ebf2"/>
+  <text x="258" y="193" class="label muted">家庭资料库 / 管理概览</text>
+  <rect x="814" y="174" width="108" height="30" rx="6" fill="white" stroke="#dce3ed"/><text x="830" y="194" class="small">返回学习端</text>
+  <text x="945" y="194" class="small muted">结束管理</text>
+  <text x="260" y="271" font-size="25" class="bold">管理概览</text>
+  <text x="260" y="299" class="label muted">家庭资料一览；通过侧栏进入对应管理。</text>
+  <g fill="white" stroke="#e4e9f0"><rect x="260" y="326" width="180" height="103" rx="10"/><rect x="455" y="326" width="180" height="103" rx="10"/><rect x="650" y="326" width="180" height="103" rx="10"/><rect x="845" y="326" width="181" height="103" rx="10"/></g>
+  <g class="label muted"><text x="279" y="357">已收集错题</text><text x="474" y="357">待整理草稿</text><text x="669" y="357">启用来源</text><text x="864" y="357">已登录设备</text></g>
+  <g font-size="31" class="bold"><text x="279" y="404">128</text><text x="474" y="404">12</text><text x="669" y="404">4</text><text x="864" y="404">3</text></g>
+  <text x="262" y="479" class="small muted">概览以当前家庭资料库中的记录为准。</text>
+  <text x="1120" y="133" font-size="17" class="bold">02　手机学习端</text>
+  <g filter="url(#shadow)"><rect x="1119" y="155" width="365" height="671" rx="27" fill="#f7faf8" stroke="#d8e1dd"/></g>
+  <text x="1142" y="186" class="small bold">9:41</text><rect x="1433" y="176" width="23" height="10" rx="3" fill="none" stroke="#536b60"/><rect x="1436" y="179" width="16" height="4" rx="1" fill="#536b60"/>
+  <text x="1141" y="230" font-size="25" class="bold">错题集</text>
+  <text x="1142" y="257" class="small muted">已收集 128 道题 · 按收集时间排列</text>
+  <rect x="1140" y="278" width="322" height="100" rx="15" fill="#f4efe4" stroke="#eee5d3"/>
+  <text x="1158" y="302" font-size="11" fill="#877552">给自己一点鼓励</text>
+  <text x="1158" y="332" font-size="18" font-weight="600" fill="#5b513b">不会的题，可以慢慢弄懂。</text>
+  <text x="1158" y="357" font-size="12" fill="#7c7058">每一次认真回看，都是一点进步。</text>
+  <g transform="translate(0,-108)">
+  <rect x="1140" y="508" width="322" height="108" rx="13" fill="white" stroke="#e3ebe5"/>
+  <rect x="1152" y="521" width="103" height="80" rx="7" fill="#f6f7f3"/>
+  <text x="1160" y="540" font-size="9" fill="#7b8275">求三角形的周长。</text><path d="M1172 582L1197 551L1235 582Z" fill="none" stroke="#82917c" stroke-width="1.5"/><text x="1174" y="570" font-size="8">5cm</text><text x="1193" y="594" font-size="8">6cm</text>
+  <rect x="1270" y="522" width="43" height="23" rx="6" fill="#e9f4ed"/><text x="1279" y="538" class="small" fill="#287764">数学</text>
+  <text x="1270" y="566" font-size="14" class="bold">课堂作业 · 第12题</text><text x="1270" y="590" class="small muted">今天收集</text>
+  <rect x="1140" y="629" width="322" height="105" rx="13" fill="white" stroke="#e3ebe5"/>
+  <rect x="1152" y="642" width="103" height="78" rx="7" fill="#f5f7fa"/><text x="1161" y="664" font-size="10" fill="#8190a5">Read and choose.</text><path d="M1162 678H1244 M1162 690H1231 M1162 702H1240" stroke="#b5bfce" stroke-width="2"/>
+  <rect x="1270" y="643" width="43" height="23" rx="6" fill="#edf0ff"/><text x="1279" y="659" class="small" fill="#6276b3">英语</text><text x="1270" y="686" font-size="14" class="bold">练习册 · 第5题</text><text x="1270" y="710" class="small muted">今天收集</text>
+  </g>
+  <g transform="translate(0,13)">
+  <rect x="1140" y="629" width="322" height="105" rx="13" fill="white" stroke="#e3ebe5"/>
+  <rect x="1152" y="642" width="103" height="78" rx="7" fill="#faf6f2"/><text x="1161" y="664" font-size="10" fill="#948776">阅读短文，回答问题。</text><path d="M1162 678H1244 M1162 690H1231 M1162 702H1240" stroke="#cbbfae" stroke-width="2"/>
+  <rect x="1270" y="643" width="43" height="23" rx="6" fill="#fff0e6"/><text x="1279" y="659" class="small" fill="#b38455">语文</text><text x="1270" y="686" font-size="14" class="bold">试卷 · 第3题</text><text x="1270" y="710" class="small muted">昨天收集</text>
+  </g>
+  <path d="M1120 751H1483" stroke="#e2e9e4"/>
+  <path d="M1166 773L1177 763L1188 773V783H1166Z" fill="none" stroke="#287764" stroke-width="1.8"/><text x="1165" y="801" font-size="11" class="bold">首页</text>
+  <rect x="1289" y="761" width="22" height="22" rx="5" fill="none" stroke="#87998f" stroke-width="1.6"/><path d="M1294 772H1306 M1300 766V778" stroke="#87998f" stroke-width="1.8" stroke-linecap="round"/><text x="1289" y="801" font-size="11" class="muted">收集</text>
+  <circle cx="1410" cy="770" r="5" fill="none" stroke="#87998f" stroke-width="1.6"/><path d="M1401 784Q1401 778 1410 778Q1419 778 1419 784" fill="none" stroke="#87998f" stroke-width="1.6"/><text x="1399" y="801" font-size="11" class="muted">我的</text>
+  <rect x="1255" y="808" width="88" height="4" rx="2" fill="#34483e"/>
+  <text x="35" y="862" font-size="14" class="bold">本轮布局</text><text x="137" y="862" font-size="14" class="muted">管理概览、错题资料、来源、设备与账号；学习端首页、收集、我的。</text>
+  <text x="35" y="895" font-size="14" class="bold">后续位置</text><text x="137" y="895" font-size="14" class="muted">学科与学习阶段、能力服务、回收站、导入导出、备份随对应功能开放。</text>
+  <text x="1125" y="862" class="small muted">大按钮 · 单列卡片 · 主要操作易触达</text>
+  <text x="35" y="942" font-size="13" class="muted">设计草案：本图用于确认整体布局；示例内容不代表实际数据或功能已交付。</text>
+</svg>

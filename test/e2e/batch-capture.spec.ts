@@ -21,6 +21,7 @@ test('相册多选逐张整理，取消单张后重开保留进度，另一设�
       await target.getByRole('button', { name: '登录此设备' }).click();
     };
     await login(page);
+    await page.getByRole('button', { name: '收集', exact: true }).click();
     await page.getByRole('button', { name: '收集一道错题' }).click();
     await page.getByLabel('从相册选择（可多选）').setInputFiles(['第一张.png', '取消这张.png', '第三张.png'].map(name => ({ name, mimeType: 'image/png', buffer: image })));
     await expect(page.getByRole('heading', { name: '整理这道题' })).toBeVisible();
@@ -56,6 +57,7 @@ test('拍照取消有退路，批量坏图可跳过，触控框题与电脑停�
     await page.getByLabel('家长账号').fill('parent');
     await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
     await page.getByRole('button', { name: '登录此设备' }).click();
+    await page.getByRole('button', { name: '收集', exact: true }).click();
     await page.getByRole('button', { name: '收集一道错题' }).click();
     await page.getByLabel('拍照', { exact: true }).dispatchEvent('cancel');
     await expect(page.getByRole('status')).toContainText('没有取得照片');

@@ -11,8 +11,8 @@ import { QuestionImage } from './QuestionImage.tsx';
 import type { Source } from '../shared/sources.ts';
 import { CaptureInput } from './CaptureInput.tsx';
 
-export function CollectionWorkspace({ api, home, platform, onExpired, onEditing }: {
-  api: FamilyApi; home: Home; platform: ClientPlatform; onExpired(): Promise<void>; onEditing(active: boolean): void;
+export function CollectionWorkspace({ api, home, platform, onExpired, onEditing, active = true, mode = 'workspace' }: {
+  api: FamilyApi; home: Home; platform: ClientPlatform; onExpired(): Promise<void>; onEditing(active: boolean): void; active?: boolean; mode?: 'home' | 'workspace';
 }) {
   const cache = useMemo(() => new CaptureCache(platform, { libraryId: home.library.id, accountId: home.account.id }), [platform, home.library.id, home.account.id]);
   const [screen, setScreen] = useState<'list' | 'upload' | 'edit' | 'detail'>('list');
@@ -28,25 +28,27 @@ export function CollectionWorkspace({ api, home, platform, onExpired, onEditing 
   const [notice, setNotice] = useState('');
   const [originalOpen, setOriginalOpen] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const listState = mode === 'home' ? 'collected' : state;
 
   useEffect(() => { onEditing(screen !== 'list'); }, [screen, onEditing]);
   useEffect(() => {
-    let active = true;
+    if (!active) return;
+    let current = true;
     setBusy(true); setError('');
-    void Promise.all([api.subjects(), api.questions(state), api.sources(), cache.readBatch().catch(failure => {
-      if (active) setError(failure instanceof Error ? failure.message : '本设备暂存无法读取，请重新选择图片');
+    void Promise.all([api.subjects(), api.questions(listState), api.sources(), cache.readBatch().catch(failure => {
+      if (current) setError(failure instanceof Error ? failure.message : '本设备暂存无法读取，请重新选择图片');
       return undefined;
     })]).then(([subjects, list, sources, pending]) => {
-      if (!active) return;
+      if (!current) return;
       setSubjects(subjects); setList(list); setSources(sources); setBatch(current => current ?? pending);
     }).catch(async failure => {
-      if (!active) return;
+      if (!current) return;
       if (failure instanceof ApiError && failure.status === 401) { await onExpired(); return; }
       setError(failure instanceof Error ? failure.message : '读取失败，请重试');
     })
-      .finally(() => { if (active) setBusy(false); });
-    return () => { active = false; };
-  }, [api, cache, state, refresh]);
+      .finally(() => { if (current) setBusy(false); });
+    return () => { current = false; };
+  }, [api, cache, listState, refresh, active]);
 
   async function run(action: () => Promise<void>) {
     setBusy(true); setError(''); setNotice('');
@@ -90,16 +92,16 @@ export function CollectionWorkspace({ api, home, platform, onExpired, onEditing 
     {error && <p role="alert" className="message error">{error}</p>}
     {notice && <p role="status" className="message">{notice}</p>}
     {screen === 'list' && <section className="card collection-card">
-      <div className="section-heading"><div><p className="eyebrow">从一道题开始</p><h2>我的学习材料</h2></div><button disabled={busy} onClick={() => { setError(''); setScreen('upload'); }}>收集一道错题</button></div>
-      {pending && <div className="message"><strong>还有 {batch!.items.length} 张图片等待上传</strong><p>已上传 {batch!.uploaded} / {batch!.total} 张，已取消 {batch!.cancelled} 张</p><p>{pending.name} · 尚未同步，可继续上传</p><button disabled={busy} onClick={() => { setScreen('upload'); void run(() => upload(pending)); }}>继续上传</button><button className="quiet" disabled={busy} onClick={() => setScreen('upload')}>查看本批材料</button></div>}
-      <div className="collection-tabs"><button className="quiet" aria-pressed={state === 'collected'} disabled={busy} onClick={() => setState('collected')}>已收集</button><button className="quiet" aria-pressed={state === 'draft'} disabled={busy} onClick={() => setState('draft')}>草稿</button><button className="quiet" disabled={busy} onClick={() => setRefresh(value => value + 1)}>刷新列表</button></div>
+      <div className="section-heading"><div><p className="eyebrow">从一道题开始</p><h2>我的学习材料</h2></div>{mode === 'workspace' && <button disabled={busy} onClick={() => { setError(''); setScreen('upload'); }}>收集一道错题</button>}</div>
+      {mode === 'workspace' && pending && <div className="message"><strong>还有 {batch!.items.length} 张图片等待上传</strong><p>已上传 {batch!.uploaded} / {batch!.total} 张，已取消 {batch!.cancelled} 张</p><p>{pending.name} · 尚未同步，可继续上传</p><button disabled={busy} onClick={() => { setScreen('upload'); void run(() => upload(pending)); }}>继续上传</button><button className="quiet" disabled={busy} onClick={() => setScreen('upload')}>查看本批材料</button></div>}
+      <div className="collection-tabs">{mode === 'workspace' && <><button className="quiet" aria-pressed={state === 'collected'} disabled={busy} onClick={() => setState('collected')}>已收集</button><button className="quiet" aria-pressed={state === 'draft'} disabled={busy} onClick={() => setState('draft')}>草稿</button></>}<button className="quiet" disabled={busy} onClick={() => setRefresh(value => value + 1)}>刷新列表</button></div>
       {busy && <p>正在读取材料…</p>}
-      {!busy && list.total === 0 && <div className="empty-state"><h3>{state === 'draft' ? '还没有草稿' : '开始收集第一道错题吧'}</h3><p>{state === 'draft' ? '上传图片后，可以先保存草稿，稍后继续整理。' : '选择图片、框住题目、选好学科，就能保存。'}</p></div>}
+      {!busy && list.total === 0 && <div className="empty-state"><h3>{listState === 'draft' ? '还没有草稿' : '开始收集第一道错题吧'}</h3><p>{mode === 'home' ? '从底部“收集”开始，把材料留下来。' : listState === 'draft' ? '上传图片后，可以先保存草稿，稍后继续整理。' : '选择图片、框住题目、选好学科，就能保存。'}</p></div>}
       <div className="question-list">{list.items.map(question => <article key={question.id}>
         <div className="question-thumbnail"><QuestionImage api={api} page={question.originalPage} region={question.region} /></div>
-        <div><p className="eyebrow">{state === 'draft' ? '草稿' : '已收集'} · {subjectName(question.subjectId)}</p><h3>{question.source || '未填写来源'}{question.questionNumber ? ` · 第 ${question.questionNumber} 题` : ''}</h3><p className="hint">{state === 'collected' ? '收集于' : '暂存于'} {date(question.collectedAt ?? question.createdAt)}</p><button className="quiet" disabled={busy} onClick={() => open(question)}>{state === 'draft' ? '继续整理' : '打开错题'}</button></div>
+        <div><p className="eyebrow">{listState === 'draft' ? '草稿' : '已收集'} · {subjectName(question.subjectId)}</p><h3>{question.source || '未填写来源'}{question.questionNumber ? ` · 第 ${question.questionNumber} 题` : ''}</h3><p className="hint">{listState === 'collected' ? '收集于' : '暂存于'} {date(question.collectedAt ?? question.createdAt)}</p><button className="quiet" disabled={busy} onClick={() => open(question)}>{listState === 'draft' ? '继续整理' : '打开错题'}</button></div>
       </article>)}</div>
-      {list.items.length < list.total && <button className="quiet" disabled={busy} onClick={() => void run(async () => { const more = await api.questions(state, list.items.length); setList(current => ({ ...more, items: [...current.items, ...more.items] })); })}>加载更多</button>}
+      {list.items.length < list.total && <button className="quiet" disabled={busy} onClick={() => void run(async () => { const more = await api.questions(listState, list.items.length); setList(current => ({ ...more, items: [...current.items, ...more.items] })); })}>加载更多</button>}
     </section>}
     {screen === 'upload' && <section className="card collection-card">
       <div className="section-heading"><div><p className="eyebrow">先把材料留下来</p><h1>收集一道错题</h1></div><button className="quiet" disabled={busy} onClick={back}>返回列表</button></div>
