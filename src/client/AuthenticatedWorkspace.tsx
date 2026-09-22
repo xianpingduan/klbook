@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useContext, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { Home, ParentGrant } from '../shared/contracts.ts';
 import type { PagePath } from '../shared/app-routes.ts';
@@ -10,11 +10,13 @@ import { AdminOverview } from './AdminOverview.tsx';
 import { CollectionWorkspace } from './CollectionWorkspace.tsx';
 import { SourceManager } from './SourceManager.tsx';
 import { DeviceManager } from './DeviceManager.tsx';
+import { LeaveContext } from './navigation.ts';
 
 export function AuthenticatedWorkspace({ api, home, platform, path, navigate, onSignedOut, onRecoveryCode, notice }: {
   api: FamilyApi; home: Home; platform: ClientPlatform; path: PagePath; navigate(path: PagePath): void; onSignedOut(): Promise<void>; onRecoveryCode(code: string): void; notice: string;
 }) {
   const [grant, setGrant] = useState<ParentGrant>();
+  const { requestLeave } = useContext(LeaveContext);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [collecting, setCollecting] = useState(false);
@@ -34,12 +36,6 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
     const timer = window.setTimeout(() => { setGrant(undefined); setError('管理验证已到期，请重新验证。当前未提交内容仍保留。'); }, Math.max(0, grant.expiresAt - Date.now()));
     return () => window.clearTimeout(timer);
   }, [grant]);
-  useEffect(() => {
-    if (!collecting) return;
-    const leaving = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
-    window.addEventListener('beforeunload', leaving);
-    return () => window.removeEventListener('beforeunload', leaving);
-  }, [collecting]);
   const accessError = useCallback(async (failure: ApiError) => {
     if (failure.status === 401) { await onSignedOut(); return; }
     setGrant(undefined); setError(failure.message);
@@ -69,7 +65,7 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
     event.currentTarget.reset();
     void run(async () => { setGrant(await api.unlock(password)); });
   }
-  const lock = () => void run(async () => { if (grant) await api.lock(grant.token); setGrant(undefined); navigate('/learn'); });
+  const lock = () => requestLeave(() => void run(async () => { if (grant) await api.lock(grant.token); setGrant(undefined); navigate('/learn'); }));
   return <SurfaceLayout path={path} navigate={navigate} authenticated managing={!!grant} editing={collectionVisible && collecting} busy={busy} onLock={lock}>
     {notice && <p className="message" role="status">{notice}</p>}
     {error && <p className="message error" role="alert">{error}</p>}
@@ -77,7 +73,7 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
     {path === '/admin' && grant && <AdminOverview api={api} grant={grant.token} onAccessError={accessError} />}
     {path === '/learn' && !collecting && <section className="learn-welcome"><h1>{home.library.learnerName}的错题集</h1><div className="encouragement"><span>给自己一点鼓励</span><h2>不会的题，可以慢慢弄懂。</h2><p>每一次认真回看，都是一点进步。</p></div></section>}
     <div hidden={!collectionVisible} inert={!collectionVisible}>
-      {collectionStarted && <CollectionWorkspace api={api} home={home} platform={platform} active={collectionVisible} mode={path === '/learn' ? 'home' : 'workspace'} onEditing={setCollecting} onExpired={onSignedOut} />}
+      {collectionStarted && <CollectionWorkspace api={api} home={home} platform={platform} path={path} active={collectionVisible} mode={path === '/learn' ? 'home' : path === '/learn/collect' ? 'collect' : 'workspace'} onEditing={setCollecting} onExpired={onSignedOut} />}
     </div>
     <div hidden={path !== '/admin/sources' || !grant} inert={path !== '/admin/sources' || !grant}>
       {sourcesStarted && <section className="card"><h1>来源管理</h1><SourceManager api={api} grant={grant?.token} active={path === '/admin/sources'} onAccessError={accessError} /></section>}

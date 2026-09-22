@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import { startServer } from './server.ts';
 
+test.use({ hasTouch: true });
+
 test('相册多选逐张整理，取消单张后重开保留进度，另一设备能找回', async ({ page, browser, request }) => {
   const dataDir = await mkdtemp(join(tmpdir(), 'klbook-batch-'));
   const server = await startServer(dataDir);
@@ -22,20 +24,21 @@ test('相册多选逐张整理，取消单张后重开保留进度，另一设�
     };
     await login(page);
     await page.getByRole('button', { name: '收集', exact: true }).click();
-    await page.getByRole('button', { name: '收集一道错题' }).click();
+    await expect(page.getByLabel('从相册选择（可多选）')).toBeEnabled();
     await page.getByLabel('从相册选择（可多选）').setInputFiles(['第一张.png', '取消这张.png', '第三张.png'].map(name => ({ name, mimeType: 'image/png', buffer: image })));
-    await expect(page.getByRole('heading', { name: '整理这道题' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '框住这道题' })).toBeVisible();
     await page.getByRole('button', { name: '选择整页' }).click();
+    await page.getByRole('button', { name: '下一步，选学科' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('math');
     await page.getByRole('button', { name: '保存到错题集' }).click();
-    await page.getByRole('button', { name: '继续下一张' }).click();
     await page.getByRole('button', { name: '取消 取消这张.png', exact: true }).click();
     await expect(page.getByText('已上传 1 / 3 张，已取消 1 张', { exact: true })).toBeVisible();
     await page.reload();
     await expect(page.getByText('还有 1 张图片等待上传', { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: '继续上传', exact: true }).click();
-    await expect(page.getByRole('heading', { name: '整理这道题' })).toBeVisible();
+    await page.getByRole('button', { name: '继续上传 第三张.png', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '框住这道题' })).toBeVisible();
     await page.getByRole('button', { name: '选择整页' }).click();
+    await page.getByRole('button', { name: '下一步，选学科' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('english');
     await page.getByRole('button', { name: '保存到错题集' }).click();
     const second = await other.newPage();
@@ -58,10 +61,10 @@ test('拍照取消有退路，批量坏图可跳过，触控框题与电脑停�
     await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
     await page.getByRole('button', { name: '登录此设备' }).click();
     await page.getByRole('button', { name: '收集', exact: true }).click();
-    await page.getByRole('button', { name: '收集一道错题' }).click();
     await page.getByLabel('拍照', { exact: true }).dispatchEvent('cancel');
     await expect(page.getByRole('status')).toContainText('没有取得照片');
     const image = await sharp({ create: { width: 160, height: 100, channels: 3, background: '#edf2e4' } }).jpeg().withMetadata({ orientation: 6 }).toBuffer();
+    await expect(page.getByLabel('从相册选择（可多选）')).toBeEnabled();
     await page.getByLabel('从相册选择（可多选）').setInputFiles([
       { name: '损坏的材料.heic', mimeType: 'image/heic', buffer: Buffer.from('not an image') },
       { name: '手机拍照.jpg', mimeType: 'image/jpeg', buffer: image }
@@ -70,11 +73,11 @@ test('拍照取消有退路，批量坏图可跳过，触控框题与电脑停�
     await page.getByRole('button', { name: '取消 损坏的材料.heic', exact: true }).click();
     const port = Number(new URL(server.url).port);
     await server.stop();
-    await page.getByRole('button', { name: '重试上传' }).click();
-    await expect(page.getByRole('alert')).toContainText('无法连接家庭电脑');
+    await page.getByRole('button', { name: '继续上传 手机拍照.jpg', exact: true }).click();
+    await expect(page.getByRole('alert').filter({ hasText: /^无法连接家庭电脑，请确认电脑已开机且服务运行，再重试$/ })).toBeVisible();
     await expect(page.getByText('手机拍照.jpg', { exact: true }).first()).toBeVisible();
     server = await startServer(dataDir, port);
-    await page.getByRole('button', { name: '重试上传' }).click();
+    await page.getByRole('button', { name: '继续上传 手机拍照.jpg', exact: true }).click();
     const frame = page.getByRole('img', { name: '框选题目范围' });
     await expect(frame).toBeVisible();
     await frame.scrollIntoViewIfNeeded();
@@ -82,6 +85,7 @@ test('拍照取消有退路，批量坏图可跳过，触控框题与电脑停�
     await frame.dispatchEvent('pointerdown', { pointerId: 1, pointerType: 'touch', clientX: bounds.x + bounds.width * .1, clientY: bounds.y + bounds.height * .1 });
     await frame.dispatchEvent('pointermove', { pointerId: 1, pointerType: 'touch', clientX: bounds.x + bounds.width * .8, clientY: bounds.y + bounds.height * .6 });
     await frame.dispatchEvent('pointerup', { pointerId: 1, pointerType: 'touch', clientX: bounds.x + bounds.width * .8, clientY: bounds.y + bounds.height * .6 });
+    await page.getByRole('button', { name: '下一步，选学科' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('science');
     await page.getByRole('button', { name: '保存到错题集' }).click();
     await expect(page.getByRole('heading', { name: '错题详情' })).toBeVisible();

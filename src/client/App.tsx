@@ -5,7 +5,7 @@ import type { ClientPlatform } from './platform.ts';
 import { ApiError, FamilyApi } from './api.ts';
 import { AuthenticatedWorkspace } from './AuthenticatedWorkspace.tsx';
 import { SurfaceLayout } from './SurfaceLayout.tsx';
-import { usePage } from './navigation.ts';
+import { LeaveContext, usePage } from './navigation.ts';
 
 function Field({ label, name, type = 'text', value, autoComplete, minLength }: { label: string; name: string; type?: string; value?: string; autoComplete?: string; minLength?: number }) {
   return <label>{label}<input name={name} type={type} defaultValue={value} autoComplete={autoComplete} minLength={minLength} maxLength={name.toLowerCase().includes('password') || name.includes('Code') ? 128 : 64} required /></label>;
@@ -21,7 +21,7 @@ export function App({ platform }: { platform: ClientPlatform }) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
-  const { path, navigate } = usePage();
+  const { path, navigate, boundary } = usePage();
   const signedOut = useCallback(async () => { await api?.forget(); setHome(undefined); setScreen('login'); }, [api]);
 
   async function boot() {
@@ -65,7 +65,7 @@ export function App({ platform }: { platform: ClientPlatform }) {
     });
   }
 
-  if (screen === 'home' && home && api) return <AuthenticatedWorkspace key={home.session.id} api={api} home={home} platform={platform} path={path} navigate={navigate} notice={notice} onSignedOut={signedOut} onRecoveryCode={code => { setRecoveryCode(code); setAcknowledged(false); setScreen('save-code'); }} />;
+  if (screen === 'home' && home && api) return <LeaveContext.Provider value={boundary}><AuthenticatedWorkspace key={home.session.id} api={api} home={home} platform={platform} path={path} navigate={navigate} notice={notice} onSignedOut={signedOut} onRecoveryCode={code => { setRecoveryCode(code); setAcknowledged(false); setScreen('save-code'); }} /></LeaveContext.Provider>;
   return <SurfaceLayout path={path} navigate={navigate}>
     {error && <p role="alert" className="message error">{error}</p>}
     {notice && <p role="status" className="message">{notice}</p>}

@@ -36,12 +36,13 @@ test('家长独立管理来源并安全重试，孩子下拉选择，来源停�
     const image = await sharp(await readFile(new URL('../fixtures/paper.svg', import.meta.url))).png().toBuffer();
     const upload = async () => {
       await page.getByRole('button', { name: '收集', exact: true }).click();
-    await page.getByRole('button', { name: '收集一道错题' }).click();
+      await expect(page.getByLabel('选择题目图片')).toBeEnabled();
       await page.getByLabel('选择题目图片').setInputFiles({ name: '课堂小测.png', mimeType: 'image/png', buffer: image });
-      await expect(page.getByRole('heading', { name: '整理这道题' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '框住这道题' })).toBeVisible();
     };
     await upload();
     await page.getByRole('button', { name: '选择整页' }).click();
+    await page.getByRole('button', { name: '下一步，选学科' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption({ label: '数学' });
     await page.getByRole('combobox', { name: '来源（选填）', exact: true }).selectOption({ label: '课堂小测' });
     await page.getByRole('button', { name: '保存到错题集' }).click();
@@ -64,6 +65,8 @@ test('家长独立管理来源并安全重试，孩子下拉选择，来源停�
     await expect(page.getByText('来源停用也可以补充', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: '返回列表' }).click();
     await upload();
+    await page.getByRole('button', { name: '选择整页' }).click();
+    await page.getByRole('button', { name: '下一步，选学科' }).click();
     await expect(page.getByRole('combobox', { name: '来源（选填）', exact: true })).toHaveValue('');
     await expect(page.getByRole('option', { name: /每周课堂小测/ })).toHaveCount(0);
   } finally { await server.stop(); await rm(dataDir, { recursive: true, force: true }); }

@@ -47,8 +47,8 @@ export function CropSelector({ api, page, region, onChange, disabled }: { api: F
   return <div>
     <p className="hint">在图片上拖动，框住一道可以独立作答的小题。可以重新拖动，也可以选择整页。</p>
     {image.error && <p role="alert" className="message error">{image.error} <button onClick={image.retry}>重试加载图片</button></p>}
-    {image.url ? <div className="image-stage">
-      <img src={image.url} alt="用于框题的原始页预览" draggable={false} />
+    {image.url ? <div className="image-stage" style={{ width: `min(100%, ${62 * page.width / page.height}dvh)`, marginInline: 'auto' }}>
+      <img src={image.url} width={page.width} height={page.height} alt="用于框题的原始页预览" draggable={false} />
       <svg role="img" aria-label="框选题目范围" viewBox="0 0 1000 1000" preserveAspectRatio="none"
         onPointerDown={event => { if (disabled) return; event.preventDefault(); start.current = point(event); event.currentTarget.setPointerCapture(event.pointerId); }}
         onPointerMove={move} onPointerUp={event => { move(event); start.current = null; }} onPointerCancel={() => { start.current = null; }}>

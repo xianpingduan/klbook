@@ -24,9 +24,9 @@ test('上传、框题、保存草稿、继续收集和补充信息，第二设�
     await login(page);
     await expect(page.getByRole('button', { name: '收集', exact: true })).toBeVisible();
     await page.getByRole('button', { name: '收集', exact: true }).click();
-    await page.getByRole('button', { name: '收集一道错题' }).click();
+    await expect(page.getByLabel('选择题目图片')).toBeEnabled();
     await page.getByLabel('选择题目图片').setInputFiles({ name: '数学作业.png', mimeType: 'image/png', buffer: image });
-    await expect(page.getByRole('heading', { name: '整理这道题' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '框住这道题' })).toBeVisible();
     const frame = page.getByRole('img', { name: '框选题目范围' });
     await expect(frame).toBeVisible();
     await frame.scrollIntoViewIfNeeded();
@@ -35,12 +35,12 @@ test('上传、框题、保存草稿、继续收集和补充信息，第二设�
     await page.mouse.down();
     await page.mouse.move(bounds.x + bounds.width * .87, bounds.y + bounds.height * .22);
     await page.mouse.up();
+    await page.getByRole('button', { name: '下一步，选学科' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption({ label: '数学' });
     await page.getByRole('combobox', { name: '来源（选填）', exact: true }).selectOption({ label: '练习册' });
     await page.getByRole('button', { name: '保存草稿' }).click();
     await expect(page.getByRole('status')).toContainText('草稿已保存到家庭资料库');
     await page.getByRole('button', { name: '返回列表' }).click();
-    await page.getByRole('button', { name: '草稿', exact: true }).click();
     await page.getByRole('button', { name: '继续整理' }).click();
     await expect(page.getByRole('combobox', { name: '来源（选填）', exact: true }).locator('option:checked')).toHaveText('练习册');
     await page.getByRole('button', { name: '保存到错题集' }).click();
@@ -56,6 +56,7 @@ test('上传、框题、保存草稿、继续收集和补充信息，第二设�
     await server.stop();
     server = await startServer(dataDir, port);
     await page.reload();
+    await page.getByRole('button', { name: '首页', exact: true }).click();
     await page.getByRole('button', { name: '打开错题' }).click();
     await expect(page.getByText('还没弄懂，先记下来', { exact: true })).toBeVisible();
     const secondPage = await second.newPage();
@@ -81,7 +82,7 @@ test('写入失败和响应丢失后保留材料，重开及重复保存不会�
     await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
     await page.getByRole('button', { name: '登录此设备' }).click();
     await page.getByRole('button', { name: '收集', exact: true }).click();
-    await page.getByRole('button', { name: '收集一道错题' }).click();
+    await expect(page.getByLabel('选择题目图片')).toBeEnabled();
     await page.getByLabel('选择题目图片').setInputFiles({ name: '待恢复的作业.png', mimeType: 'image/png', buffer: image });
     await expect(page.getByRole('alert')).toContainText('图片未能完整保存');
     await expect(page.getByText('已同步到家庭资料库', { exact: true })).toHaveCount(0);
@@ -96,8 +97,9 @@ test('写入失败和响应丢失后保留材料，重开及重复保存不会�
     await page.reload();
     await page.unroute('**/api/v1/collection/drafts');
     await page.getByRole('button', { name: '继续上传' }).click();
-    await expect(page.getByRole('heading', { name: '整理这道题' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '框住这道题' })).toBeVisible();
     await page.getByRole('button', { name: '选择整页' }).click();
+    await page.getByRole('button', { name: '下一步，选学科' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption({ label: '科学' });
     await page.getByLabel('备注（选填）').fill('保存失败也不要丢掉这句话');
     await page.route('**/api/v1/collection/questions/*', async route => {
@@ -136,11 +138,12 @@ test('设备暂存不可用时，返回列表仍保留内存图片，修复存�
     await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
     await page.getByRole('button', { name: '登录此设备' }).click();
     await page.getByRole('button', { name: '收集', exact: true }).click();
-    await page.getByRole('button', { name: '收集一道错题' }).click();
     const image = await sharp(await readFile(new URL('../fixtures/paper.svg', import.meta.url))).png().toBuffer();
+    await expect(page.getByLabel('选择题目图片')).toBeEnabled();
     await page.getByLabel('选择题目图片').setInputFiles({ name: '仍在页面里的材料.png', mimeType: 'image/png', buffer: image });
     await expect(page.getByRole('alert')).toContainText('本设备暂存失败');
-    await page.getByRole('button', { name: '返回列表' }).click();
+    await page.getByRole('button', { name: '首页', exact: true }).click();
+    await page.getByRole('button', { name: '收集', exact: true }).click();
     await expect(page.getByText('还有 1 张图片等待上传', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '继续上传' })).toBeEnabled();
     await page.evaluate(() => new Promise<void>((resolve, reject) => {
@@ -149,6 +152,6 @@ test('设备暂存不可用时，返回列表仍保留内存图片，修复存�
       request.onerror = () => reject(request.error);
     }));
     await page.getByRole('button', { name: '继续上传' }).click();
-    await expect(page.getByRole('heading', { name: '整理这道题' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '框住这道题' })).toBeVisible();
   } finally { await server.stop(); await rm(dataDir, { recursive: true, force: true }); }
 });
