@@ -1,6 +1,6 @@
 # 独立界面改造任务拆分
 
-状态：用户于 2026-09-22 确认按以下 4 项发布，已创建 #29—#32，均为规格 [#28](https://github.com/xianpingduan/klbook/issues/28) 的原生子议题，标签为 ready-for-agent。正文、标签、父子关联及前置依赖均已回读核验；正式页面改造尚未开始。任务内容与状态以 GitHub Issues 为准。
+发布快照：用户于 2026-09-22 确认按以下 4 项发布，已创建 #29—#32，均为规格 [#28](https://github.com/xianpingduan/klbook/issues/28) 的原生子议题，发布时标签为 ready-for-agent。正文、标签、父子关联及前置依赖均已回读核验。任务内容与当前状态以 GitHub Issues 为准。
 
 ## 拆分方案
 
@@ -11,7 +11,7 @@
 | UI-03 | [#31 后台资料整理与来源管理](https://github.com/xianpingduan/klbook/issues/31) | [#29](https://github.com/xianpingduan/klbook/issues/29) | 家长上传、更正和管理来源，学习端看到同一份资料及新来源状态 |
 | UI-04 | [#32 后台设备、账号恢复与管理退出](https://github.com/xianpingduan/klbook/issues/32) | [#29](https://github.com/xianpingduan/klbook/issues/29) | 家长撤销设备、管理恢复码、结束管理；真实会话权限随操作正确失效 |
 
-当前正在实施 #29，独立入口与管理概览已接入真实流程，验证进度见[实施记录](verification/issue-29.md)；它完成后，#30、#31、#32 可按需要独立推进。共享代码改动需要协调，但不人为添加业务阻塞关系。UI-01—UI-04 是方案编号，与 GitHub 议题编号分别记录。上方发布状态为发布时快照。
+#29 已完成独立入口、真实登录与管理概览，18 个 API 和 36 个浏览器用例及旧版升级验证通过，详见[实施记录](verification/issue-29.md)。#30、#31、#32 可以分别推进，下一项建议 #30 学习端收集、查阅与草稿续接。共享代码改动需要协调，但不人为添加业务阻塞关系。UI-01—UI-04 是方案编号，与 GitHub 议题编号分别记录。
 
 ## 发布核验
 

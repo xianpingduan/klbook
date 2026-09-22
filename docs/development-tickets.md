@@ -65,7 +65,7 @@
 - [#31 后台资料整理与来源管理](https://github.com/xianpingduan/klbook/issues/31)：仅依赖 #29。
 - [#32 后台设备、账号恢复与管理退出](https://github.com/xianpingduan/klbook/issues/32)：仅依赖 #29。
 
-四项均已原生关联父规格 #28，共 36 条验收标准、3 条原生前置依赖，详见[界面改造任务索引](ui-separation-tickets.md)。用户已要求实施下一步，#29 正在接入独立入口与真实管理概览，详见[验证记录](verification/issue-29.md)；原有 24 项和 #4 的真机状态保持不变。
+四项均已原生关联父规格 #28，共 36 条验收标准、3 条原生前置依赖，详见[界面改造任务索引](ui-separation-tickets.md)。#29 已实现独立入口与真实管理概览，通过 18 个 API、36 个浏览器用例及原址升级验证，详见[验证记录](verification/issue-29.md)；下一项建议 #30。原有 24 项和 #4 的真机状态保持不变。
 
 ## 后续移动安装与商店发布
 
