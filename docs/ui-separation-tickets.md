@@ -11,7 +11,7 @@
 | UI-03 | [#31 后台资料整理与来源管理](https://github.com/xianpingduan/klbook/issues/31) | [#29](https://github.com/xianpingduan/klbook/issues/29) | 家长上传、更正和管理来源，学习端看到同一份资料及新来源状态 |
 | UI-04 | [#32 后台设备、账号恢复与管理退出](https://github.com/xianpingduan/klbook/issues/32) | [#29](https://github.com/xianpingduan/klbook/issues/29) | 家长撤销设备、管理恢复码、结束管理；真实会话权限随操作正确失效 |
 
-#29 已完成独立入口、真实登录与管理概览，18 个 API 和 36 个浏览器用例及旧版升级验证通过，详见[实施记录](verification/issue-29.md)。#30、#31、#32 可以分别推进，下一项建议 #30 学习端收集、查阅与草稿续接。共享代码改动需要协调，但不人为添加业务阻塞关系。UI-01—UI-04 是方案编号，与 GitHub 议题编号分别记录。
+#29 已完成独立入口、真实登录与管理概览，详见[实施记录](verification/issue-29.md)。#30 已实现学习端精简入口、分步收集、草稿续接及离开保护；18 个 API、三引擎 57 个浏览器场景、原址升级与双路审查完成，新版真机待验证，议题保持开放并转为 ready-for-human，详见[验证记录](verification/issue-30.md)。下一开发项建议 #31 后台资料整理与来源管理。#31、#32 仅依赖已完成的 #29，可以分别推进；共享代码改动需要协调，不人为添加业务阻塞关系。UI-01—UI-04 是方案编号，与 GitHub 议题编号分别记录。
 
 ## 发布核验
 
