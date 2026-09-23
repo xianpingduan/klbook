@@ -71,6 +71,8 @@
 
 2026-09-23，#6 已实现共享阅读材料、跨页有序原文、独立小题引用与解除关联保护；24 项 API 与三引擎 108 项浏览器场景均取得通过结果（完整回归中的测试等待问题修正后定向复验通过），本机资料备份升级核验完成。以用户确认的 `c4bb9fb` 为基线，Standards 与 Spec 各 1 项 P2 均已修复，独立复核无未解决项；另修复新建原文漏带刚保存页面的边界。证据见 [#6 验证记录](verification/issue-6.md)。下一项为 [#7 关联纸质答案并允许后补](https://github.com/xianpingduan/klbook/issues/7)，议题状态以 GitHub 为准。
 
+2026-09-23，#7 已实现同页与另页纸质答案后补、有序解答区、共享答案页及解除关联保护；答案选填，原始手写、批改和图形保留。构建、27 项 API 与三引擎 114 项浏览器完整回归全部通过，隔离旧版原址升级及本机备份更新核验完成。以用户确认的 `1d8fac5` 为基线，Standards 初审 2 项（P2/P3）与 Spec 初审 2 项 P2 均已修复，独立复核无未解决项。操作与证据见 [纸质答案](paper-answers.md)及 [#7 验证记录](verification/issue-7.md)。下一项为 [#8 扩展学科并按学习阶段查找](https://github.com/xianpingduan/klbook/issues/8)，仅依赖已完成的 #3；#4/#30 真机待验仍单独保留。
+
 ## 后续移动安装与商店发布
 
 2026-09-18 用户补充最终交付 Android APK 和 iOS App Store App，并确认目前没有 Mac/开发者会员、先预留发布方案。已登记 [后续移动交付里程碑 #26](https://github.com/xianpingduan/klbook/issues/26)，标签为 `needs-triage`；它是后续范围跟踪，尚未细拆为可直接执行的开发任务。
