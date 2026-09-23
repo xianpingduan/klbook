@@ -14,10 +14,17 @@ export function StudyManager(props: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [refresh, setRefresh] = useState(0);
+  const [formVersion, setFormVersion] = useState(0);
+  const formProtected = useRef(false);
   useEffect(() => {
     if (!active || !grant) return;
     let live = true; setLoading(true); setError('');
-    void Promise.all([api.subjects(), api.studySettings(grant)]).then(([subjects, settings]) => { if (live) setData({ subjects, settings }); }).catch(async failure => {
+    void Promise.all([api.subjects(), api.studySettings(grant)]).then(([subjects, settings]) => {
+      if (!live) return;
+      setData({ subjects, settings });
+      // Clean forms may adopt the authoritative read; reauthorization must preserve pending edits.
+      if (!formProtected.current) setFormVersion(value => value + 1);
+    }).catch(async failure => {
       if (!live) return;
       if (failure instanceof ApiError && [401, 403].includes(failure.status)) await onAccessError(failure);
       else setError(failure instanceof Error ? failure.message : '读取设置失败');
@@ -27,11 +34,11 @@ export function StudyManager(props: Props) {
   return <section className="card study-manager"><h1>学科与学习阶段</h1>
     {loading && <p role="status">正在读取设置…</p>}
     {error && <p className="message error" role="alert">{error}<button className="quiet" disabled={loading || !grant || !active} onClick={() => setRefresh(value => value + 1)}>重试读取设置</button></p>}
-    {data && <StudyForm {...props} data={data} loading={loading} onSubject={subject => setData(value => value && ({ ...value, subjects: [...value.subjects.filter(item => item.id !== subject.id), subject] }))} onReload={() => { setData(undefined); setRefresh(value => value + 1); }} />}
+    {data && <StudyForm key={formVersion} {...props} data={data} loading={loading} onProtectedChange={value => { formProtected.current = value; }} onSubject={subject => setData(value => value && ({ ...value, subjects: [...value.subjects.filter(item => item.id !== subject.id), subject] }))} onReload={() => { setData(undefined); setRefresh(value => value + 1); }} />}
   </section>;
 }
-function StudyForm({ api, grant, active, onAccessError, data, loading, onSubject, onReload }: Props & {
-  data: { subjects: Subject[]; settings: StudySettings }; loading: boolean; onSubject(subject: Subject): void; onReload(): void;
+function StudyForm({ api, grant, active, onAccessError, data, loading, onSubject, onReload, onProtectedChange }: Props & {
+  data: { subjects: Subject[]; settings: StudySettings }; loading: boolean; onSubject(subject: Subject): void; onReload(): void; onProtectedChange(value: boolean): void;
 }) {
   const [stage, setStage] = useState(data.settings.stage);
   const [name, setName] = useState('');
@@ -44,6 +51,7 @@ function StudyForm({ api, grant, active, onAccessError, data, loading, onSubject
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const saver = useRevisionedSave({ initial: data.settings, contentOf: value => ({ stage: value.stage }), persist: input => api.saveStudySettings(grant!, input), conflictMessage: '学习阶段已在其他页面更新，请重新读取设置后核对' });
   const dirtyStage = JSON.stringify(stage) !== baseline.current;
+  useEffect(() => { onProtectedChange(dirtyStage || !!name || busy); }, [dirtyStage, name, busy, onProtectedChange]);
   const leave = useEditorLeave({ dirty: dirtyStage || !!name, busy, canSave: active && !!grant && !loading, title: '学科与学习阶段还有未保存的修改', error,
     description: <p>保存设置只影响之后新建的记录；已收集题目和已暂存材料保留原归属。</p>, save: () => save('all'),
     discard: () => { const saved = saver.discard(); setStage(saved.stage); baseline.current = JSON.stringify(saved.stage); setName(''); subjectId.current = crypto.randomUUID(); } });
@@ -59,7 +67,7 @@ function StudyForm({ api, grant, active, onAccessError, data, loading, onSubject
         onSubject(saved); setName(''); subjectId.current = crypto.randomUUID(); setNotice('学科已添加，收集和查找时可以选择。');
       }
       if (kind === 'stage' || (kind === 'all' && dirtyStage)) {
-        const saved = await saver.save({ stage });
+        const saved = await saver.save({ stage }, true);
         if (!mounted.current) return false;
         setStage(saved.stage); baseline.current = JSON.stringify(saved.stage); setNotice('学习阶段已保存，只影响之后新建的记录。');
       }

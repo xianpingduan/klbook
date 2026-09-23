@@ -109,6 +109,13 @@ test('管理设置保护未保存输入，新增和保存响应丢失可重试�
     await expect(page.getByRole('alert')).toContainText('其他页面更新'); await expect(page.getByRole('combobox', { name: '学期（选填）', exact: true })).toHaveValue('second');
     await page.getByRole('button', { name: '重新读取设置', exact: true }).click(); await page.getByRole('button', { name: '放弃本次修改并离开', exact: true }).click();
     await expect(page.getByRole('textbox', { name: '学年（选填）', exact: true })).toHaveValue('');
+    await page.getByRole('button', { name: '来源管理', exact: true }).click();
+    expect((await request.put(`${server.url}/api/v1/admin/study-settings`, { headers: { ...headers, 'X-Parent-Authorization': grant.token }, data: { operationId: crypto.randomUUID(), expectedRevision: 4, stage: { schoolYear: '2027-2028', grade: '初中一年级', term: 'first' } } })).ok()).toBeTruthy();
+    await page.getByRole('button', { name: '学科与学习阶段', exact: true }).click();
+    await expect(page.getByRole('textbox', { name: '学年（选填）', exact: true })).toHaveValue('2027-2028');
+    expect((await request.put(`${server.url}/api/v1/admin/study-settings`, { headers: { ...headers, 'X-Parent-Authorization': grant.token }, data: { operationId: crypto.randomUUID(), expectedRevision: 5, stage: { schoolYear: null, grade: null, term: null } } })).ok()).toBeTruthy();
+    await page.getByRole('button', { name: '保存学习阶段', exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText('其他页面更新');
     await page.screenshot({ path: 'test-results/study-admin.png', fullPage: true });
   } finally { await server.stop(); await rm(dir, { recursive: true, force: true }); }
 });

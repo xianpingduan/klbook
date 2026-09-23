@@ -21,9 +21,10 @@ export function useRevisionedSave<Value extends { revision: number }, Content ex
     }
   }
   return {
-    async save(desired: Content) {
+    async save(desired: Content, verifyUnchanged = false) {
+      const replayed = !!pending.current;
       if (pending.current) await send(pending.current);
-      if (!current.current.revision || JSON.stringify(desired) !== JSON.stringify(contentOf(current.current))) {
+      if (!current.current.revision || JSON.stringify(desired) !== JSON.stringify(contentOf(current.current)) || (verifyUnchanged && !replayed)) {
         await send({ ...desired, operationId: crypto.randomUUID(), expectedRevision: current.current.revision });
       }
       return current.current;
