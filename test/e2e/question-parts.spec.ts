@@ -74,8 +74,28 @@ test('手机尺寸学习端追加图片，未确认的新范围阻止保存离�
   try {
     const draft = await (await request.post(`${f.url}/api/v1/collection/drafts`, { headers: { ...f.headers, 'Content-Type': 'image/png', 'Idempotency-Key': crypto.randomUUID() }, data: f.bytes })).json();
     await request.put(`${f.url}/api/v1/collection/questions/${draft.id}`, { headers: f.headers, data: { operationId: crypto.randomUUID(), expectedRevision: 1, state: 'collected', region: { x: 0, y: 0, width: 1, height: 1 }, subjectId: 'math', sourceId: null, pageNumber: '', questionNumber: '', note: '' } });
+    const storageTab = await page.context().newPage();
+    await storageTab.goto(f.url);
+    // A real pending write transaction delays another tab's draft read without replacing the storage adapter.
+    await storageTab.evaluate(() => new Promise<void>((resolve, reject) => {
+      const opening = indexedDB.open('klbook-device-drafts', 1);
+      opening.onupgradeneeded = () => opening.result.createObjectStore('drafts');
+      opening.onerror = () => reject(opening.error);
+      opening.onsuccess = () => {
+        const db = opening.result;
+        const transaction = db.transaction('drafts', 'readwrite');
+        let released = false;
+        Reflect.set(window, 'releaseDraftRead', () => { released = true; });
+        const keepActive = () => { const read = transaction.objectStore('drafts').get('test-lock'); read.onsuccess = () => { resolve(); if (!released) keepActive(); }; };
+        transaction.oncomplete = () => db.close();
+        keepActive();
+      };
+    }));
     await page.setViewportSize({ width: 390, height: 844 });
     await login(page, `${f.url}/learn`);
+    await expect(page.getByRole('button', { name: '打开错题', exact: true })).toBeDisabled();
+    await storageTab.evaluate(() => Reflect.get(window, 'releaseDraftRead')());
+    await storageTab.close();
     await page.getByRole('button', { name: '打开错题', exact: true }).click();
     await page.getByRole('button', { name: '补充或更正信息' }).click();
     await expect(page.getByLabel('追加跨页图片')).toBeEnabled();
