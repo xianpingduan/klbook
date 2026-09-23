@@ -4,6 +4,8 @@ import { serverOrigin } from './platform.ts';
 import type { AnswerEdit, AnswerPageList, OriginalPage, Question, QuestionCreate, QuestionEdit, QuestionList, Subject } from '../shared/collection.ts';
 import type { Source, SourceEdit } from '../shared/sources.ts';
 import type { ReadingMaterial, ReadingMaterialEdit, ReadingMaterialList } from '../shared/reading-materials.ts';
+import type { StudySettings, StudySettingsEdit, StudyStage } from '../shared/study.ts';
+import type { FilterOptions, QuestionFilters } from '../shared/collection.ts';
 
 export class ApiError extends Error {
   status: number;
@@ -50,6 +52,10 @@ export class FamilyApi {
     return response.status === 204 ? undefined as T : response.json();
   }
   subjects() { return this.request<Subject[]>('/collection/subjects'); }
+  addSubject(grant: string, id: string, name: string) { return this.request<Subject>(`/admin/subjects/${encodeURIComponent(id)}`, 'PUT', { name }, grant); }
+  studySettings(grant?: string) { return this.request<StudySettings>(grant ? '/admin/study-settings' : '/collection/study-settings', 'GET', undefined, grant); }
+  saveStudySettings(grant: string, input: StudySettingsEdit) { return this.request<StudySettings>('/admin/study-settings', 'PUT', input, grant); }
+  filterOptions(grant?: string) { return this.request<FilterOptions>('/collection/filter-options', 'GET', undefined, grant); }
   answerPages(offset = 0, grant?: string) { return this.request<AnswerPageList>(`/collection/answer-pages?offset=${offset}`, 'GET', undefined, grant); }
   saveAnswers(id: string, input: AnswerEdit, grant?: string) { return this.request<Question>(`/collection/questions/${encodeURIComponent(id)}/answers`, 'PUT', input, grant); }
   readingMaterials(offset = 0, grant?: string) { return this.request<ReadingMaterialList>(`/collection/reading-materials?offset=${offset}`, 'GET', undefined, grant); }
@@ -58,14 +64,18 @@ export class FamilyApi {
   sources() { return this.request<Source[]>('/collection/sources'); }
   managedSources(grant: string) { return this.request<Source[]>('/admin/sources', 'GET', undefined, grant); }
   saveSource(grant: string, id: string, input: SourceEdit) { return this.request<Source>(`/admin/sources/${encodeURIComponent(id)}`, 'PUT', input, grant); }
-  questions(state: 'draft' | 'collected', offset = 0, grant?: string) { return this.request<QuestionList>(`/collection/questions?state=${state}&offset=${offset}`, 'GET', undefined, grant); }
+  questions(state: 'draft' | 'collected', offset = 0, grant?: string, filters: QuestionFilters = {}) {
+    const query = new URLSearchParams({ state, offset: String(offset) });
+    for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
+    return this.request<QuestionList>(`/collection/questions?${query}`, 'GET', undefined, grant);
+  }
   question(id: string, grant?: string) { return this.request<Question>(`/collection/questions/${encodeURIComponent(id)}`, 'GET', undefined, grant); }
   saveQuestion(id: string, input: QuestionEdit, grant?: string) { return this.request<Question>(`/collection/questions/${encodeURIComponent(id)}`, 'PUT', input, grant); }
   createQuestion(pageId: string, input: QuestionCreate, grant?: string) { return this.request<Question>(`/collection/pages/${encodeURIComponent(pageId)}/questions`, 'POST', input, grant); }
-  uploadImage(file: Blob, operationId: string, grant?: string) { return this.upload<Question>('drafts', file, operationId, grant); }
+  uploadImage(file: Blob, operationId: string, grant?: string, stage?: StudyStage) { return this.upload<Question>('drafts', file, operationId, grant, stage); }
   uploadPage(file: Blob, operationId: string, grant?: string) { return this.upload<OriginalPage>('pages', file, operationId, grant); }
-  private async upload<T>(target: 'drafts' | 'pages', file: Blob, operationId: string, grant?: string): Promise<T> {
-    const response = await this.send(`/collection/${target}`, { method: 'POST', body: file, headers: { 'Content-Type': ['image/jpeg', 'image/png', 'image/webp'].includes(file.type) ? file.type : 'image/png', 'Idempotency-Key': operationId, ...(grant ? { 'X-Parent-Authorization': grant } : {}) } });
+  private async upload<T>(target: 'drafts' | 'pages', file: Blob, operationId: string, grant?: string, stage?: StudyStage): Promise<T> {
+    const response = await this.send(`/collection/${target}`, { method: 'POST', body: file, headers: { 'Content-Type': ['image/jpeg', 'image/png', 'image/webp'].includes(file.type) ? file.type : 'image/png', 'Idempotency-Key': operationId, ...(grant ? { 'X-Parent-Authorization': grant } : {}), ...(stage ? { 'X-Learning-Stage': encodeURIComponent(JSON.stringify(stage)) } : {}) } });
     return response.json();
   }
   async pageImage(pageId: string, variant: 'original' | 'preview') {

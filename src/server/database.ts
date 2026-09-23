@@ -98,7 +98,15 @@ const migrations = [
     pageId TEXT NOT NULL REFERENCES originalPages(id), position INTEGER NOT NULL, region TEXT NOT NULL,
     PRIMARY KEY(questionId, id), UNIQUE(questionId, position)
   );
-  CREATE INDEX answerPartsByPage ON answerParts(pageId);`
+  CREATE INDEX answerPartsByPage ON answerParts(pageId);`,
+  `ALTER TABLE questions ADD COLUMN schoolYear TEXT;
+  ALTER TABLE questions ADD COLUMN grade TEXT;
+  ALTER TABLE questions ADD COLUMN term TEXT;
+  CREATE INDEX questionsByStage ON questions(libraryId, state, schoolYear, grade, term);
+  CREATE INDEX questionsByCollectionDate ON questions(libraryId, state, collectedAt);
+  CREATE TABLE studySettings (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), revision INTEGER NOT NULL, schoolYear TEXT, grade TEXT, term TEXT);
+  INSERT INTO studySettings VALUES (1, 0, NULL, NULL, NULL);
+  CREATE TABLE studyOperations (libraryId TEXT NOT NULL, accountId TEXT NOT NULL, operationId TEXT NOT NULL, requestHash TEXT NOT NULL, PRIMARY KEY(libraryId, accountId, operationId));`
 ];
 
 export function openDatabase(dataDir: string) {

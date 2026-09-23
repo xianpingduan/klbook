@@ -1,4 +1,6 @@
 import type { ReadingMaterial } from './reading-materials.ts';
+import type { StudyStage } from './study.ts';
+import type { Source } from './sources.ts';
 
 export interface Subject { id: string; name: string }
 export interface Region { x: number; y: number; width: number; height: number }
@@ -20,16 +22,20 @@ export interface Question {
   parts: QuestionPart[];
   readingMaterial: ReadingMaterial | null;
   answerParts: QuestionPart[];
+  studyStage: StudyStage;
 }
 export interface AnswerEdit { operationId: string; expectedRevision: number; parts: QuestionPartEdit[] }
 export interface AnswerPageList { items: OriginalPage[]; total: number; offset: number; limit: number }
 export interface QuestionList { items: Question[]; total: number; offset: number; limit: number }
+export interface QuestionFilters { subjectId?: string; schoolYear?: string; grade?: string; term?: string; sourceId?: string; collectedFrom?: string; collectedBefore?: string }
+export interface FilterOptions { schoolYears: string[]; grades: string[]; sources: Source[] }
 export interface QuestionEdit {
   operationId: string; expectedRevision: number; state: 'draft' | 'collected';
   subjectId: string | null; region: Region | null;
   sourceId?: string | null; source?: string; pageNumber: string; questionNumber: string; note: string;
   parts?: QuestionPartEdit[];
   readingMaterialId?: string | null;
+  studyStage?: StudyStage;
 }
 export type QuestionCreate = Omit<QuestionEdit, 'expectedRevision'>;
 export const MAX_IMAGE_BYTES = 15 * 1024 * 1024;

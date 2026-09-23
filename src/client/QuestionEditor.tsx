@@ -12,9 +12,10 @@ import { NewQuestionFromPage } from './NewQuestionFromPage.tsx';
 import { ReadingMaterialPicker } from './ReadingMaterialPicker.tsx';
 import { ReadingMaterialView } from './ReadingMaterialView.tsx';
 import { AnswerView } from './AnswerView.tsx';
+import { StudyStageFields } from './StudyStageFields.tsx';
 
 function editable(question: Question) {
-  return { subjectId: question.subjectId, parts: question.parts, sourceId: question.sourceId, pageNumber: question.pageNumber, questionNumber: question.questionNumber, note: question.note, readingMaterialId: question.readingMaterial?.id ?? null };
+  return { subjectId: question.subjectId, parts: question.parts, sourceId: question.sourceId, pageNumber: question.pageNumber, questionNumber: question.questionNumber, note: question.note, readingMaterialId: question.readingMaterial?.id ?? null, studyStage: question.studyStage };
 }
 
 export function QuestionEditor({ api, question, subjects, sources, active, admin = false, creating = false, externalBusy = false, grant, pageCache, onSaved, onBack, onAccessError, onNewFromPage, onReading, onAnswers }: {
@@ -115,6 +116,8 @@ export function QuestionEditor({ api, question, subjects, sources, active, admin
         <label>学科<select value={fields.subjectId ?? ''} onChange={event => setFields(current => ({ ...current, subjectId: event.target.value || null }))}><option value="">请选择</option>{subjects.map(subject => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></label>
         <p className="hint">确认范围和学科就可以收集，答案和总结可以以后再补。</p>
         <h2>顺手记一点（选填）</h2>
+        <StudyStageFields value={fields.studyStage} onChange={studyStage => setFields(current => ({ ...current, studyStage }))} />
+        <p className="hint">填写材料实际所属的学习阶段；更正不会改变收集日期。</p>
         <label>来源（选填）<select value={fields.sourceId ?? ''} onChange={event => setFields(current => ({ ...current, sourceId: event.target.value || null }))}>
           <option value="">暂不填写</option>
           {question.sourceId && !sources.some(source => source.id === question.sourceId) && <option value={question.sourceId} disabled>{question.source}（已停用）</option>}

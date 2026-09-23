@@ -253,3 +253,10 @@ select:focus-visible, textarea:focus-visible { outline: 3px solid #ceac53; outli
 .answer-page-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 1rem; }
 .answer-page-list > div { max-width: 240px; min-width: 0; }
 .answer-page-list .paper-image { max-height: 220px; object-fit: contain; }
+.study-fields, .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 12px; }
+.study-manager > h1 { margin-bottom: 24px; }
+.study-manager h2 { margin-top: 24px; }
+.study-manager .table-scroll { margin-top: 20px; }
+.question-filters { margin: 16px 0; padding: 12px 16px; background: #f4f8f6; border: 1px solid #dce5df; border-radius: 12px; }
+.question-filters summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
+.study-stage { color: var(--muted); overflow-wrap: anywhere; }

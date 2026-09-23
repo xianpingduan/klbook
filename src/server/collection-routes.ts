@@ -2,9 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import type { FamilyAccess } from './family-access.ts';
 import { CollectionStore } from './collection-store.ts';
 import { MAX_IMAGE_BYTES } from '../shared/collection.ts';
-import type { AnswerEdit, QuestionCreate, QuestionEdit } from '../shared/collection.ts';
+import type { AnswerEdit, QuestionCreate, QuestionEdit, QuestionFilters } from '../shared/collection.ts';
 import { AccessError } from './family-access.ts';
 import type { ReadingMaterialEdit } from '../shared/reading-materials.ts';
+import { stageSchema } from './study-routes.ts';
+import { normalizeStage } from './study.ts';
 
 const regionSchema = { anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], properties: {
   x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 },
@@ -22,6 +24,7 @@ const createBody = {
     } } },
     sourceId: { type: ['string', 'null'], format: 'uuid' }, source: { type: 'string', maxLength: 200 },
     readingMaterialId: { type: ['string', 'null'], format: 'uuid' },
+    studyStage: stageSchema,
     pageNumber: { type: 'string', maxLength: 32 }, questionNumber: { type: 'string', maxLength: 32 }, note: { type: 'string', maxLength: 2000 }
   }
 };
@@ -36,6 +39,7 @@ export function collectionRoutes(app: FastifyInstance, access: FamilyAccess, col
     routes.addHook('onRequest', async request => { authorize(request.headers); });
     routes.addContentTypeParser(['image/jpeg', 'image/png', 'image/webp'], { parseAs: 'buffer', bodyLimit: MAX_IMAGE_BYTES }, (_request, body, done) => done(null, body));
     routes.get('/subjects', async () => collection.subjects());
+    routes.get('/filter-options', async request => collection.filterOptions(authorize(request.headers).library.id));
     routes.get<{ Querystring: { offset?: string } }>('/answer-pages', { schema: { querystring: { type: 'object', additionalProperties: false, properties: { offset: { type: 'string', pattern: '^[0-9]{1,7}$' } } } } }, async request => collection.answerPages(authorize(request.headers).library.id, Number(request.query.offset ?? 0)));
     routes.put<{ Params: { id: string }; Body: AnswerEdit }>('/questions/:id/answers', { schema: { params: idParams, body: {
       type: 'object', additionalProperties: false, required: ['operationId', 'expectedRevision', 'parts'], properties: {
@@ -53,12 +57,23 @@ export function collectionRoutes(app: FastifyInstance, access: FamilyAccess, col
       type: 'object', required: ['idempotency-key'], properties: { 'idempotency-key': { type: 'string', format: 'uuid' } }
     } } }, async (request, reply) => {
       if (!Buffer.isBuffer(request.body)) throw new AccessError(415, '请选择 JPEG、PNG 或 WebP 图片文件');
-      const upload = path === '/drafts' ? collection.upload.bind(collection) : collection.uploadPage.bind(collection);
-      return reply.code(201).send(await upload(() => authorize(request.headers), request.headers['idempotency-key'], request.body));
+      let stage;
+      if (path === '/drafts' && request.headers['x-learning-stage'] !== undefined) {
+        try { stage = normalizeStage(JSON.parse(decodeURIComponent(String(request.headers['x-learning-stage'])))); }
+        catch { throw new AccessError(422, '暂存的学习阶段格式不正确，请核对材料后重试'); }
+      }
+      const result = path === '/drafts' ? await collection.upload(() => authorize(request.headers), request.headers['idempotency-key'], request.body, stage)
+        : await collection.uploadPage(() => authorize(request.headers), request.headers['idempotency-key'], request.body);
+      return reply.code(201).send(result);
     });
-    routes.get<{ Querystring: { state: 'draft' | 'collected'; offset?: string } }>('/questions', { schema: { querystring: {
-      type: 'object', required: ['state'], additionalProperties: false, properties: { state: { enum: ['draft', 'collected'] }, offset: { type: 'string', pattern: '^[0-9]{1,7}$' } }
-    } } }, async request => collection.list(access.home(token(request.headers.authorization)).library.id, request.query.state, Number(request.query.offset ?? 0)));
+    routes.get<{ Querystring: QuestionFilters & { state: 'draft' | 'collected'; offset?: string } }>('/questions', { schema: { querystring: {
+      type: 'object', required: ['state'], additionalProperties: false, properties: {
+        state: { enum: ['draft', 'collected'] }, offset: { type: 'string', pattern: '^[0-9]{1,7}$' },
+        subjectId: { type: 'string', minLength: 1, maxLength: 64 }, sourceId: { anyOf: [{ const: '__unset__' }, { type: 'string', format: 'uuid' }] },
+        schoolYear: { type: 'string', pattern: '^(\\d{4}-\\d{4}|__unset__)$' }, grade: { type: 'string', minLength: 1, maxLength: 40 }, term: { enum: ['first', 'second', '__unset__'] },
+        collectedFrom: { type: 'string', pattern: '^[0-9]{1,15}$' }, collectedBefore: { type: 'string', pattern: '^[0-9]{1,15}$' }
+      }
+    } } }, async request => collection.list(authorize(request.headers).library.id, request.query.state, Number(request.query.offset ?? 0), request.query));
     routes.get<{ Params: { id: string } }>('/questions/:id', async request => collection.get(access.home(token(request.headers.authorization)).library.id, request.params.id));
     routes.post<{ Params: { id: string }; Body: QuestionCreate }>('/pages/:id/questions', { schema: { params: idParams, body: createBody } }, async (request, reply) => reply.code(201).send(await collection.create(() => authorize(request.headers), request.params.id, request.body)));
     routes.put<{ Params: { id: string }; Body: QuestionEdit }>('/questions/:id', { schema: {

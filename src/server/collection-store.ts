@@ -8,8 +8,11 @@ import { Attachments, fileHash } from './attachments.ts';
 import type { StoredPage } from './attachments.ts';
 import { Sources } from './sources.ts';
 import { ReadingMaterials } from './reading-materials.ts';
+import { Study, normalizeStage } from './study.ts';
+import type { StudyStage } from '../shared/study.ts';
+import type { FilterOptions, QuestionFilters } from '../shared/collection.ts';
 
-interface QuestionRow extends Omit<Question, 'originalPage' | 'parts' | 'region' | 'syncState' | 'readingMaterial' | 'answerParts'> { originalPageId: string; region: string | null }
+interface QuestionRow extends Omit<Question, 'originalPage' | 'parts' | 'region' | 'syncState' | 'readingMaterial' | 'answerParts' | 'studyStage'>, StudyStage { originalPageId: string; region: string | null }
 export class CollectionStore {
   private db: Database.Database;
   private files: Attachments;
@@ -40,17 +43,32 @@ export class CollectionStore {
   get(libraryId: string, id: string): Question {
     const row = this.db.prepare<[string, string], QuestionRow>('SELECT * FROM questions WHERE libraryId = ? AND id = ?').get(libraryId, id);
     if (!row) throw new AccessError(404, '找不到这道题');
-    const { originalPageId, region, ...rest } = row;
+    const { originalPageId, region, schoolYear, grade, term, ...rest } = row;
     const parts = this.db.prepare<[string], { id: string; pageId: string; region: string | null }>('SELECT id, pageId, region FROM questionParts WHERE questionId = ? ORDER BY position').all(id)
       .map(part => ({ id: part.id, originalPage: this.publicPage(libraryId, part.pageId), region: part.region ? JSON.parse(part.region) as Region : null }));
     const reading = this.db.prepare<[string], { materialId: string }>('SELECT materialId FROM questionReadings WHERE questionId = ?').get(id);
     const answerParts = this.db.prepare<[string], { id: string; pageId: string; region: string }>('SELECT id, pageId, region FROM answerParts WHERE questionId = ? ORDER BY position').all(id)
       .map(part => ({ id: part.id, originalPage: this.publicPage(libraryId, part.pageId), region: JSON.parse(part.region) as Region }));
-    return { ...rest, source: rest.sourceId ? this.sources.get(rest.sourceId).name : rest.source, region: region ? JSON.parse(region) as Region : null, originalPage: this.publicPage(libraryId, originalPageId), parts, answerParts, readingMaterial: reading ? this.readings.get(libraryId, reading.materialId) : null, syncState: 'synced' };
+    return { ...rest, studyStage: { schoolYear, grade, term }, source: rest.sourceId ? this.sources.get(rest.sourceId).name : rest.source, region: region ? JSON.parse(region) as Region : null, originalPage: this.publicPage(libraryId, originalPageId), parts, answerParts, readingMaterial: reading ? this.readings.get(libraryId, reading.materialId) : null, syncState: 'synced' };
   }
-  list(libraryId: string, state: 'draft' | 'collected', offset: number): QuestionList {
-    const ids = this.db.prepare<[string, string, number], { id: string }>('SELECT id FROM questions WHERE libraryId = ? AND state = ? ORDER BY createdAt DESC, id LIMIT 50 OFFSET ?').all(libraryId, state, offset);
-    const total = this.db.prepare<[string, string], { count: number }>('SELECT COUNT(*) AS count FROM questions WHERE libraryId = ? AND state = ?').get(libraryId, state)!.count;
+  filterOptions(libraryId: string): FilterOptions {
+    const values = (column: 'schoolYear' | 'grade') => this.db.prepare<[string], { value: string }>(`SELECT DISTINCT ${column} AS value FROM questions WHERE libraryId = ? AND ${column} IS NOT NULL ORDER BY ${column} DESC`).all(libraryId).map(row => row.value);
+    return { schoolYears: values('schoolYear'), grades: values('grade'), sources: this.sources.list(true) };
+  }
+  list(libraryId: string, state: 'draft' | 'collected', offset: number, filters: QuestionFilters = {}): QuestionList {
+    const clauses = ['libraryId = ?', 'state = ?'];
+    const values: (string | number)[] = [libraryId, state];
+    for (const key of ['subjectId', 'schoolYear', 'grade', 'term', 'sourceId'] as const) {
+      if (!filters[key]) continue;
+      if (filters[key] === '__unset__') clauses.push(`${key} IS NULL`);
+      else { clauses.push(`${key} = ?`); values.push(filters[key]); }
+    }
+    if (filters.collectedFrom && filters.collectedBefore && Number(filters.collectedFrom) >= Number(filters.collectedBefore)) throw new AccessError(422, '收集日期的开始时间需早于结束时间');
+    if (filters.collectedFrom) { clauses.push('collectedAt >= ?'); values.push(Number(filters.collectedFrom)); }
+    if (filters.collectedBefore) { clauses.push('collectedAt < ?'); values.push(Number(filters.collectedBefore)); }
+    const where = clauses.join(' AND ');
+    const ids = this.db.prepare<(string | number)[], { id: string }>(`SELECT id FROM questions WHERE ${where} ORDER BY createdAt DESC, id LIMIT 50 OFFSET ?`).all(...values, offset);
+    const total = this.db.prepare<(string | number)[], { count: number }>(`SELECT COUNT(*) AS count FROM questions WHERE ${where}`).get(...values)!.count;
     return { items: ids.map(row => this.get(libraryId, row.id)), total, offset, limit: 50 };
   }
   private replay(home: Home, operationId: string, requestHash: string) {
@@ -91,7 +109,7 @@ export class CollectionStore {
     authorize();
     return saved;
   }
-  async upload(authorize: () => Home, operationId: string, bytes: Buffer) {
+  async upload(authorize: () => Home, operationId: string, bytes: Buffer, stage?: StudyStage) {
     const requestHash = `upload:${fileHash(bytes)}`;
     const saved = await this.storeUpload(authorize, bytes, home => {
       const result = this.replay(home, operationId, requestHash);
@@ -99,6 +117,7 @@ export class CollectionStore {
     }, (home, page) => {
       const id = randomUUID();
       this.db.prepare("INSERT INTO questions (id, libraryId, learnerId, originalPageId, revision, state, createdAt, updatedAt) VALUES (?, ?, ?, ?, 1, 'draft', ?, ?)").run(id, home.library.id, home.library.learnerId, page.id, this.now(), this.now());
+      this.db.prepare('UPDATE questions SET schoolYear = @schoolYear, grade = @grade, term = @term WHERE id = @id').run({ id, ...(stage === undefined ? new Study(this.db).settings().stage : normalizeStage(stage)) });
       this.db.prepare('INSERT INTO questionParts VALUES (?, ?, ?, 0, NULL)').run(id, randomUUID(), page.id);
       this.db.prepare('INSERT INTO collectionOperations VALUES (?, ?, ?, ?, ?)').run(home.library.id, home.account.id, operationId, requestHash, id);
       return this.get(home.library.id, id);
@@ -152,6 +171,7 @@ export class CollectionStore {
   private async write(authorize: () => Home, id: string | null, input: QuestionEdit, pageId?: string) {
     const home = authorize();
     const current = id ? this.get(home.library.id, id) : undefined;
+    const providedStage = input.studyStage === undefined ? undefined : normalizeStage(input.studyStage);
     const parts: QuestionPartEdit[] = input.parts ?? (current ? current.parts.map((part, index) => ({ id: part.id, pageId: part.originalPage.id, region: index === 0 ? input.region : part.region })) : [{ id: randomUUID(), pageId: pageId!, region: input.region }]);
     if (!parts.length || parts.length > 50 || new Set(parts.map(part => part.id)).size !== parts.length) throw new AccessError(422, '每道题需保留 1～50 个不重复的题目区');
     if (parts.some(part => part.region && !validQuestionRegion(part.region))) throw new AccessError(422, '题目范围必须在原始页内');
@@ -165,7 +185,7 @@ export class CollectionStore {
       ...(input.sourceId !== undefined ? { sourceId: input.sourceId } : { source: input.source!.trim() }),
       pageNumber: input.pageNumber.trim(), questionNumber: input.questionNumber.trim(), note: input.note.trim()
     };
-    const requestHash = `save:${fileHash(Buffer.from(JSON.stringify({ id, pageId, expectedRevision: input.expectedRevision, ...content, ...(input.parts ? { parts: input.parts } : {}), ...(input.readingMaterialId !== undefined ? { readingMaterialId: input.readingMaterialId } : {}) })))}`;
+    const requestHash = `save:${fileHash(Buffer.from(JSON.stringify({ id, pageId, expectedRevision: input.expectedRevision, ...content, ...(input.parts ? { parts: input.parts } : {}), ...(input.readingMaterialId !== undefined ? { readingMaterialId: input.readingMaterialId } : {}), ...(providedStage !== undefined ? { studyStage: providedStage } : {}) })))}`;
     const readingId = input.readingMaterialId === undefined ? current?.readingMaterial?.id : input.readingMaterialId;
     const reading = readingId ? await this.readings.verify(home.library.id, readingId) : null;
     // Verify the actual required files before publishing a collected record or acknowledging a retry.
@@ -190,10 +210,12 @@ export class CollectionStore {
       const questionId = id ?? randomUUID();
       if (!id) this.db.prepare("INSERT INTO questions (id, libraryId, learnerId, originalPageId, revision, state, createdAt, updatedAt) VALUES (?, ?, ?, ?, 1, 'draft', ?, ?)").run(questionId, home.library.id, home.library.learnerId, parts[0]!.pageId, this.now(), this.now());
       this.db.prepare(`UPDATE questions SET revision = @revision, state = @state, subjectId = @subjectId, region = @region, originalPageId = @originalPageId,
-        sourceId = @sourceId, source = @source, pageNumber = @pageNumber, questionNumber = @questionNumber, note = @note, updatedAt = @updatedAt, collectedAt = @collectedAt
+        sourceId = @sourceId, source = @source, pageNumber = @pageNumber, questionNumber = @questionNumber, note = @note, updatedAt = @updatedAt, collectedAt = @collectedAt,
+        schoolYear = @schoolYear, grade = @grade, term = @term
         WHERE id = @id AND libraryId = @libraryId`).run({
         id: questionId, revision: latest ? latest.revision + 1 : 1, originalPageId: parts[0]!.pageId, libraryId: home.library.id, ...content, region: content.region ? JSON.stringify(content.region) : null,
         sourceId: selectedSource?.id ?? null, source: selectedSource?.name ?? '',
+        ...(providedStage ?? latest?.studyStage ?? new Study(this.db).settings().stage),
         updatedAt: this.now(), collectedAt: latest?.collectedAt ?? (input.state === 'collected' ? this.now() : null)
       });
       this.db.prepare('DELETE FROM questionParts WHERE questionId = ?').run(questionId);

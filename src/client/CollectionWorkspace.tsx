@@ -22,6 +22,9 @@ import { ReadingMaterialEditor } from './ReadingMaterialEditor.tsx';
 import { ReadingMaterialView } from './ReadingMaterialView.tsx';
 import { AnswerEditor } from './AnswerEditor.tsx';
 import { AnswerView } from './AnswerView.tsx';
+import { emptyStage, stageLabel } from '../shared/study.ts';
+import { QuestionFilters } from './QuestionFilters.tsx';
+import type { FilterOptions, QuestionFilters as Filters } from '../shared/collection.ts';
 
 export function CollectionWorkspace({ api, home, platform, path, grant, onAccessError, onEditing, active = true, mode = 'workspace' }: {
   api: FamilyApi; home: Home; platform: ClientPlatform; path: PagePath; grant?: string; onAccessError(error: ApiError): Promise<void>; onEditing(active: boolean): void; active?: boolean; mode?: 'home' | 'collect' | 'workspace';
@@ -33,6 +36,9 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
   const [list, setList] = useState<QuestionList>({ items: [], total: 0, offset: 0, limit: 50 });
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
+  const [filters, setFilters] = useState<Filters>({});
+  const [filterOptions, setFilterOptions] = useState<FilterOptions>({ schoolYears: [], grades: [], sources: [] });
+  const [defaultStage, setDefaultStage] = useState(emptyStage);
   const [selected, setSelected] = useState<Question>();
   const [creating, setCreating] = useState(false);
   const [reading, setReading] = useState<ReadingMaterial>();
@@ -70,9 +76,9 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
     if (!active) return;
     let current = true;
     setLoading(true); setReadError(''); setList({ items: [], total: 0, offset: 0, limit: 50 });
-    void Promise.all([api.subjects(), api.questions(listState, 0, managementGrant), api.sources()]).then(([subjects, list, sources]) => {
+    void Promise.all([api.subjects(), api.questions(listState, 0, managementGrant, mode === 'collect' ? {} : filters), api.sources(), api.filterOptions(managementGrant), api.studySettings()]).then(([subjects, list, sources, options, settings]) => {
       if (!current) return;
-      setSubjects(subjects); setList(list); setSources(sources);
+      setSubjects(subjects); setList(list); setSources(sources); setFilterOptions(options); setDefaultStage(settings.stage);
     }).catch(async failure => {
       if (!current) return;
       if (failure instanceof ApiError && [401, 403].includes(failure.status)) { await onAccessError(failure); return; }
@@ -80,7 +86,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
     })
       .finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
-  }, [api, listState, refresh, active, path, managementGrant, onAccessError]);
+  }, [api, listState, refresh, active, path, mode, managementGrant, onAccessError, filters]);
 
   async function run(action: () => Promise<void>) {
     if (busy || cacheLoading || !active || (admin && !grant)) return;
@@ -96,7 +102,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
     setBatch(currentBatch);
     await cache.saveBatch(currentBatch);
     if (!mounted.current) return;
-    const question = await api.uploadImage(capture.file, capture.operationId, managementGrant);
+    const question = await api.uploadImage(capture.file, capture.operationId, managementGrant, capture.studyStage ?? emptyStage);
     if (!mounted.current) return;
     const next = { ...currentBatch, items: currentBatch.items.filter(item => item.operationId !== capture.operationId), uploaded: currentBatch.uploaded + 1 };
     // Keep the original operation and bytes until progress is durably stored; retry reuses the server result.
@@ -109,8 +115,17 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
     const images = Array.from(files);
     if (images.length > 10 || images.reduce((sum, file) => sum + file.size, 0) > 75 * 1024 * 1024) { setError('一次最多选择 10 张、合计 75 MB，请分批收集。'); return; }
     if (images.some(file => file.size > MAX_IMAGE_BYTES || file.size === 0)) { setError('每张图片需为非空文件且不超过 15 MB，请重新选择。'); return; }
-    const next: CaptureBatch = { items: images.map(file => ({ file, name: file.name, operationId: crypto.randomUUID() })), total: images.length, uploaded: 0, cancelled: 0 };
-    void run(() => upload(next.items[0]!, next));
+    const next: CaptureBatch = { items: images.map(file => ({ file, name: file.name, operationId: crypto.randomUUID(), studyStage: defaultStage })), total: images.length, uploaded: 0, cancelled: 0 };
+    setBatch(next);
+    void run(async () => {
+      await cache.saveBatch(next);
+      let stage = defaultStage;
+      try { stage = (await api.studySettings()).stage; }
+      catch (failure) { if (failure instanceof ApiError && [401, 403].includes(failure.status)) throw failure; }
+      if (!mounted.current) return;
+      const captured = { ...next, items: next.items.map(item => ({ ...item, studyStage: stage })) };
+      await upload(captured.items[0]!, captured);
+    });
   }
   async function cancel(capture: PendingCapture) {
     const next = { ...batch!, items: batch!.items.filter(item => item.operationId !== capture.operationId), cancelled: batch!.cancelled + 1 };
@@ -122,10 +137,14 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
   function back() { setError(''); setNotice(''); setSelected(undefined); setCreating(false); setOriginalOpen(false); setScreen('list'); setRefresh(value => value + 1); }
   function newFromPage(page: OriginalPage) {
     if (!selected || !active || busy || (admin && !grant)) return;
-    setSelected({ ...selected, id: crypto.randomUUID(), revision: 1, state: 'draft', subjectId: null, region: null, questionNumber: '', note: '', collectedAt: null,
+    void run(async () => {
+    const settings = await api.studySettings();
+    if (!mounted.current) return;
+    setSelected({ ...selected, studyStage: settings.stage, id: crypto.randomUUID(), revision: 1, state: 'draft', subjectId: null, region: null, questionNumber: '', note: '', collectedAt: null,
       originalPage: page, parts: [{ id: crypto.randomUUID(), originalPage: page, region: null }], answerParts: [],
       sourceId: sources.some(source => source.id === selected.sourceId && source.active) ? selected.sourceId : null });
     setCreating(true); setOriginalOpen(false); setScreen('edit');
+    });
   }
   function open(question: Question) {
     void run(async () => { const latest = await api.question(question.id, managementGrant); setSelected(latest); setOriginalOpen(false); setScreen(admin || latest.state === 'draft' ? 'edit' : 'detail'); });
@@ -167,6 +186,10 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
   }
   const subjectName = (id: string | null) => subjects.find(subject => subject.id === id)?.name ?? '待选学科';
   const date = (time: number) => new Date(time).toLocaleString('zh-CN');
+  function changeListState(next: 'draft' | 'collected') {
+    setState(next);
+    setFilters(({ collectedFrom: _from, collectedBefore: _before, ...remaining }) => remaining);
+  }
   const continuation = pending && <div className="batch-next"><p>还有 {batch!.items.length} 张图片待处理 · 下一张：{pending.name}</p><button disabled={busy} onClick={() => requestLeave(() => { back(); void run(() => upload(pending)); })}>继续下一张</button><button className="quiet" disabled={busy} aria-label={`取消 ${pending.name}`} onClick={() => void run(() => cancel(pending))}>取消这张</button><button className="quiet" disabled={busy} onClick={() => requestLeave(back)}>稍后继续</button><p className="hint">已上传 {batch!.uploaded} / {batch!.total} 张，已取消 {batch!.cancelled} 张</p></div>;
   return <div className="collection-workspace">
     {error && <p role="alert" className="message error">{error}</p>}
@@ -176,16 +199,17 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
     {screen === 'list' && <section className="card collection-card" aria-label={listState === 'draft' ? '已保存的草稿' : '已收集错题'}>
       <div className="section-heading"><div>{admin ? <h1>错题资料</h1> : <h2>{listState === 'draft' ? '已保存的草稿' : '已收集'}</h2>}{mode === 'collect' && <p className="hint">已保存在家庭电脑，可以换设备继续整理。</p>}</div>{admin && <div className="admin-upload"><CaptureInput label="上传材料" busy={busy || cacheLoading || !!pending} onChoose={choose} onCancel={() => setNotice('已取消选择，已有材料保留。')} /></div>}</div>
       {admin && <p className="hint">支持 JPEG、PNG、静态 WebP；每张最多 15 MB、4000 万像素，每批最多 10 张、合计 75 MB。{pending ? '请先继续或取消本机待上传材料。' : '选择图片后可框题、确认学科并保存。'}</p>}
-      <div className="collection-tabs">{mode === 'workspace' && <><button className="quiet" aria-pressed={state === 'collected'} disabled={busy} onClick={() => setState('collected')}>已收集</button><button className="quiet" aria-pressed={state === 'draft'} disabled={busy} onClick={() => setState('draft')}>草稿</button></>}<button className="quiet" disabled={busy || loading} onClick={() => setRefresh(value => value + 1)}>{readError ? '重试读取' : '刷新列表'}</button></div>
+      <div className="collection-tabs">{mode === 'workspace' && <><button className="quiet" aria-pressed={state === 'collected'} disabled={busy} onClick={() => changeListState('collected')}>已收集</button><button className="quiet" aria-pressed={state === 'draft'} disabled={busy} onClick={() => changeListState('draft')}>草稿</button></>}<button className="quiet" disabled={busy || loading} onClick={() => setRefresh(value => value + 1)}>{readError ? '重试读取' : '刷新列表'}</button></div>
+      {mode !== 'collect' && <QuestionFilters key={`${path}:${listState}`} value={filters} subjects={subjects} options={filterOptions} disabled={busy || loading} dates={listState === 'collected'} onChange={setFilters} />}
       {readError && <p role="alert" className="message error">{readError}。服务器材料暂时无法读取，本机待上传图片仍保留。</p>}
       {loading && <p role="status">正在读取材料…</p>}
       {cacheLoading && <p role="status">正在读取本机暂存，请稍候…</p>}
-      {!loading && !readError && list.total === 0 && <div className="empty-state"><h3>{listState === 'draft' ? '还没有草稿' : '开始收集第一道错题吧'}</h3><p>{mode === 'home' ? '从底部“收集”开始，把材料留下来。' : listState === 'draft' ? '上传图片后，可以先保存草稿，稍后继续整理。' : '选择图片、框住题目、选好学科，就能保存。'}</p></div>}
+      {!loading && !readError && list.total === 0 && <div className="empty-state"><h3>{mode !== 'collect' && Object.values(filters).some(Boolean) ? '没有符合筛选条件的题目' : listState === 'draft' ? '还没有草稿' : '开始收集第一道错题吧'}</h3><p>{mode !== 'collect' && Object.values(filters).some(Boolean) ? '调整条件或清空筛选后再看看。' : mode === 'home' ? '从底部“收集”开始，把材料留下来。' : listState === 'draft' ? '上传图片后，可以先保存草稿，稍后继续整理。' : '选择图片、框住题目、选好学科，就能保存。'}</p></div>}
       {admin ? !loading && !readError && <AdminMaterialsTable api={api} list={list} state={listState} subjects={subjects} busy={busy || cacheLoading} onOpen={open} /> : <div className="question-list">{list.items.map(question => <article key={question.id}>
         <div className="question-thumbnail"><QuestionImage api={api} page={question.originalPage} region={question.region} /></div>
         <div><p className="eyebrow">{listState === 'draft' ? '草稿' : '已收集'} · {subjectName(question.subjectId)}</p><h3>{question.source || '未填写来源'}{question.questionNumber ? ` · 第 ${question.questionNumber} 题` : ''}</h3><p className="hint">{listState === 'collected' ? '收集于' : '暂存于'} {date(question.collectedAt ?? question.createdAt)}</p><button className="quiet" disabled={busy || cacheLoading} onClick={() => open(question)}>{listState === 'draft' ? '继续整理' : '打开错题'}</button></div>
       </article>)}</div>}
-      {list.items.length < list.total && <button className="quiet" disabled={busy || cacheLoading} onClick={() => void run(async () => { const more = await api.questions(listState, list.items.length, managementGrant); setList(current => ({ ...more, items: [...current.items, ...more.items] })); })}>加载更多</button>}
+      {list.items.length < list.total && <button className="quiet" disabled={busy || cacheLoading || loading} onClick={() => void run(async () => { const more = await api.questions(listState, list.items.length, managementGrant, mode === 'collect' ? {} : filters); setList(current => ({ ...more, items: [...current.items, ...more.items] })); })}>加载更多</button>}
     </section>}
     {screen === 'edit' && selected && <QuestionEditor key={selected.id} api={api} question={selected} subjects={subjects} sources={sources} active={active} externalBusy={busy} admin={admin} creating={creating} grant={managementGrant} pageCache={pageCache} onBack={back} onNewFromPage={newFromPage} onReading={openReading} onAnswers={openAnswers} onAccessError={onAccessError} onSaved={question => { setSelected(question); setCreating(false); setRefresh(value => value + 1); if (!admin && question.state === 'collected') setScreen('detail'); }} />}
     {screen === 'answers' && selected && <AnswerEditor key={selected.id} api={api} question={selected} cache={answerCache} grant={managementGrant} active={active} onBack={() => setScreen(answerReturn.current)} onSaved={question => { setSelected(question); setScreen(answerReturn.current); setRefresh(value => value + 1); }} onAccessError={onAccessError} />}
@@ -196,6 +220,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
       <p className="sync-state">已同步到家庭资料库</p><div className="detail-material"><QuestionParts api={api} parts={selected.parts} /></div>
       {selected.readingMaterial && <ReadingMaterialView api={api} material={selected.readingMaterial} />}
       <AnswerView api={api} parts={selected.answerParts} />
+      <p className="study-stage">{stageLabel(selected.studyStage)}</p>
       <button className="quiet" disabled={busy} onClick={openAnswers}>{selected.answerParts.length ? '整理纸质答案' : '补充纸质答案'}</button>
       {continuation}
       <dl><div><dt>收集时间</dt><dd>{date(selected.collectedAt!)}</dd></div><div><dt>来源</dt><dd>{selected.source || '未填写'}</dd></div><div><dt>页码 / 题号</dt><dd>{selected.pageNumber || '未填写'} / {selected.questionNumber || '未填写'}</dd></div><div><dt>备注</dt><dd className="note-text">{selected.note || '未填写'}</dd></div></dl>

@@ -9,6 +9,8 @@ import { collectionRoutes } from './collection-routes.ts';
 import { Sources } from './sources.ts';
 import { sourceRoutes } from './source-routes.ts';
 import { pages } from '../shared/app-routes.ts';
+import { Study } from './study.ts';
+import { studyRoutes } from './study-routes.ts';
 
 export function createApp(options: { dataDir: string; now?: () => number; allowedOrigins?: string[]; staticDir?: string }) {
   const db = openDatabase(options.dataDir);
@@ -23,7 +25,7 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
     reply.header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self' https: http://127.0.0.1:* http://localhost:*; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     if (request.headers.origin && !origins.includes(request.headers.origin)) throw new AccessError(403, '此网页来源未获允许');
   });
-  app.register(cors, { origin: origins, methods: ['GET', 'POST', 'PUT', 'DELETE'], allowedHeaders: ['Content-Type', 'Authorization', 'X-Parent-Authorization', 'Idempotency-Key'], credentials: false });
+  app.register(cors, { origin: origins, methods: ['GET', 'POST', 'PUT', 'DELETE'], allowedHeaders: ['Content-Type', 'Authorization', 'X-Parent-Authorization', 'Idempotency-Key', 'X-Learning-Stage'], credentials: false });
   app.addHook('preHandler', async request => {
     if (request.method === 'POST' && ['/api/v1/setup', '/api/v1/sessions', '/api/v1/recovery', '/api/v1/admin/grants'].includes(request.routeOptions.url ?? '')) {
       access.limitAttempt(request.routeOptions.url!, request.ip);
@@ -71,6 +73,7 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
   } } }, async (request, reply) => reply.code(201).send(await access.recover(request.body)));
   collectionRoutes(app, access, collection);
   sourceRoutes(app, access, new Sources(db));
+  studyRoutes(app, access, new Study(db));
   if (options.staticDir) {
     app.register(staticFiles, { root: options.staticDir, index: 'index.html' });
     for (const path of Object.keys(pages)) app.get(path, async (_request, reply) => reply.sendFile('index.html'));
