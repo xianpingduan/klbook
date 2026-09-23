@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { MAX_IMAGE_BYTES } from '../shared/collection.ts';
-import type { OriginalPage, Question } from '../shared/collection.ts';
+import type { OriginalPage, QuestionPart } from '../shared/collection.ts';
 import { ApiError, FamilyApi } from './api.ts';
 import type { CaptureCache, PendingCapture } from './capture-cache.ts';
 
-/** Keep the selected bytes and operation until the page reference is saved with its question. */
+/** Keep the selected bytes and operation until the owning question or reading material saves the page reference. */
 export function usePageAppend({ api, cache, grant, onAppend, onAccessError }: {
   api: FamilyApi; cache: CaptureCache; grant?: string; onAppend(page: OriginalPage, partId: string): void; onAccessError(error: ApiError): Promise<void>;
 }) {
@@ -48,8 +48,8 @@ export function usePageAppend({ api, cache, grant, onAppend, onAccessError }: {
     catch { if (mounted.current) setError('本设备追加记录暂时无法清理，材料仍保留，可稍后重试。'); }
     finally { if (mounted.current) setBusy(false); }
   }
-  async function committed(question: Question) {
-    if (capture && (appended || question.parts.some(part => part.id === capture.operationId))) await clear();
+  async function committed(material: { parts: QuestionPart[] }) {
+    if (capture && (appended || material.parts.some(part => part.id === capture.operationId))) await clear();
   }
   return { capture, loading, busy, appended, error, choose, retry: () => capture && void upload(capture), cancel: () => void clear(), committed };
 }

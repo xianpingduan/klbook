@@ -1,3 +1,5 @@
+import type { ReadingMaterial } from './reading-materials.ts';
+
 export interface Subject { id: string; name: string }
 export interface Region { x: number; y: number; width: number; height: number }
 export function validQuestionRegion(region: Region | null): region is Region {
@@ -16,6 +18,7 @@ export interface Question {
   createdAt: number; updatedAt: number; collectedAt: number | null;
   originalPage: OriginalPage;
   parts: QuestionPart[];
+  readingMaterial: ReadingMaterial | null;
 }
 export interface QuestionList { items: Question[]; total: number; offset: number; limit: number }
 export interface QuestionEdit {
@@ -23,6 +26,7 @@ export interface QuestionEdit {
   subjectId: string | null; region: Region | null;
   sourceId?: string | null; source?: string; pageNumber: string; questionNumber: string; note: string;
   parts?: QuestionPartEdit[];
+  readingMaterialId?: string | null;
 }
 export type QuestionCreate = Omit<QuestionEdit, 'expectedRevision'>;
 export const MAX_IMAGE_BYTES = 15 * 1024 * 1024;

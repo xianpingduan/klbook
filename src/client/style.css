@@ -239,3 +239,9 @@ select:focus-visible, textarea:focus-visible { outline: 3px solid #ceac53; outli
   .page-addition .capture-symbol { display: none; }
   .page-addition .hint { overflow-wrap: anywhere; }
 }
+
+.reading-material { margin-block: 1.25rem; padding-block: 1rem; border-top: 1px solid var(--line, #dfe7e4); }
+.reading-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-bottom: 1rem; }
+.reading-editor { max-width: 960px; margin-inline: auto; }
+.reading-editor fieldset { min-width: 0; }
+.reading-picker { margin-top: 1.25rem; }

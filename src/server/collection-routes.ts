@@ -4,6 +4,7 @@ import { CollectionStore } from './collection-store.ts';
 import { MAX_IMAGE_BYTES } from '../shared/collection.ts';
 import type { QuestionCreate, QuestionEdit } from '../shared/collection.ts';
 import { AccessError } from './family-access.ts';
+import type { ReadingMaterialEdit } from '../shared/reading-materials.ts';
 
 const regionSchema = { anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], properties: {
   x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 },
@@ -20,6 +21,7 @@ const createBody = {
       id: { type: 'string', format: 'uuid' }, pageId: { type: 'string', format: 'uuid' }, region: regionSchema
     } } },
     sourceId: { type: ['string', 'null'], format: 'uuid' }, source: { type: 'string', maxLength: 200 },
+    readingMaterialId: { type: ['string', 'null'], format: 'uuid' },
     pageNumber: { type: 'string', maxLength: 32 }, questionNumber: { type: 'string', maxLength: 32 }, note: { type: 'string', maxLength: 2000 }
   }
 };
@@ -34,6 +36,13 @@ export function collectionRoutes(app: FastifyInstance, access: FamilyAccess, col
     routes.addHook('onRequest', async request => { authorize(request.headers); });
     routes.addContentTypeParser(['image/jpeg', 'image/png', 'image/webp'], { parseAs: 'buffer', bodyLimit: MAX_IMAGE_BYTES }, (_request, body, done) => done(null, body));
     routes.get('/subjects', async () => collection.subjects());
+    routes.get<{ Querystring: { offset?: string } }>('/reading-materials', { schema: { querystring: { type: 'object', additionalProperties: false, properties: { offset: { type: 'string', pattern: '^[0-9]{1,7}$' } } } } }, async request => collection.readings.list(authorize(request.headers).library.id, Number(request.query.offset ?? 0)));
+    routes.get<{ Params: { id: string } }>('/reading-materials/:id', { schema: { params: idParams } }, async request => collection.readings.get(authorize(request.headers).library.id, request.params.id));
+    routes.put<{ Params: { id: string }; Body: ReadingMaterialEdit }>('/reading-materials/:id', { schema: { params: idParams, body: {
+      type: 'object', additionalProperties: false, required: ['operationId', 'expectedRevision', 'title', 'parts'], properties: {
+        operationId: { type: 'string', format: 'uuid' }, expectedRevision: { type: 'integer', minimum: 0 }, title: { type: 'string', minLength: 1, maxLength: 120 }, parts: createBody.properties.parts
+      }
+    } } }, async request => collection.readings.save(() => authorize(request.headers), request.params.id, request.body));
     for (const path of ['/drafts', '/pages']) routes.post<{ Body: Buffer; Headers: { 'idempotency-key': string } }>(path, { bodyLimit: MAX_IMAGE_BYTES, schema: { headers: {
       type: 'object', required: ['idempotency-key'], properties: { 'idempotency-key': { type: 'string', format: 'uuid' } }
     } } }, async (request, reply) => {

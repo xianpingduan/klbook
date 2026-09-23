@@ -71,6 +71,8 @@
 
 ## 后续移动安装与商店发布
 
+2026-09-23，#6 已实现共享阅读材料、跨页有序原文、独立小题引用与解除关联保护；24 项 API 与三引擎 108 项浏览器场景均取得通过结果（一次初始导航超时定向复验通过），本机资料备份升级核验完成。独立审查等待用户确认基线 `c4bb9fb`，#6 尚未关闭，证据见 [#6 验证记录](verification/issue-6.md)。
+
 2026-09-18 用户补充最终交付 Android APK 和 iOS App Store App，并确认目前没有 Mac/开发者会员、先预留发布方案。已登记 [后续移动交付里程碑 #26](https://github.com/xianpingduan/klbook/issues/26)，标签为 `needs-triage`；它是后续范围跟踪，尚未细拆为可直接执行的开发任务。
 
 - 前端方向扩展为 React + TypeScript + Vite + Capacitor，具体边界和资源见 [移动交付计划](mobile-delivery.md)。

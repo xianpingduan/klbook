@@ -74,7 +74,25 @@ const migrations = [
     );`);
     const add = db.prepare('INSERT INTO questionParts VALUES (?, ?, ?, 0, ?)');
     for (const row of db.prepare<[], { id: string; originalPageId: string; region: string | null }>('SELECT id, originalPageId, region FROM questions').all()) add.run(row.id, randomUUID(), row.originalPageId, row.region);
-  }
+  },
+  `CREATE TABLE readingMaterials (
+    id TEXT PRIMARY KEY, libraryId TEXT NOT NULL, title TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK(revision > 0), createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
+  );
+  CREATE TABLE readingParts (
+    materialId TEXT NOT NULL REFERENCES readingMaterials(id), id TEXT NOT NULL,
+    pageId TEXT NOT NULL REFERENCES originalPages(id), position INTEGER NOT NULL, region TEXT NOT NULL,
+    PRIMARY KEY(materialId, id), UNIQUE(materialId, position)
+  );
+  CREATE INDEX readingPartsByPage ON readingParts(pageId);
+  CREATE TABLE questionReadings (
+    questionId TEXT PRIMARY KEY REFERENCES questions(id), materialId TEXT NOT NULL REFERENCES readingMaterials(id)
+  );
+  CREATE INDEX questionsByReading ON questionReadings(materialId);
+  CREATE TABLE readingOperations (
+    libraryId TEXT NOT NULL, accountId TEXT NOT NULL, operationId TEXT NOT NULL, requestHash TEXT NOT NULL,
+    materialId TEXT NOT NULL REFERENCES readingMaterials(id), PRIMARY KEY(libraryId, accountId, operationId)
+  );`
 ];
 
 export function openDatabase(dataDir: string) {

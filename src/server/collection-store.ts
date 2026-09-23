@@ -7,14 +7,19 @@ import { AccessError } from './family-access.ts';
 import { Attachments, fileHash } from './attachments.ts';
 import type { StoredPage } from './attachments.ts';
 import { Sources } from './sources.ts';
+import { ReadingMaterials } from './reading-materials.ts';
 
-interface QuestionRow extends Omit<Question, 'originalPage' | 'parts' | 'region' | 'syncState'> { originalPageId: string; region: string | null }
+interface QuestionRow extends Omit<Question, 'originalPage' | 'parts' | 'region' | 'syncState' | 'readingMaterial'> { originalPageId: string; region: string | null }
 export class CollectionStore {
   private db: Database.Database;
   private files: Attachments;
   private now: () => number;
   private sources: Sources;
-  constructor(db: Database.Database, dataDir: string, now = Date.now) { this.db = db; this.files = new Attachments(dataDir); this.now = now; this.sources = new Sources(db); }
+  readonly readings: ReadingMaterials;
+  constructor(db: Database.Database, dataDir: string, now = Date.now) {
+    this.db = db; this.files = new Attachments(dataDir); this.now = now; this.sources = new Sources(db);
+    this.readings = new ReadingMaterials(db, { get: (library, page) => this.publicPage(library, page), verify: (library, page) => this.verifyPage(library, page) }, now);
+  }
   subjects(): Subject[] { return this.db.prepare<[], Subject>('SELECT id, name FROM subjects ORDER BY position').all(); }
   private page(libraryId: string, id: string) {
     const page = this.db.prepare<[string, string], StoredPage>('SELECT * FROM originalPages WHERE libraryId = ? AND id = ?').get(libraryId, id);
@@ -25,13 +30,18 @@ export class CollectionStore {
     const { previewSha256: _preview, libraryId: _libraryId, ...page } = this.page(libraryId, id);
     return page;
   }
+  private async verifyPage(libraryId: string, id: string) {
+    const page = this.page(libraryId, id);
+    await this.files.read(page, 'original'); await this.files.read(page, 'preview');
+  }
   get(libraryId: string, id: string): Question {
     const row = this.db.prepare<[string, string], QuestionRow>('SELECT * FROM questions WHERE libraryId = ? AND id = ?').get(libraryId, id);
     if (!row) throw new AccessError(404, '找不到这道题');
     const { originalPageId, region, ...rest } = row;
     const parts = this.db.prepare<[string], { id: string; pageId: string; region: string | null }>('SELECT id, pageId, region FROM questionParts WHERE questionId = ? ORDER BY position').all(id)
       .map(part => ({ id: part.id, originalPage: this.publicPage(libraryId, part.pageId), region: part.region ? JSON.parse(part.region) as Region : null }));
-    return { ...rest, source: rest.sourceId ? this.sources.get(rest.sourceId).name : rest.source, region: region ? JSON.parse(region) as Region : null, originalPage: this.publicPage(libraryId, originalPageId), parts, syncState: 'synced' };
+    const reading = this.db.prepare<[string], { materialId: string }>('SELECT materialId FROM questionReadings WHERE questionId = ?').get(id);
+    return { ...rest, source: rest.sourceId ? this.sources.get(rest.sourceId).name : rest.source, region: region ? JSON.parse(region) as Region : null, originalPage: this.publicPage(libraryId, originalPageId), parts, readingMaterial: reading ? this.readings.get(libraryId, reading.materialId) : null, syncState: 'synced' };
   }
   list(libraryId: string, state: 'draft' | 'collected', offset: number): QuestionList {
     const ids = this.db.prepare<[string, string, number], { id: string }>('SELECT id FROM questions WHERE libraryId = ? AND state = ? ORDER BY createdAt DESC, id LIMIT 50 OFFSET ?').all(libraryId, state, offset);
@@ -116,11 +126,12 @@ export class CollectionStore {
       ...(input.sourceId !== undefined ? { sourceId: input.sourceId } : { source: input.source!.trim() }),
       pageNumber: input.pageNumber.trim(), questionNumber: input.questionNumber.trim(), note: input.note.trim()
     };
-    const requestHash = `save:${fileHash(Buffer.from(JSON.stringify({ id, pageId, expectedRevision: input.expectedRevision, ...content, ...(input.parts ? { parts: input.parts } : {}) })))}`;
+    const requestHash = `save:${fileHash(Buffer.from(JSON.stringify({ id, pageId, expectedRevision: input.expectedRevision, ...content, ...(input.parts ? { parts: input.parts } : {}), ...(input.readingMaterialId !== undefined ? { readingMaterialId: input.readingMaterialId } : {}) })))}`;
+    const readingId = input.readingMaterialId === undefined ? current?.readingMaterial?.id : input.readingMaterialId;
+    const reading = readingId ? await this.readings.verify(home.library.id, readingId) : null;
     // Verify the actual required files before publishing a collected record or acknowledging a retry.
     for (const required of new Set(parts.map(part => part.pageId))) {
-      const page = this.page(home.library.id, required);
-      await this.files.read(page, 'original'); await this.files.read(page, 'preview');
+      await this.verifyPage(home.library.id, required);
     }
     return this.db.transaction(() => {
       authorize();
@@ -129,6 +140,7 @@ export class CollectionStore {
       const latest = id ? this.get(home.library.id, id) : undefined;
       if (latest?.state === 'collected' && input.state === 'draft') throw new AccessError(409, '已收集的题目不能改回草稿');
       if (latest && latest.revision !== input.expectedRevision) throw new AccessError(409, '这道题已在其他页面更新。你的修改仍在当前页面，请先重新读取并核对');
+      if (reading && this.readings.get(home.library.id, reading.id).revision !== reading.revision) throw new AccessError(409, '阅读材料已更新，请核对后重试');
       let selectedSource = input.sourceId ? this.sources.get(input.sourceId) : undefined;
       if (input.sourceId === undefined && input.source!.trim()) {
         const name = input.source!.trim();
@@ -148,6 +160,10 @@ export class CollectionStore {
       this.db.prepare('DELETE FROM questionParts WHERE questionId = ?').run(questionId);
       const addPart = this.db.prepare('INSERT INTO questionParts VALUES (?, ?, ?, ?, ?)');
       parts.forEach((part, index) => addPart.run(questionId, part.id, part.pageId, index, part.region ? JSON.stringify(part.region) : null));
+      if (input.readingMaterialId !== undefined) {
+        this.db.prepare('DELETE FROM questionReadings WHERE questionId = ?').run(questionId);
+        if (reading) this.db.prepare('INSERT INTO questionReadings VALUES (?, ?)').run(questionId, reading.id);
+      }
       this.db.prepare('INSERT INTO collectionOperations VALUES (?, ?, ?, ?, ?)').run(home.library.id, home.account.id, input.operationId, requestHash, questionId);
       return this.get(home.library.id, questionId);
     })();

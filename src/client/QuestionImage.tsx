@@ -20,17 +20,17 @@ export function usePageImage(api: FamilyApi, pageId: string, variant: 'original'
   return { url, error, retry: () => setAttempt(value => value + 1) };
 }
 
-export function QuestionImage({ api, page, region, original = false }: { api: FamilyApi; page: OriginalPage; region?: Region | null; original?: boolean }) {
+export function QuestionImage({ api, page, region, original = false, label = '已收集的题目区' }: { api: FamilyApi; page: OriginalPage; region?: Region | null; original?: boolean; label?: string }) {
   const image = usePageImage(api, page.id, original ? 'original' : 'preview');
   if (image.error) return <p role="alert" className="message error">{image.error} <button className="quiet" onClick={image.retry}>重试加载图片</button></p>;
   if (!image.url) return <p>正在读取材料…</p>;
   if (!region || original) return <img className="paper-image" src={image.url} alt={original ? '原始页（保留作答和批改）' : '原始页预览'} />;
-  return <svg className="question-crop" role="img" aria-label="已收集的题目区" viewBox={`${region.x * page.width} ${region.y * page.height} ${region.width * page.width} ${region.height * page.height}`}>
+  return <svg className="question-crop" role="img" aria-label={label} viewBox={`${region.x * page.width} ${region.y * page.height} ${region.width * page.width} ${region.height * page.height}`}>
     <image href={image.url} width={page.width} height={page.height} />
   </svg>;
 }
 
-export function CropSelector({ api, page, region, onChange, disabled }: { api: FamilyApi; page: OriginalPage; region: Region | null; onChange(value: Region | null): void; disabled: boolean }) {
+export function CropSelector({ api, page, region, onChange, disabled, reading = false }: { api: FamilyApi; page: OriginalPage; region: Region | null; onChange(value: Region | null): void; disabled: boolean; reading?: boolean }) {
   const image = usePageImage(api, page.id, 'preview');
   const start = useRef<{ x: number; y: number } | null>(null);
   function point(event: PointerEvent<SVGSVGElement>) {
@@ -45,7 +45,7 @@ export function CropSelector({ api, page, region, onChange, disabled }: { api: F
     onChange({ x: Math.min(start.current.x, end.x), y: Math.min(start.current.y, end.y), width, height });
   }
   return <div>
-    <p className="hint">在图片上拖动，框住一道可以独立作答的小题。可以重新拖动，也可以选择整页。</p>
+    <p className="hint">{reading ? '在图片上拖动，框住阅读原文。' : '在图片上拖动，框住一道可以独立作答的小题。'}可以重新拖动，也可以选择整页。</p>
     {image.error && <p role="alert" className="message error">{image.error} <button onClick={image.retry}>重试加载图片</button></p>}
     {image.url ? <div className="image-stage" style={{ width: `min(100%, ${62 * page.width / page.height}dvh)`, marginInline: 'auto' }}>
       <img src={image.url} width={page.width} height={page.height} alt="用于框题的原始页预览" draggable={false} />
