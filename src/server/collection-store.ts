@@ -45,56 +45,45 @@ export class CollectionStore {
     return this.get(home.library.id, operation.questionId);
   }
   async upload(authorize: () => Home, operationId: string, bytes: Buffer) {
-    const home = authorize();
     const requestHash = `upload:${fileHash(bytes)}`;
-    const existing = this.replay(home, operationId, requestHash);
-    if (existing) {
-      const page = this.page(home.library.id, existing.originalPage.id);
-      await this.files.read(page, 'original');
-      await this.files.read(page, 'preview');
-      authorize();
-      return existing;
-    }
-    const page = await this.files.save(randomUUID(), home.library.id, bytes);
-    try {
-      return this.db.transaction(() => {
-        authorize();
-        const duplicate = this.replay(home, operationId, requestHash);
-        if (duplicate) return duplicate;
-        this.db.prepare('INSERT INTO originalPages VALUES (@id, @libraryId, @mimeType, @byteLength, @sha256, @previewSha256, @width, @height)').run(page);
-        const id = randomUUID();
-        this.db.prepare("INSERT INTO questions (id, libraryId, learnerId, originalPageId, revision, state, createdAt, updatedAt) VALUES (?, ?, ?, ?, 1, 'draft', ?, ?)").run(id, home.library.id, home.library.learnerId, page.id, this.now(), this.now());
-        this.db.prepare('INSERT INTO questionParts VALUES (?, ?, ?, 0, NULL)').run(id, randomUUID(), page.id);
-        this.db.prepare('INSERT INTO collectionOperations VALUES (?, ?, ?, ?, ?)').run(home.library.id, home.account.id, operationId, requestHash, id);
-        return this.get(home.library.id, id);
-      })();
-    } finally {
-      const used = Boolean(this.db.prepare('SELECT 1 FROM originalPages WHERE id = ?').get(page.id));
-      if (!used) await this.files.discard(page.id);
-    }
+    return this.storeUpload(authorize, bytes, home => {
+      const result = this.replay(home, operationId, requestHash);
+      return result ? { pageId: result.originalPage.id, result } : undefined;
+    }, (home, page) => {
+      const id = randomUUID();
+      this.db.prepare("INSERT INTO questions (id, libraryId, learnerId, originalPageId, revision, state, createdAt, updatedAt) VALUES (?, ?, ?, ?, 1, 'draft', ?, ?)").run(id, home.library.id, home.library.learnerId, page.id, this.now(), this.now());
+      this.db.prepare('INSERT INTO questionParts VALUES (?, ?, ?, 0, NULL)').run(id, randomUUID(), page.id);
+      this.db.prepare('INSERT INTO collectionOperations VALUES (?, ?, ?, ?, ?)').run(home.library.id, home.account.id, operationId, requestHash, id);
+      return this.get(home.library.id, id);
+    });
   }
   async uploadPage(authorize: () => Home, operationId: string, bytes: Buffer) {
-    const home = authorize();
     const requestHash = fileHash(bytes);
-    const replay = () => {
+    return this.storeUpload(authorize, bytes, home => {
       const row = this.db.prepare<[string, string, string], { pageId: string; requestHash: string }>('SELECT pageId, requestHash FROM pageOperations WHERE libraryId = ? AND accountId = ? AND operationId = ?').get(home.library.id, home.account.id, operationId);
       if (row && row.requestHash !== requestHash) throw new AccessError(409, '此次重试的图片已改变，请重新选择');
-      return row ? this.page(home.library.id, row.pageId) : undefined;
-    };
-    const existing = replay();
+      return row ? { pageId: row.pageId, result: this.publicPage(home.library.id, row.pageId) } : undefined;
+    }, (home, page) => {
+      this.db.prepare('INSERT INTO pageOperations VALUES (?, ?, ?, ?, ?)').run(home.library.id, home.account.id, operationId, requestHash, page.id);
+      return this.publicPage(home.library.id, page.id);
+    });
+  }
+  private async storeUpload<T>(authorize: () => Home, bytes: Buffer, replay: (home: Home) => { pageId: string; result: T } | undefined, publish: (home: Home, page: StoredPage) => T): Promise<T> {
+    const home = authorize();
+    const existing = replay(home);
     if (existing) {
-      await this.files.read(existing, 'original'); await this.files.read(existing, 'preview'); authorize();
-      return this.publicPage(home.library.id, existing.id);
+      const page = this.page(home.library.id, existing.pageId);
+      await this.files.read(page, 'original'); await this.files.read(page, 'preview'); authorize();
+      return existing.result;
     }
     const page = await this.files.save(randomUUID(), home.library.id, bytes);
     try {
       return this.db.transaction(() => {
         authorize();
-        const duplicate = replay();
-        if (duplicate) return this.publicPage(home.library.id, duplicate.id);
+        const duplicate = replay(home);
+        if (duplicate) return duplicate.result;
         this.db.prepare('INSERT INTO originalPages VALUES (@id, @libraryId, @mimeType, @byteLength, @sha256, @previewSha256, @width, @height)').run(page);
-        this.db.prepare('INSERT INTO pageOperations VALUES (?, ?, ?, ?, ?)').run(home.library.id, home.account.id, operationId, requestHash, page.id);
-        return this.publicPage(home.library.id, page.id);
+        return publish(home, page);
       })();
     } finally {
       if (!this.db.prepare('SELECT 1 FROM originalPages WHERE id = ?').get(page.id)) await this.files.discard(page.id);

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import type { OriginalPage, Question, QuestionEdit, Subject } from '../shared/collection.ts';
+import type { OriginalPage, Question, QuestionCreate, QuestionEdit, Subject } from '../shared/collection.ts';
 import { validQuestionRegion } from '../shared/collection.ts';
 import { ApiError, FamilyApi } from './api.ts';
 import { QuestionParts, QuestionPartsEditor } from './QuestionParts.tsx';
@@ -31,6 +31,8 @@ export function QuestionEditor({ api, question, subjects, sources, active, admin
   const working = busy || append.busy || append.loading;
   const baseline = useRef(JSON.stringify(editable(question)));
   const pending = useRef<{ fingerprint: string; operationId: string } | null>(null);
+  const creation = useRef<{ pageId: string; input: QuestionCreate } | null>(null);
+  const created = useRef<Question | null>(null);
   const dirty = JSON.stringify(fields) !== baseline.current;
   const leave = useEditorLeave({
     dirty, busy: working, canSave: active, title: '还有未保存的修改', error,
@@ -42,14 +44,32 @@ export function QuestionEditor({ api, question, subjects, sources, active, admin
   async function save(state: 'draft' | 'collected') {
     if (!active || working || (admin && !grant)) return false;
     setBusy(true); setError(''); setNotice('');
-    const content = { expectedRevision: question.revision, state, ...fields, region: fields.parts[0]!.region,
+    const content = { state, ...fields, region: fields.parts[0]!.region,
       parts: fields.parts.map(part => ({ id: part.id, pageId: part.originalPage.id, region: part.region })) };
-    const fingerprint = JSON.stringify(content);
-    if (pending.current?.fingerprint !== fingerprint) pending.current = { fingerprint, operationId: crypto.randomUUID() };
-    const input: QuestionEdit = { ...content, operationId: pending.current.operationId };
     try {
-      const { expectedRevision: _revision, ...newInput } = input;
-      const saved = creating ? await api.createQuestion(fields.parts[0]!.originalPage.id, newInput, grant) : await api.saveQuestion(question.id, input, grant);
+      let saved: Question | undefined;
+      if (creating && !created.current) {
+        // Replay the exact unresolved creation before applying edits, so a lost response cannot create a second question.
+        creation.current ??= { pageId: fields.parts[0]!.originalPage.id, input: { ...content, operationId: crypto.randomUUID() } };
+        const attempt = creation.current;
+        try { created.current = await api.createQuestion(attempt.pageId, attempt.input, grant); }
+        catch (failure) {
+          if (failure instanceof ApiError && [400, 422].includes(failure.status)) creation.current = null;
+          throw failure;
+        }
+        creation.current = null;
+        const { operationId: _operation, ...submitted } = attempt.input;
+        if (JSON.stringify(submitted) === JSON.stringify(content)) saved = created.current;
+      }
+      if (!saved) {
+        const current = created.current ?? question;
+        const update = { ...content, expectedRevision: current.revision, state: current.state === 'collected' ? 'collected' as const : state };
+        const fingerprint = JSON.stringify(update);
+        if (pending.current?.fingerprint !== fingerprint) pending.current = { fingerprint, operationId: crypto.randomUUID() };
+        const input: QuestionEdit = { ...update, operationId: pending.current.operationId };
+        saved = await api.saveQuestion(current.id, input, grant);
+      }
+      if (creating) created.current = saved;
       setFields(editable(saved)); baseline.current = JSON.stringify(editable(saved)); pending.current = null;
       await append.committed(saved);
       setNotice(saved.state === 'draft' ? '草稿已保存到家庭资料库，可以稍后继续。' : '已同步到家庭资料库');

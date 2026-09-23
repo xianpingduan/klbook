@@ -21,7 +21,7 @@ async function login(page: Page, url: string) {
   await page.getByRole('button', { name: '登录此设备', exact: true }).click();
 }
 
-test('同一原始页继续选题，清除误选后重画，保存响应丢失重试只新增一道', async ({ page, request }) => {
+for (const editAfterFailure of [false, true]) test(`同一原始页继续选题，保存响应丢失${editAfterFailure ? '后修改内容再' : '后直接'}重试只新增一道`, async ({ page, request }) => {
   const f = await fixture(request);
   try {
     await login(page, `${f.url}/learn/collect`);
@@ -48,6 +48,14 @@ test('同一原始页继续选题，清除误选后重画，保存响应丢失�
     await page.route('**/api/v1/collection/pages/*/questions', async route => { await route.fetch(); await route.abort(); }, { times: 1 });
     await page.getByRole('button', { name: '保存到错题集', exact: true }).click();
     await expect(page.getByRole('alert')).toContainText('仍保留');
+    if (editAfterFailure) {
+      await page.getByLabel('备注（选填）').fill('第二道题，重试时补充');
+      // The creation and its following edit can both succeed while their responses are lost.
+      await page.route('**/api/v1/collection/questions/*', async route => { await route.fetch(); await route.abort(); }, { times: 1 });
+      await page.getByRole('button', { name: '保存到错题集', exact: true }).click();
+      await expect(page.getByRole('alert')).toContainText('仍保留');
+      expect((await (await request.get(`${f.url}/api/v1/collection/questions?state=collected`, { headers: f.headers })).json()).total).toBe(2);
+    }
     await page.getByRole('button', { name: '保存到错题集', exact: true }).click();
     await expect(page.getByRole('heading', { name: '错题详情' })).toBeVisible();
     const after = await (await request.get(`${f.url}/api/v1/collection/questions?state=collected`, { headers: f.headers })).json();
@@ -56,6 +64,7 @@ test('同一原始页继续选题，清除误选后重画，保存响应丢失�
     const added = after.items.find((item: { id: string }) => item.id !== before.items[0].id);
     expect(added.originalPage.id).toBe(before.items[0].originalPage.id);
     expect(added.subjectId).toBe('science'); expect(added.region.height).toBe(.4);
+    expect(added.note).toBe(editAfterFailure ? '第二道题，重试时补充' : '第二道题');
     expect(await (await request.get(`${f.url}/api/v1/collection/pages/${added.originalPage.id}/original`, { headers: f.headers })).body()).toEqual(f.bytes);
   } finally { await f.close(); }
 });

@@ -56,12 +56,10 @@ export class FamilyApi {
   question(id: string, grant?: string) { return this.request<Question>(`/collection/questions/${encodeURIComponent(id)}`, 'GET', undefined, grant); }
   saveQuestion(id: string, input: QuestionEdit, grant?: string) { return this.request<Question>(`/collection/questions/${encodeURIComponent(id)}`, 'PUT', input, grant); }
   createQuestion(pageId: string, input: QuestionCreate, grant?: string) { return this.request<Question>(`/collection/pages/${encodeURIComponent(pageId)}/questions`, 'POST', input, grant); }
-  async uploadImage(file: Blob, operationId: string, grant?: string): Promise<Question> {
-    const response = await this.send('/collection/drafts', { method: 'POST', body: file, headers: { 'Content-Type': ['image/jpeg', 'image/png', 'image/webp'].includes(file.type) ? file.type : 'image/png', 'Idempotency-Key': operationId, ...(grant ? { 'X-Parent-Authorization': grant } : {}) } });
-    return response.json();
-  }
-  async uploadPage(file: Blob, operationId: string, grant?: string): Promise<OriginalPage> {
-    const response = await this.send('/collection/pages', { method: 'POST', body: file, headers: { 'Content-Type': ['image/jpeg', 'image/png', 'image/webp'].includes(file.type) ? file.type : 'image/png', 'Idempotency-Key': operationId, ...(grant ? { 'X-Parent-Authorization': grant } : {}) } });
+  uploadImage(file: Blob, operationId: string, grant?: string) { return this.upload<Question>('drafts', file, operationId, grant); }
+  uploadPage(file: Blob, operationId: string, grant?: string) { return this.upload<OriginalPage>('pages', file, operationId, grant); }
+  private async upload<T>(target: 'drafts' | 'pages', file: Blob, operationId: string, grant?: string): Promise<T> {
+    const response = await this.send(`/collection/${target}`, { method: 'POST', body: file, headers: { 'Content-Type': ['image/jpeg', 'image/png', 'image/webp'].includes(file.type) ? file.type : 'image/png', 'Idempotency-Key': operationId, ...(grant ? { 'X-Parent-Authorization': grant } : {}) } });
     return response.json();
   }
   async pageImage(pageId: string, variant: 'original' | 'preview') {
