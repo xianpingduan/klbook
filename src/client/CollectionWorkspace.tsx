@@ -129,9 +129,11 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
   function openReading(id: string | null) {
     if (!selected || creating) return;
     void run(async () => {
+      // Leaving the question editor can save new pages before this queued callback runs.
+      const question = id ? undefined : await api.question(selected.id, managementGrant);
       const material = id ? await api.readingMaterial(id, managementGrant) : {
         id: crypto.randomUUID(), libraryId: home.library.id, title: '', revision: 0, referenceCount: 0, partCount: 0, createdAt: 0, updatedAt: 0,
-        parts: selected.parts.filter((part, index, parts) => parts.findIndex(other => other.originalPage.id === part.originalPage.id) === index).map(part => ({ id: crypto.randomUUID(), originalPage: part.originalPage, region: null }))
+        parts: question!.parts.filter((part, index, parts) => parts.findIndex(other => other.originalPage.id === part.originalPage.id) === index).map(part => ({ id: crypto.randomUUID(), originalPage: part.originalPage, region: null }))
       };
       if (!mounted.current) return;
       setReading(material); readingLinkOperation.current = crypto.randomUUID(); setScreen('reading');
@@ -139,12 +141,16 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
   }
   async function readingSaved(material: ReadingMaterial) {
     if (!selected) return;
-    const latest = selected.readingMaterial?.id === material.id ? await api.question(selected.id, managementGrant) : await api.saveQuestion(selected.id, {
+    const alreadyLinked = selected.readingMaterial?.id === material.id;
+    const latest = alreadyLinked ? await api.question(selected.id, managementGrant) : await api.saveQuestion(selected.id, {
       operationId: readingLinkOperation.current, expectedRevision: selected.revision, state: selected.state, subjectId: selected.subjectId,
       region: selected.region, parts: selected.parts.map(part => ({ id: part.id, pageId: part.originalPage.id, region: part.region })),
       sourceId: selected.sourceId, pageNumber: selected.pageNumber, questionNumber: selected.questionNumber, note: selected.note, readingMaterialId: material.id
     }, managementGrant);
     if (!mounted.current) return;
+    if (latest.readingMaterial?.id !== material.id || (!alreadyLinked && latest.revision !== selected.revision + 1)) {
+      throw new ApiError(409, '题目已在其他页面更新，请返回列表重新打开题目后核对');
+    }
     setSelected(latest); setReading(undefined); setScreen('edit'); setRefresh(value => value + 1);
   }
   const subjectName = (id: string | null) => subjects.find(subject => subject.id === id)?.name ?? '待选学科';

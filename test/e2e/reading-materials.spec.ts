@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { startServer } from './server.ts';
+import type { Question } from '../../src/shared/collection.ts';
 
 test('从小题建立跨页共享原文，另一小题选择同一材料，解除首题后仍可完整查看', async ({ page, request }) => {
   const dir = await mkdtemp(join(tmpdir(), 'klbook-reading-'));
@@ -68,6 +69,27 @@ test('从小题建立跨页共享原文，另一小题选择同一材料，解�
     }
     const list = await (await request.get(`${server.url}/api/v1/collection/reading-materials`, { headers })).json();
     expect(list.total).toBe(1); expect(list.items[0].referenceCount).toBe(1);
+    // A lost association response must not hide another device's later unlink.
+    await page.getByRole('button', { name: '返回列表', exact: true }).click();
+    await page.getByRole('article').filter({ has: page.getByRole('heading', { name: '未填写来源 · 第 1 题', exact: true }) }).getByRole('button', { name: '打开错题', exact: true }).click();
+    await page.getByRole('button', { name: '补充或更正信息', exact: true }).click();
+    await page.getByRole('button', { name: '从原始页新建阅读材料', exact: true }).click();
+    await page.getByLabel('阅读材料名称').fill('重试时保留的原文');
+    await page.getByRole('button', { name: '选择整页', exact: true }).click();
+    await page.route('**/api/v1/collection/questions/*', async route => { await route.fetch(); await route.abort(); }, { times: 1 });
+    await page.getByRole('button', { name: '保存并返回题目', exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText('仍保留');
+    const linked: Question = await (await request.get(`${server.url}/api/v1/collection/questions/${question.id}`, { headers })).json();
+    expect(linked.readingMaterial?.title).toBe('重试时保留的原文');
+    const unlinked = await request.put(`${server.url}/api/v1/collection/questions/${question.id}`, { headers, data: {
+      ...fields, expectedRevision: linked.revision, operationId: crypto.randomUUID(), readingMaterialId: null,
+      parts: linked.parts.map(part => ({ id: part.id, pageId: part.originalPage.id, region: part.region })), note: '另一设备已解除引用'
+    } });
+    expect(unlinked.status()).toBe(200);
+    await page.getByRole('button', { name: '保存并返回题目', exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText('题目已在其他页面更新');
+    await expect(page.getByLabel('阅读材料名称')).toHaveValue('重试时保留的原文');
+    expect(await (await request.get(`${server.url}/api/v1/collection/questions/${question.id}`, { headers })).json()).toEqual(await unlinked.json());
   } finally { await server.stop(); await rm(dir, { recursive: true, force: true }); }
 });
 
@@ -87,10 +109,16 @@ test('后台原文保存及关联响应丢失可重试，修改不重复创建�
     await page.getByRole('button', { name: '登录此设备', exact: true }).click();
     await page.getByLabel('家长密码', { exact: true }).fill('family password 123'); await page.getByRole('button', { name: '验证并进入管理', exact: true }).click();
     await page.getByRole('table', { name: '已收集资料' }).getByRole('button', { name: '打开', exact: true }).click();
+    await page.getByLabel('追加跨页图片', { exact: true }).setInputFiles({ name: '新追加原始页.png', mimeType: 'image/png', buffer: await sharp(bytes).flop().png().toBuffer() });
+    await expect(page.getByRole('button', { name: '题目区 2', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', { name: '选择整页', exact: true }).click();
+    await page.getByRole('button', { name: '确认题目范围', exact: true }).click();
     await page.getByLabel('备注（选填）').fill('先保存小题的修改');
     await page.getByRole('button', { name: '从原始页新建阅读材料', exact: true }).click();
     await page.getByRole('button', { name: '保存后离开', exact: true }).click();
     await page.getByLabel('阅读材料名称', { exact: true }).fill('My story'); await page.getByRole('button', { name: '选择整页', exact: true }).click();
+    await page.getByRole('button', { name: '原文区 2', exact: true }).click();
+    await page.getByRole('button', { name: '选择整页', exact: true }).click();
     await page.route('**/api/v1/collection/reading-materials/*', async route => { await route.fetch(); await route.abort(); }, { times: 1 });
     await page.getByRole('button', { name: '保存并返回题目', exact: true }).click();
     await expect(page.getByRole('alert')).toContainText('仍保留');
@@ -102,6 +130,7 @@ test('后台原文保存及关联响应丢失可重试，修改不重复创建�
     await expect(page.getByLabel('备注（选填）')).toHaveValue('先保存小题的修改');
     const saved = await (await request.get(`${server.url}/api/v1/collection/questions/${question.id}`, { headers })).json();
     expect(saved.readingMaterial.title).toBe('My revised story');
+    expect(saved.readingMaterial.parts.map((part: { originalPage: { id: string } }) => part.originalPage.id)).toEqual(saved.parts.map((part: { originalPage: { id: string } }) => part.originalPage.id));
     expect((await (await request.get(`${server.url}/api/v1/collection/reading-materials`, { headers })).json()).total).toBe(1);
     await page.getByRole('button', { name: '编辑已关联原文', exact: true }).click();
     await page.getByLabel('阅读材料名称', { exact: true }).fill('本页尚未保存的名称');

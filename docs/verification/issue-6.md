@@ -1,7 +1,7 @@
 # #6 共享阅读材料验证
 
 日期：2026-09-23。任务：[GitHub #6](https://github.com/xianpingduan/klbook/issues/6)。
-开始提交：`c4bb9fb65b9e336f83fe7ab5c5b3ee83933b791c`；本次代码审查基线已询问，等待用户确认。
+开始提交与用户确认的代码审查基线：`c4bb9fb65b9e336f83fe7ab5c5b3ee83933b791c`。
 操作与引用规则：[共享阅读材料](../shared-reading-materials.md)。
 
 ## 实施与测试边界

@@ -44,7 +44,7 @@ export class ReadingMaterials {
     const parts = input.parts.map(part => ({ id: part.id, pageId: part.pageId, region: { x: part.region!.x, y: part.region!.y, width: part.region!.width, height: part.region!.height } }));
     const requestHash = fileHash(Buffer.from(JSON.stringify({ id, expectedRevision: input.expectedRevision, title, parts })));
     for (const pageId of new Set(parts.map(part => part.pageId))) await this.pages.verify(home.library.id, pageId);
-    return this.db.transaction(() => {
+    const saved = this.db.transaction(() => {
       authorize();
       const previous = this.db.prepare<[string, string, string], { requestHash: string; materialId: string }>('SELECT requestHash, materialId FROM readingOperations WHERE libraryId = ? AND accountId = ? AND operationId = ?').get(home.library.id, home.account.id, input.operationId);
       if (previous) {
@@ -61,5 +61,11 @@ export class ReadingMaterials {
       this.db.prepare('INSERT INTO readingOperations VALUES (?, ?, ?, ?, ?)').run(home.library.id, home.account.id, input.operationId, requestHash, id);
       return this.get(home.library.id, id);
     })();
+    // Replaying an older operation returns the current snapshot, which may include newer pages.
+    if (saved.revision !== input.expectedRevision + 1) {
+      for (const pageId of new Set(saved.parts.map(part => part.originalPage.id))) await this.pages.verify(home.library.id, pageId);
+      authorize();
+    }
+    return saved;
   }
 }

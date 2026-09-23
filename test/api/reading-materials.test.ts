@@ -83,10 +83,16 @@ test('共享材料遵守权限、重试与修订规则，附件缺失不能保�
     const material = result.json();
     assert.equal((await save({ ...input, title: '同一操作变更' })).statusCode, 409);
     assert.equal((await save({ ...input, operationId: randomUUID() })).statusCode, 409);
-    const edit = { ...input, operationId: randomUUID(), expectedRevision: 1, title: '已更正' };
+    const continuation = (await f.app.inject({ method: 'POST', url: '/api/v1/collection/pages', headers: { ...headers, 'content-type': 'image/png', 'idempotency-key': randomUUID() }, payload: await paper('#dddddd') })).json();
+    const edit = { ...input, operationId: randomUUID(), expectedRevision: 1, title: '已更正', parts: [...input.parts, { id: randomUUID(), pageId: continuation.id, region: whole }] };
     const updated = await save(edit); assert.equal(updated.statusCode, 200);
     assert.equal((await save({ ...edit, operationId: randomUUID(), title: '旧修订覆盖' })).statusCode, 409);
     assert.equal((await save(input)).json().revision, 2);
+    const continuationOriginal = join(f.dataDir, 'attachments', 'pages', continuation.id, 'original');
+    await rename(continuationOriginal, `${continuationOriginal}.unavailable`);
+    try { assert.equal((await save(input)).statusCode, 503, '重放旧操作不能将包含缺失续页的最新原文报为完整保存'); }
+    finally { await rename(`${continuationOriginal}.unavailable`, continuationOriginal); }
+    assert.deepEqual((await save(input)).json(), updated.json());
     // Move the actual original file temporarily; verification remains through public interfaces.
     const original = join(f.dataDir, 'attachments', 'pages', page.id, 'original');
     await rename(original, `${original}.unavailable`);
