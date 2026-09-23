@@ -1,7 +1,7 @@
 import type { Device, Home, LoginInput, ParentGrant, RecoveryInput, ServerInfo, SessionResult, SetupInput } from '../shared/contracts.ts';
 import type { ClientPlatform, SavedCredential } from './platform.ts';
 import { serverOrigin } from './platform.ts';
-import type { Question, QuestionEdit, QuestionList, Subject } from '../shared/collection.ts';
+import type { OriginalPage, Question, QuestionCreate, QuestionEdit, QuestionList, Subject } from '../shared/collection.ts';
 import type { Source, SourceEdit } from '../shared/sources.ts';
 
 export class ApiError extends Error {
@@ -55,8 +55,13 @@ export class FamilyApi {
   questions(state: 'draft' | 'collected', offset = 0, grant?: string) { return this.request<QuestionList>(`/collection/questions?state=${state}&offset=${offset}`, 'GET', undefined, grant); }
   question(id: string, grant?: string) { return this.request<Question>(`/collection/questions/${encodeURIComponent(id)}`, 'GET', undefined, grant); }
   saveQuestion(id: string, input: QuestionEdit, grant?: string) { return this.request<Question>(`/collection/questions/${encodeURIComponent(id)}`, 'PUT', input, grant); }
+  createQuestion(pageId: string, input: QuestionCreate, grant?: string) { return this.request<Question>(`/collection/pages/${encodeURIComponent(pageId)}/questions`, 'POST', input, grant); }
   async uploadImage(file: Blob, operationId: string, grant?: string): Promise<Question> {
     const response = await this.send('/collection/drafts', { method: 'POST', body: file, headers: { 'Content-Type': ['image/jpeg', 'image/png', 'image/webp'].includes(file.type) ? file.type : 'image/png', 'Idempotency-Key': operationId, ...(grant ? { 'X-Parent-Authorization': grant } : {}) } });
+    return response.json();
+  }
+  async uploadPage(file: Blob, operationId: string, grant?: string): Promise<OriginalPage> {
+    const response = await this.send('/collection/pages', { method: 'POST', body: file, headers: { 'Content-Type': ['image/jpeg', 'image/png', 'image/webp'].includes(file.type) ? file.type : 'image/png', 'Idempotency-Key': operationId, ...(grant ? { 'X-Parent-Authorization': grant } : {}) } });
     return response.json();
   }
   async pageImage(pageId: string, variant: 'original' | 'preview') {

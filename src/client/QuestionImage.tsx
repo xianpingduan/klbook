@@ -30,7 +30,7 @@ export function QuestionImage({ api, page, region, original = false }: { api: Fa
   </svg>;
 }
 
-export function CropSelector({ api, page, region, onChange, disabled }: { api: FamilyApi; page: OriginalPage; region: Region | null; onChange(value: Region): void; disabled: boolean }) {
+export function CropSelector({ api, page, region, onChange, disabled }: { api: FamilyApi; page: OriginalPage; region: Region | null; onChange(value: Region | null): void; disabled: boolean }) {
   const image = usePageImage(api, page.id, 'preview');
   const start = useRef<{ x: number; y: number } | null>(null);
   function point(event: PointerEvent<SVGSVGElement>) {
@@ -56,6 +56,7 @@ export function CropSelector({ api, page, region, onChange, disabled }: { api: F
       </svg>
     </div> : !image.error && <p>正在读取图片…</p>}
     <button type="button" className="quiet" disabled={disabled || !image.url} onClick={() => onChange({ x: 0, y: 0, width: 1, height: 1 })}>选择整页</button>
+    {region && <button type="button" className="quiet" disabled={disabled} onClick={() => onChange(null)}>清除当前框选</button>}
     {region && <details className="region-controls"><summary>精确调整范围（百分比）</summary><div className="region-grid">{(['x', 'y', 'width', 'height'] as const).map((key, index) => <label key={key}>{['左边位置', '上边位置', '范围宽度', '范围高度'][index]}<input type="number" min={key === 'width' || key === 'height' ? .01 : 0} max="100" step="0.01" disabled={disabled} value={Number((region[key] * 100).toFixed(2))} onChange={event => onChange({ ...region, [key]: Number(event.target.value) / 100 })} /></label>)}</div></details>}
   </div>;
 }

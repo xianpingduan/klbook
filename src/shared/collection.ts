@@ -7,17 +7,22 @@ export function validQuestionRegion(region: Region | null): region is Region {
 export interface OriginalPage {
   id: string; mimeType: string; byteLength: number; sha256: string; width: number; height: number;
 }
+export interface QuestionPart { id: string; originalPage: OriginalPage; region: Region | null }
+export interface QuestionPartEdit { id: string; pageId: string; region: Region | null }
 export interface Question {
   id: string; libraryId: string; learnerId: string; revision: number;
   state: 'draft' | 'collected'; syncState: 'synced'; subjectId: string | null; region: Region | null;
   sourceId: string | null; source: string; pageNumber: string; questionNumber: string; note: string;
   createdAt: number; updatedAt: number; collectedAt: number | null;
   originalPage: OriginalPage;
+  parts: QuestionPart[];
 }
 export interface QuestionList { items: Question[]; total: number; offset: number; limit: number }
 export interface QuestionEdit {
   operationId: string; expectedRevision: number; state: 'draft' | 'collected';
   subjectId: string | null; region: Region | null;
   sourceId?: string | null; source?: string; pageNumber: string; questionNumber: string; note: string;
+  parts?: QuestionPartEdit[];
 }
+export type QuestionCreate = Omit<QuestionEdit, 'expectedRevision'>;
 export const MAX_IMAGE_BYTES = 15 * 1024 * 1024;

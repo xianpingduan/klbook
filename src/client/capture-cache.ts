@@ -6,17 +6,18 @@ export interface CaptureBatch { items: PendingCapture[]; total: number; uploaded
 export class CaptureCache {
   private platform: ClientPlatform;
   private scope: DraftScope;
-  constructor(platform: ClientPlatform, scope: DraftScope) { this.platform = platform; this.scope = scope; }
+  private key: string;
+  constructor(platform: ClientPlatform, scope: DraftScope, key = 'manual-capture') { this.platform = platform; this.scope = scope; this.key = key; }
   async saveBatch(batch: CaptureBatch) {
     const header = new TextEncoder().encode(JSON.stringify({ version: 2, total: batch.total, uploaded: batch.uploaded, cancelled: batch.cancelled,
       items: batch.items.map(item => ({ operationId: item.operationId, name: item.name, type: item.file.type, size: item.file.size })) }));
     const length = new ArrayBuffer(4);
     new DataView(length).setUint32(0, header.byteLength);
-    try { await this.platform.drafts.put(this.scope, 'manual-capture', new Blob([length, header, ...batch.items.map(item => item.file)])); }
+    try { await this.platform.drafts.put(this.scope, this.key, new Blob([length, header, ...batch.items.map(item => item.file)])); }
     catch { throw new Error('本设备暂存失败，请检查浏览器可用空间后重试。当前图片仍保留在页面中。'); }
   }
   async readBatch(): Promise<CaptureBatch | undefined> {
-    const blob = await this.platform.drafts.get(this.scope, 'manual-capture');
+    const blob = await this.platform.drafts.get(this.scope, this.key);
     if (!blob) return;
     try {
       const length = new DataView(await blob.slice(0, 4).arrayBuffer()).getUint32(0);
@@ -41,11 +42,11 @@ export class CaptureCache {
     const length = new ArrayBuffer(4);
     new DataView(length).setUint32(0, header.byteLength);
     const blob = new Blob([length, header, capture.file]);
-    try { await this.platform.drafts.put(this.scope, 'manual-capture', blob); }
+    try { await this.platform.drafts.put(this.scope, this.key, blob); }
     catch { throw new Error('本设备暂存失败，请检查浏览器可用空间后重试。当前图片仍保留在页面中。'); }
   }
   async read(): Promise<PendingCapture | undefined> {
-    const blob = await this.platform.drafts.get(this.scope, 'manual-capture');
+    const blob = await this.platform.drafts.get(this.scope, this.key);
     if (!blob) return;
     try {
       const length = new DataView(await blob.slice(0, 4).arrayBuffer()).getUint32(0);
@@ -55,5 +56,5 @@ export class CaptureCache {
       return { operationId: header.operationId, file: blob.slice(length + 4, blob.size, header.type), name: header.name };
     } catch { throw new Error('本设备暂存信息无法读取，请重新选择原图片。'); }
   }
-  remove() { return this.platform.drafts.remove(this.scope, 'manual-capture'); }
+  remove() { return this.platform.drafts.remove(this.scope, this.key); }
 }

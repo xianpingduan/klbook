@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Home } from '../shared/contracts.ts';
 import { MAX_IMAGE_BYTES } from '../shared/collection.ts';
-import type { Question, QuestionList, Subject } from '../shared/collection.ts';
+import type { OriginalPage, Question, QuestionList, Subject } from '../shared/collection.ts';
 import type { ClientPlatform } from './platform.ts';
 import { ApiError, FamilyApi } from './api.ts';
 import { CaptureCache } from './capture-cache.ts';
 import type { CaptureBatch, PendingCapture } from './capture-cache.ts';
 import { QuestionEditor } from './QuestionEditor.tsx';
 import { QuestionImage } from './QuestionImage.tsx';
+import { QuestionParts } from './QuestionParts.tsx';
+import { NewQuestionFromPage } from './NewQuestionFromPage.tsx';
 import type { Source } from '../shared/sources.ts';
 import { CaptureChoices } from './CaptureChoices.tsx';
 import { CaptureQueue } from './CaptureQueue.tsx';
@@ -26,6 +28,8 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
   const [selected, setSelected] = useState<Question>();
+  const [creating, setCreating] = useState(false);
+  const pageCache = useMemo(() => new CaptureCache(platform, { libraryId: home.library.id, accountId: home.account.id }, `question-pages:${selected?.id}`), [platform, home.library.id, home.account.id, selected?.id]);
   const [batch, setBatch] = useState<CaptureBatch>();
   const pending = batch?.items[0];
   const [busy, setBusy] = useState(false);
@@ -42,7 +46,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const { requestLeave } = useLeaveGuard(busy && screen !== 'edit', () => setError('正在处理材料，请稍候再离开。当前材料仍保留。'));
-  useEffect(() => { setScreen('list'); setSelected(undefined); setOriginalOpen(false); }, [path]);
+  useEffect(() => { setScreen('list'); setSelected(undefined); setCreating(false); setOriginalOpen(false); }, [path]);
 
   useEffect(() => { onEditing(screen !== 'list'); }, [screen, onEditing]);
   useEffect(() => {
@@ -105,7 +109,14 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
     setNotice('已取消这张材料。若此前已上传成功，服务器草稿仍会保留。');
     setRefresh(value => value + 1);
   }
-  function back() { setError(''); setNotice(''); setSelected(undefined); setOriginalOpen(false); setScreen('list'); setRefresh(value => value + 1); }
+  function back() { setError(''); setNotice(''); setSelected(undefined); setCreating(false); setOriginalOpen(false); setScreen('list'); setRefresh(value => value + 1); }
+  function newFromPage(page: OriginalPage) {
+    if (!selected || !active || busy || (admin && !grant)) return;
+    setSelected({ ...selected, id: crypto.randomUUID(), revision: 1, state: 'draft', subjectId: null, region: null, questionNumber: '', note: '', collectedAt: null,
+      originalPage: page, parts: [{ id: crypto.randomUUID(), originalPage: page, region: null }],
+      sourceId: sources.some(source => source.id === selected.sourceId && source.active) ? selected.sourceId : null });
+    setCreating(true); setOriginalOpen(false); setScreen('edit');
+  }
   function open(question: Question) {
     void run(async () => { const latest = await api.question(question.id, managementGrant); setSelected(latest); setOriginalOpen(false); setScreen(admin || latest.state === 'draft' ? 'edit' : 'detail'); });
   }
@@ -130,15 +141,16 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
       </article>)}</div>}
       {list.items.length < list.total && <button className="quiet" disabled={busy} onClick={() => void run(async () => { const more = await api.questions(listState, list.items.length, managementGrant); setList(current => ({ ...more, items: [...current.items, ...more.items] })); })}>加载更多</button>}
     </section>}
-    {screen === 'edit' && selected && <QuestionEditor key={selected.id} api={api} question={selected} subjects={subjects} sources={sources} active={active} admin={admin} grant={managementGrant} onBack={back} onAccessError={onAccessError} onSaved={question => { setSelected(question); setRefresh(value => value + 1); if (!admin && question.state === 'collected') setScreen('detail'); }} />}
+    {screen === 'edit' && selected && <QuestionEditor key={selected.id} api={api} question={selected} subjects={subjects} sources={sources} active={active} admin={admin} creating={creating} grant={managementGrant} pageCache={pageCache} onBack={back} onNewFromPage={newFromPage} onAccessError={onAccessError} onSaved={question => { setSelected(question); setCreating(false); setRefresh(value => value + 1); if (!admin && question.state === 'collected') setScreen('detail'); }} />}
     {admin && screen === 'edit' && continuation}
     {screen === 'detail' && selected && <section className="card collection-card">
       <div className="section-heading"><div><p className="eyebrow">{subjectName(selected.subjectId)} · 已收集</p><h1>错题详情</h1></div><button className="quiet" disabled={busy} onClick={back}>返回列表</button></div>
-      <p className="sync-state">已同步到家庭资料库</p><div className="detail-material"><QuestionImage api={api} page={selected.originalPage} region={selected.region} /></div>
+      <p className="sync-state">已同步到家庭资料库</p><div className="detail-material"><QuestionParts api={api} parts={selected.parts} /></div>
       {continuation}
       <dl><div><dt>收集时间</dt><dd>{date(selected.collectedAt!)}</dd></div><div><dt>来源</dt><dd>{selected.source || '未填写'}</dd></div><div><dt>页码 / 题号</dt><dd>{selected.pageNumber || '未填写'} / {selected.questionNumber || '未填写'}</dd></div><div><dt>备注</dt><dd className="note-text">{selected.note || '未填写'}</dd></div></dl>
       <button disabled={busy} onClick={() => setScreen('edit')}>补充或更正信息</button><button className="quiet" onClick={() => setOriginalOpen(value => !value)}>{originalOpen ? '收起原始页' : '查看原始页'}</button>
-      {originalOpen && <div className="original-material"><h2>原始页</h2><p className="hint">这是上传时保留的完整原图，包含题目、作答和批改。</p><QuestionImage api={api} page={selected.originalPage} original /></div>}
+      <NewQuestionFromPage parts={selected.parts} disabled={busy} onChoose={newFromPage} />
+      {originalOpen && <div className="original-material"><h2>原始页</h2><p className="hint">这是上传时保留的完整原图，包含题目、作答和批改。</p><QuestionParts api={api} parts={selected.parts} original /></div>}
     </section>}
   </div>;
 }

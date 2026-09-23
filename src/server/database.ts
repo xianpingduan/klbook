@@ -59,6 +59,21 @@ const migrations = [
       const name = question.source.trim();
       if (name) db.prepare('UPDATE questions SET sourceId = ? WHERE id = ?').run(add(name), question.id);
     }
+  },
+  (db: Database.Database) => {
+    db.exec(`CREATE TABLE questionParts (
+      questionId TEXT NOT NULL REFERENCES questions(id), id TEXT NOT NULL,
+      pageId TEXT NOT NULL REFERENCES originalPages(id), position INTEGER NOT NULL, region TEXT,
+      PRIMARY KEY(questionId, id), UNIQUE(questionId, position)
+    );
+    CREATE INDEX partsByPage ON questionParts(pageId);
+    CREATE TABLE pageOperations (
+      libraryId TEXT NOT NULL, accountId TEXT NOT NULL, operationId TEXT NOT NULL,
+      requestHash TEXT NOT NULL, pageId TEXT NOT NULL REFERENCES originalPages(id),
+      PRIMARY KEY(libraryId, accountId, operationId)
+    );`);
+    const add = db.prepare('INSERT INTO questionParts VALUES (?, ?, ?, 0, ?)');
+    for (const row of db.prepare<[], { id: string; originalPageId: string; region: string | null }>('SELECT id, originalPageId, region FROM questions').all()) add.run(row.id, randomUUID(), row.originalPageId, row.region);
   }
 ];
 

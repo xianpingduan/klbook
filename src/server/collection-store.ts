@@ -1,14 +1,14 @@
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import type { Home } from '../shared/contracts.ts';
-import type { Question, QuestionEdit, QuestionList, Region, Subject } from '../shared/collection.ts';
+import type { Question, QuestionCreate, QuestionEdit, QuestionList, QuestionPartEdit, Region, Subject } from '../shared/collection.ts';
 import { validQuestionRegion } from '../shared/collection.ts';
 import { AccessError } from './family-access.ts';
 import { Attachments, fileHash } from './attachments.ts';
 import type { StoredPage } from './attachments.ts';
 import { Sources } from './sources.ts';
 
-interface QuestionRow extends Omit<Question, 'originalPage' | 'region' | 'syncState'> { originalPageId: string; region: string | null }
+interface QuestionRow extends Omit<Question, 'originalPage' | 'parts' | 'region' | 'syncState'> { originalPageId: string; region: string | null }
 export class CollectionStore {
   private db: Database.Database;
   private files: Attachments;
@@ -21,12 +21,17 @@ export class CollectionStore {
     if (!page) throw new AccessError(404, '找不到原始页');
     return page;
   }
+  private publicPage(libraryId: string, id: string) {
+    const { previewSha256: _preview, libraryId: _libraryId, ...page } = this.page(libraryId, id);
+    return page;
+  }
   get(libraryId: string, id: string): Question {
     const row = this.db.prepare<[string, string], QuestionRow>('SELECT * FROM questions WHERE libraryId = ? AND id = ?').get(libraryId, id);
     if (!row) throw new AccessError(404, '找不到这道题');
     const { originalPageId, region, ...rest } = row;
-    const { previewSha256: _preview, libraryId: _libraryId, ...originalPage } = this.page(libraryId, originalPageId);
-    return { ...rest, source: rest.sourceId ? this.sources.get(rest.sourceId).name : rest.source, region: region ? JSON.parse(region) as Region : null, originalPage, syncState: 'synced' };
+    const parts = this.db.prepare<[string], { id: string; pageId: string; region: string | null }>('SELECT id, pageId, region FROM questionParts WHERE questionId = ? ORDER BY position').all(id)
+      .map(part => ({ id: part.id, originalPage: this.publicPage(libraryId, part.pageId), region: part.region ? JSON.parse(part.region) as Region : null }));
+    return { ...rest, source: rest.sourceId ? this.sources.get(rest.sourceId).name : rest.source, region: region ? JSON.parse(region) as Region : null, originalPage: this.publicPage(libraryId, originalPageId), parts, syncState: 'synced' };
   }
   list(libraryId: string, state: 'draft' | 'collected', offset: number): QuestionList {
     const ids = this.db.prepare<[string, string, number], { id: string }>('SELECT id FROM questions WHERE libraryId = ? AND state = ? ORDER BY createdAt DESC, id LIMIT 50 OFFSET ?').all(libraryId, state, offset);
@@ -59,6 +64,7 @@ export class CollectionStore {
         this.db.prepare('INSERT INTO originalPages VALUES (@id, @libraryId, @mimeType, @byteLength, @sha256, @previewSha256, @width, @height)').run(page);
         const id = randomUUID();
         this.db.prepare("INSERT INTO questions (id, libraryId, learnerId, originalPageId, revision, state, createdAt, updatedAt) VALUES (?, ?, ?, ?, 1, 'draft', ?, ?)").run(id, home.library.id, home.library.learnerId, page.id, this.now(), this.now());
+        this.db.prepare('INSERT INTO questionParts VALUES (?, ?, ?, 0, NULL)').run(id, randomUUID(), page.id);
         this.db.prepare('INSERT INTO collectionOperations VALUES (?, ?, ?, ?, ?)').run(home.library.id, home.account.id, operationId, requestHash, id);
         return this.get(home.library.id, id);
       })();
@@ -67,50 +73,94 @@ export class CollectionStore {
       if (!used) await this.files.discard(page.id);
     }
   }
+  async uploadPage(authorize: () => Home, operationId: string, bytes: Buffer) {
+    const home = authorize();
+    const requestHash = fileHash(bytes);
+    const replay = () => {
+      const row = this.db.prepare<[string, string, string], { pageId: string; requestHash: string }>('SELECT pageId, requestHash FROM pageOperations WHERE libraryId = ? AND accountId = ? AND operationId = ?').get(home.library.id, home.account.id, operationId);
+      if (row && row.requestHash !== requestHash) throw new AccessError(409, '此次重试的图片已改变，请重新选择');
+      return row ? this.page(home.library.id, row.pageId) : undefined;
+    };
+    const existing = replay();
+    if (existing) {
+      await this.files.read(existing, 'original'); await this.files.read(existing, 'preview'); authorize();
+      return this.publicPage(home.library.id, existing.id);
+    }
+    const page = await this.files.save(randomUUID(), home.library.id, bytes);
+    try {
+      return this.db.transaction(() => {
+        authorize();
+        const duplicate = replay();
+        if (duplicate) return this.publicPage(home.library.id, duplicate.id);
+        this.db.prepare('INSERT INTO originalPages VALUES (@id, @libraryId, @mimeType, @byteLength, @sha256, @previewSha256, @width, @height)').run(page);
+        this.db.prepare('INSERT INTO pageOperations VALUES (?, ?, ?, ?, ?)').run(home.library.id, home.account.id, operationId, requestHash, page.id);
+        return this.publicPage(home.library.id, page.id);
+      })();
+    } finally {
+      if (!this.db.prepare('SELECT 1 FROM originalPages WHERE id = ?').get(page.id)) await this.files.discard(page.id);
+    }
+  }
   async attachment(libraryId: string, pageId: string, variant: 'original' | 'preview') {
     const page = this.page(libraryId, pageId);
     return { bytes: await this.files.read(page, variant), mimeType: variant === 'original' ? page.mimeType : 'image/webp' };
   }
 
-  async save(authorize: () => Home, id: string, input: QuestionEdit) {
+  create(authorize: () => Home, pageId: string, input: QuestionCreate) {
+    return this.write(authorize, null, { ...input, expectedRevision: 0 }, pageId);
+  }
+  save(authorize: () => Home, id: string, input: QuestionEdit) {
+    return this.write(authorize, id, input);
+  }
+  private async write(authorize: () => Home, id: string | null, input: QuestionEdit, pageId?: string) {
     const home = authorize();
-    const current = this.get(home.library.id, id);
+    const current = id ? this.get(home.library.id, id) : undefined;
+    const parts: QuestionPartEdit[] = input.parts ?? (current ? current.parts.map((part, index) => ({ id: part.id, pageId: part.originalPage.id, region: index === 0 ? input.region : part.region })) : [{ id: randomUUID(), pageId: pageId!, region: input.region }]);
+    if (!parts.length || parts.length > 50 || new Set(parts.map(part => part.id)).size !== parts.length) throw new AccessError(422, '每道题需保留 1～50 个不重复的题目区');
+    if (parts.some(part => part.region && !validQuestionRegion(part.region))) throw new AccessError(422, '题目范围必须在原始页内');
+    if (['x', 'y', 'width', 'height'].some(key => parts[0]!.region?.[key as keyof Region] !== input.region?.[key as keyof Region])) throw new AccessError(422, '首个题目区与题目范围不一致，请刷新后重试');
+    if (pageId && parts[0]!.pageId !== pageId) throw new AccessError(422, '新题需从所选原始页开始');
     if (input.region && !validQuestionRegion(input.region)) throw new AccessError(422, '题目范围必须在原始页内');
     if (input.subjectId !== null && !this.db.prepare('SELECT 1 FROM subjects WHERE id = ?').get(input.subjectId)) throw new AccessError(422, '请选择有效学科');
-    if (input.state === 'collected' && (!input.subjectId || !input.region)) throw new AccessError(422, '确认题目范围并选择学科后，才能完成收集');
+    if (input.state === 'collected' && (!input.subjectId || parts.some(part => !part.region))) throw new AccessError(422, '确认所有题目范围并选择学科后，才能完成收集');
     const content = {
       state: input.state, subjectId: input.subjectId, region: input.region ? { x: input.region.x, y: input.region.y, width: input.region.width, height: input.region.height } : null,
       ...(input.sourceId !== undefined ? { sourceId: input.sourceId } : { source: input.source!.trim() }),
       pageNumber: input.pageNumber.trim(), questionNumber: input.questionNumber.trim(), note: input.note.trim()
     };
-    const requestHash = `save:${fileHash(Buffer.from(JSON.stringify({ id, expectedRevision: input.expectedRevision, ...content })))}`;
+    const requestHash = `save:${fileHash(Buffer.from(JSON.stringify({ id, pageId, expectedRevision: input.expectedRevision, ...content, ...(input.parts ? { parts: input.parts } : {}) })))}`;
     // Verify the actual required files before publishing a collected record or acknowledging a retry.
-    const page = this.page(home.library.id, current.originalPage.id);
-    await this.files.read(page, 'original');
-    await this.files.read(page, 'preview');
+    for (const required of new Set(parts.map(part => part.pageId))) {
+      const page = this.page(home.library.id, required);
+      await this.files.read(page, 'original'); await this.files.read(page, 'preview');
+    }
     return this.db.transaction(() => {
       authorize();
       const duplicate = this.replay(home, input.operationId, requestHash);
       if (duplicate) return duplicate;
-      const latest = this.get(home.library.id, id);
-      if (latest.state === 'collected' && input.state === 'draft') throw new AccessError(409, '已收集的题目不能改回草稿');
-      if (latest.revision !== input.expectedRevision) throw new AccessError(409, '这道题已在其他页面更新。你的修改仍在当前页面，请先重新读取并核对');
+      const latest = id ? this.get(home.library.id, id) : undefined;
+      if (latest?.state === 'collected' && input.state === 'draft') throw new AccessError(409, '已收集的题目不能改回草稿');
+      if (latest && latest.revision !== input.expectedRevision) throw new AccessError(409, '这道题已在其他页面更新。你的修改仍在当前页面，请先重新读取并核对');
       let selectedSource = input.sourceId ? this.sources.get(input.sourceId) : undefined;
       if (input.sourceId === undefined && input.source!.trim()) {
         const name = input.source!.trim();
-        selectedSource = name === latest.source && latest.sourceId ? this.sources.get(latest.sourceId) : this.sources.find(name);
+        selectedSource = name === latest?.source && latest.sourceId ? this.sources.get(latest.sourceId) : this.sources.find(name);
         if (!selectedSource) throw new AccessError(409, '来源已改为列表选择，请刷新页面后选择已有来源');
       }
-      if (selectedSource && !selectedSource.active && selectedSource.id !== latest.sourceId) throw new AccessError(422, '此来源已停用，请选择其他来源或留空');
-      this.db.prepare(`UPDATE questions SET revision = revision + 1, state = @state, subjectId = @subjectId, region = @region,
+      if (selectedSource && !selectedSource.active && selectedSource.id !== latest?.sourceId) throw new AccessError(422, '此来源已停用，请选择其他来源或留空');
+      const questionId = id ?? randomUUID();
+      if (!id) this.db.prepare("INSERT INTO questions (id, libraryId, learnerId, originalPageId, revision, state, createdAt, updatedAt) VALUES (?, ?, ?, ?, 1, 'draft', ?, ?)").run(questionId, home.library.id, home.library.learnerId, parts[0]!.pageId, this.now(), this.now());
+      this.db.prepare(`UPDATE questions SET revision = @revision, state = @state, subjectId = @subjectId, region = @region, originalPageId = @originalPageId,
         sourceId = @sourceId, source = @source, pageNumber = @pageNumber, questionNumber = @questionNumber, note = @note, updatedAt = @updatedAt, collectedAt = @collectedAt
         WHERE id = @id AND libraryId = @libraryId`).run({
-        id, libraryId: home.library.id, ...content, region: content.region ? JSON.stringify(content.region) : null,
+        id: questionId, revision: latest ? latest.revision + 1 : 1, originalPageId: parts[0]!.pageId, libraryId: home.library.id, ...content, region: content.region ? JSON.stringify(content.region) : null,
         sourceId: selectedSource?.id ?? null, source: selectedSource?.name ?? '',
-        updatedAt: this.now(), collectedAt: latest.collectedAt ?? (input.state === 'collected' ? this.now() : null)
+        updatedAt: this.now(), collectedAt: latest?.collectedAt ?? (input.state === 'collected' ? this.now() : null)
       });
-      this.db.prepare('INSERT INTO collectionOperations VALUES (?, ?, ?, ?, ?)').run(home.library.id, home.account.id, input.operationId, requestHash, id);
-      return this.get(home.library.id, id);
+      this.db.prepare('DELETE FROM questionParts WHERE questionId = ?').run(questionId);
+      const addPart = this.db.prepare('INSERT INTO questionParts VALUES (?, ?, ?, ?, ?)');
+      parts.forEach((part, index) => addPart.run(questionId, part.id, part.pageId, index, part.region ? JSON.stringify(part.region) : null));
+      this.db.prepare('INSERT INTO collectionOperations VALUES (?, ?, ?, ?, ?)').run(home.library.id, home.account.id, input.operationId, requestHash, questionId);
+      return this.get(home.library.id, questionId);
     })();
   }
 }

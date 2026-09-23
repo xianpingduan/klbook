@@ -2,8 +2,27 @@ import type { FastifyInstance } from 'fastify';
 import type { FamilyAccess } from './family-access.ts';
 import { CollectionStore } from './collection-store.ts';
 import { MAX_IMAGE_BYTES } from '../shared/collection.ts';
-import type { QuestionEdit } from '../shared/collection.ts';
+import type { QuestionCreate, QuestionEdit } from '../shared/collection.ts';
 import { AccessError } from './family-access.ts';
+
+const regionSchema = { anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], properties: {
+  x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 },
+  width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 }
+} }] };
+const idParams = { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } };
+const createBody = {
+  type: 'object', required: ['operationId', 'state', 'subjectId', 'region', 'pageNumber', 'questionNumber', 'note'], additionalProperties: false,
+  oneOf: [{ required: ['sourceId'] }, { required: ['source'] }],
+  properties: {
+    operationId: { type: 'string', format: 'uuid' }, state: { enum: ['draft', 'collected'] },
+    subjectId: { type: ['string', 'null'], minLength: 1, maxLength: 64 }, region: regionSchema,
+    parts: { type: 'array', minItems: 1, maxItems: 50, items: { type: 'object', additionalProperties: false, required: ['id', 'pageId', 'region'], properties: {
+      id: { type: 'string', format: 'uuid' }, pageId: { type: 'string', format: 'uuid' }, region: regionSchema
+    } } },
+    sourceId: { type: ['string', 'null'], format: 'uuid' }, source: { type: 'string', maxLength: 200 },
+    pageNumber: { type: 'string', maxLength: 32 }, questionNumber: { type: 'string', maxLength: 32 }, note: { type: 'string', maxLength: 2000 }
+  }
+};
 
 export function collectionRoutes(app: FastifyInstance, access: FamilyAccess, collection: CollectionStore) {
   app.register(async routes => {
@@ -15,30 +34,20 @@ export function collectionRoutes(app: FastifyInstance, access: FamilyAccess, col
     routes.addHook('onRequest', async request => { authorize(request.headers); });
     routes.addContentTypeParser(['image/jpeg', 'image/png', 'image/webp'], { parseAs: 'buffer', bodyLimit: MAX_IMAGE_BYTES }, (_request, body, done) => done(null, body));
     routes.get('/subjects', async () => collection.subjects());
-    routes.post<{ Body: Buffer; Headers: { 'idempotency-key': string } }>('/drafts', { bodyLimit: MAX_IMAGE_BYTES, schema: { headers: {
+    for (const path of ['/drafts', '/pages']) routes.post<{ Body: Buffer; Headers: { 'idempotency-key': string } }>(path, { bodyLimit: MAX_IMAGE_BYTES, schema: { headers: {
       type: 'object', required: ['idempotency-key'], properties: { 'idempotency-key': { type: 'string', format: 'uuid' } }
     } } }, async (request, reply) => {
       if (!Buffer.isBuffer(request.body)) throw new AccessError(415, '请选择 JPEG、PNG 或 WebP 图片文件');
-      return reply.code(201).send(await collection.upload(() => authorize(request.headers), request.headers['idempotency-key'], request.body));
+      const upload = path === '/drafts' ? collection.upload.bind(collection) : collection.uploadPage.bind(collection);
+      return reply.code(201).send(await upload(() => authorize(request.headers), request.headers['idempotency-key'], request.body));
     });
     routes.get<{ Querystring: { state: 'draft' | 'collected'; offset?: string } }>('/questions', { schema: { querystring: {
       type: 'object', required: ['state'], additionalProperties: false, properties: { state: { enum: ['draft', 'collected'] }, offset: { type: 'string', pattern: '^[0-9]{1,7}$' } }
     } } }, async request => collection.list(access.home(token(request.headers.authorization)).library.id, request.query.state, Number(request.query.offset ?? 0)));
     routes.get<{ Params: { id: string } }>('/questions/:id', async request => collection.get(access.home(token(request.headers.authorization)).library.id, request.params.id));
+    routes.post<{ Params: { id: string }; Body: QuestionCreate }>('/pages/:id/questions', { schema: { params: idParams, body: createBody } }, async (request, reply) => reply.code(201).send(await collection.create(() => authorize(request.headers), request.params.id, request.body)));
     routes.put<{ Params: { id: string }; Body: QuestionEdit }>('/questions/:id', { schema: {
-      params: { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } },
-      body: { type: 'object', required: ['operationId', 'expectedRevision', 'state', 'subjectId', 'region', 'pageNumber', 'questionNumber', 'note'], additionalProperties: false,
-        oneOf: [{ required: ['sourceId'] }, { required: ['source'] }],
-        properties: {
-          operationId: { type: 'string', format: 'uuid' }, expectedRevision: { type: 'integer', minimum: 1 }, state: { enum: ['draft', 'collected'] },
-          subjectId: { type: ['string', 'null'], minLength: 1, maxLength: 64 },
-          region: { anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], properties: {
-            x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 },
-            width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 }
-          } }] },
-          sourceId: { type: ['string', 'null'], format: 'uuid' }, source: { type: 'string', maxLength: 200 }, pageNumber: { type: 'string', maxLength: 32 }, questionNumber: { type: 'string', maxLength: 32 }, note: { type: 'string', maxLength: 2000 }
-        }
-      }
+      params: idParams, body: { ...createBody, required: [...createBody.required, 'expectedRevision'], properties: { ...createBody.properties, expectedRevision: { type: 'integer', minimum: 1 } } }
     } }, async request => collection.save(() => authorize(request.headers), request.params.id, request.body));
     routes.get<{ Params: { id: string; variant: 'original' | 'preview' } }>('/pages/:id/:variant', { schema: { params: {
       type: 'object', required: ['id', 'variant'], properties: { id: { type: 'string', format: 'uuid' }, variant: { enum: ['original', 'preview'] } }
