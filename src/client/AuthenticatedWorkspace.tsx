@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { Home, ParentGrant } from '../shared/contracts.ts';
 import type { PagePath } from '../shared/app-routes.ts';
@@ -16,6 +16,15 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
   api: FamilyApi; home: Home; platform: ClientPlatform; path: PagePath; navigate(path: PagePath): void; onSignedOut(): Promise<void>; onRecoveryCode(code: string): void; notice: string;
 }) {
   const [grant, setGrant] = useState<ParentGrant>();
+  const sessionActive = useRef(true);
+  useEffect(() => { sessionActive.current = true; return () => { sessionActive.current = false; }; }, []);
+  // Accepted device operations may finish after the management view expires.
+  // Keep their results only while this authenticated session still owns the workspace.
+  const deviceSignedOut = async () => { if (sessionActive.current) await onSignedOut(); };
+  const recoveryCodeReady = (code: string) => {
+    if (!sessionActive.current) return;
+    setGrant(undefined); onRecoveryCode(code);
+  };
   const { requestLeave } = useContext(LeaveContext);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -78,7 +87,7 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
     <div hidden={path !== '/admin/sources' || !grant} inert={path !== '/admin/sources' || !grant}>
       {sourcesStarted && <section className="card"><h1>来源管理</h1><SourceManager api={api} grant={grant?.token} active={path === '/admin/sources'} onAccessError={accessError} /></section>}
     </div>
-    {path === '/admin/devices' && grant && <DeviceManager api={api} grant={grant.token} onAccessError={accessError} onSignedOut={onSignedOut} onRecoveryCode={code => { setGrant(undefined); onRecoveryCode(code); }} />}
+    {path === '/admin/devices' && grant && <DeviceManager api={api} grant={grant.token} onAccessError={accessError} onSignedOut={deviceSignedOut} onRecoveryCode={recoveryCodeReady} />}
     {path === '/learn/mine' && <section className="card"><h1>我的</h1><p role="status">{connection}</p><dl><div><dt>学习者</dt><dd>{home.library.learnerName}</dd></div><div><dt>家长账号</dt><dd>{home.account.username}</dd></div><div><dt>当前设备</dt><dd>{home.session.deviceName}</dd></div></dl><details open><summary>资料库身份</summary><code data-testid="library-id">{home.library.id}</code></details><button onClick={() => { setError(''); navigate('/admin'); }}>家长管理</button><button className="quiet" disabled={busy} onClick={() => void run(async () => { await api.logout(); await onSignedOut(); })}>退出此设备</button></section>}
   </SurfaceLayout>;
 }

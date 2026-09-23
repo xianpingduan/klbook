@@ -39,8 +39,8 @@ export function DeviceManager({ api, grant, onAccessError, onSignedOut, onRecove
   }
   async function revoke(device: Device) {
     await api.revoke(grant, device.id);
-    if (!mounted.current) return;
     if (device.current) { await onSignedOut(); return; }
+    if (!mounted.current) return;
     setDevices(items => items.filter(item => item.id !== device.id));
     setNotice(`已撤销“${device.deviceName}”的访问。该设备需重新登录。`);
     setRefresh(value => value + 1);
@@ -53,6 +53,6 @@ export function DeviceManager({ api, grant, onAccessError, onSignedOut, onRecove
       {readError && <p className="message error" role="alert">{readError}。设备列表暂不可用，请重试读取。</p>}
       {!loading && !readError && <><p className="table-count">有效设备 {devices.length} 台</p><div className="table-scroll" role="region" aria-label="设备表格，可横向滚动" tabIndex={0}><table className="management-table device-table" aria-label="有效设备"><thead><tr><th scope="col">设备名称</th><th scope="col">状态</th><th scope="col">登录时间</th><th scope="col">会话到期时间</th><th scope="col">操作</th></tr></thead><tbody>{devices.map(device => <tr key={device.id}><td className="table-source"><strong>{device.deviceName}</strong></td><td><span className="state-pill">{device.current ? '当前设备' : '已授权'}</span></td><td><time dateTime={new Date(device.createdAt).toISOString()}>{new Date(device.createdAt).toLocaleString('zh-CN')}</time></td><td><time dateTime={new Date(device.expiresAt).toISOString()}>{new Date(device.expiresAt).toLocaleString('zh-CN')}</time></td><td><button className="quiet" aria-label={`撤销 ${device.deviceName}`} disabled={busy} onClick={() => void run(() => revoke(device))}>撤销</button></td></tr>)}</tbody></table></div></>}
     </section>
-    <section className="recovery-section" aria-label="恢复码保管"><h2>恢复码保管</h2><p>忘记家长密码时，可以使用单独保存的恢复码找回账号。</p><p className="hint">重新生成后旧码立即失效，新码只显示一次。请及时保存；完成后需要重新验证家长身份。</p><button className="quiet" disabled={busy} onClick={() => void run(async () => { const result = await api.rotateRecoveryCode(grant); if (mounted.current) onRecoveryCode(result.recoveryCode); })}>重新生成恢复码</button></section>
+    <section className="recovery-section" aria-label="恢复码保管"><h2>恢复码保管</h2><p>忘记家长密码时，可以使用单独保存的恢复码找回账号。</p><p className="hint">重新生成后旧码立即失效，新码只显示一次。请及时保存；完成后需要重新验证家长身份。</p><button className="quiet" disabled={busy} onClick={() => void run(async () => { const result = await api.rotateRecoveryCode(grant); onRecoveryCode(result.recoveryCode); })}>重新生成恢复码</button></section>
   </section>;
 }

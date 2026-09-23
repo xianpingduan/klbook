@@ -28,6 +28,14 @@ async function unlock(page: Page) {
   await page.getByRole('button', { name: '验证并进入管理', exact: true }).click();
   return (await response).json();
 }
+async function holdResponse(page: Page, pattern: string) {
+  let received = () => {};
+  let release = () => {};
+  const seen = new Promise<void>(resolve => { received = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await page.route(pattern, async route => { const response = await route.fetch(); received(); await held; await route.fulfill({ response }); }, { times: 1 });
+  return { seen, release };
+}
 
 test('设备表格显示真实会话，响应丢失后撤销可重试，当前设备撤销后旧权限失效', async ({ page, request }) => {
   const f = await fixture(request);
@@ -86,11 +94,8 @@ test('恢复码轮换期间不能切页，保存确认前后退受保护，恢�
     const current = await login(page, `${f.url}/admin`);
     const grant = await unlock(page);
     await page.getByRole('button', { name: '设备与账号', exact: true }).click();
-    let received = () => {};
-    const seen = new Promise<void>(resolve => { received = resolve; });
-    const held = new Promise<void>(resolve => { release = resolve; });
-    await page.route('**/api/v1/admin/recovery-code', async route => { const response = await route.fetch(); received(); await held; await route.fulfill({ response }); }, { times: 1 });
-    await page.getByRole('button', { name: '重新生成恢复码' }).click(); await seen;
+    const pending = await holdResponse(page, '**/api/v1/admin/recovery-code'); release = pending.release;
+    await page.getByRole('button', { name: '重新生成恢复码' }).click(); await pending.seen;
     await page.getByRole('button', { name: '来源管理', exact: true }).click();
     await expect(page).toHaveURL(`${f.url}/admin/devices`);
     await expect(page.getByRole('alert')).toContainText('请稍候');
@@ -171,4 +176,69 @@ test('结束管理失败留在原页可重试，再进入需验证，服务端�
     await unlock(page);
     await expect(page.getByRole('table', { name: '有效设备' }).getByRole('row')).toHaveCount(3);
   } finally { await f.close(); }
+});
+
+test('管理到期后仍接收同一设备会话已完成的恢复码轮换与当前设备撤销结果', async ({ page, request }) => {
+  const f = await fixture(request);
+  let release = () => {};
+  try {
+    await page.clock.install();
+    const current = await login(page, `${f.url}/admin/devices`);
+    await unlock(page);
+    await expect(page.getByRole('table', { name: '有效设备' }).getByRole('row')).toHaveCount(3);
+    await page.clock.fastForward(295000);
+    const rotation = await holdResponse(page, '**/api/v1/admin/recovery-code'); release = rotation.release;
+    await page.getByRole('button', { name: '重新生成恢复码' }).click(); await rotation.seen;
+    await page.clock.fastForward(5100);
+    await expect(page.getByRole('heading', { name: '验证家长身份' })).toBeVisible();
+    rotation.release();
+    await expect(page.getByRole('heading', { name: '请保存恢复码' })).toBeVisible();
+    expect(await page.getByLabel('恢复码', { exact: true }).inputValue()).not.toBe(f.initial.recoveryCode);
+    expect((await request.post(`${f.url}/api/v1/recovery`, { data: { recoveryCode: f.initial.recoveryCode, newPassword: 'new family password 456', deviceName: '旧码验证' } })).status()).toBe(401);
+    await page.getByLabel('我已将恢复码保存在安全的地方').check();
+    await page.getByRole('button', { name: '进入错题集' }).click();
+    await page.clock.setFixedTime(new Date());
+    await unlock(page);
+    await expect(page.getByRole('table', { name: '有效设备' }).getByRole('row')).toHaveCount(3);
+    await page.clock.fastForward(295000);
+    const revocation = await holdResponse(page, '**/api/v1/admin/devices/*'); release = revocation.release;
+    await page.getByRole('button', { name: '撤销 管理电脑', exact: true }).click(); await revocation.seen;
+    await page.clock.fastForward(5100);
+    await expect(page.getByRole('heading', { name: '验证家长身份' })).toBeVisible();
+    revocation.release();
+    await expect(page.getByRole('heading', { name: '登录家庭资料库' })).toBeVisible();
+    expect((await request.get(`${f.url}/api/v1/home`, { headers: { Authorization: `Bearer ${current.token}` } })).status()).toBe(401);
+  } finally { release(); await f.close(); }
+});
+
+test('旧设备会话的恢复码响应不能覆盖重新登录后的管理页面', async ({ page, request }) => {
+  const f = await fixture(request);
+  let release = () => {};
+  try {
+    await page.clock.install();
+    const current = await login(page, `${f.url}/admin/devices`);
+    await unlock(page);
+    await expect(page.getByRole('table', { name: '有效设备' }).getByRole('row')).toHaveCount(3);
+    await page.clock.fastForward(295000);
+    const rotation = await holdResponse(page, '**/api/v1/admin/recovery-code'); release = rotation.release;
+    await page.getByRole('button', { name: '重新生成恢复码' }).click(); await rotation.seen;
+    expect((await request.delete(`${f.url}/api/v1/sessions/current`, { headers: { Authorization: `Bearer ${current.token}` } })).status()).toBe(204);
+    await page.clock.fastForward(5100);
+    await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
+    await page.getByRole('button', { name: '验证并进入管理' }).click();
+    await expect(page.getByRole('heading', { name: '登录家庭资料库' })).toBeVisible();
+    await page.clock.setFixedTime(new Date());
+    await page.getByLabel('家长账号').fill('parent');
+    await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
+    await page.getByLabel('设备名称', { exact: true }).fill('重新登录的电脑');
+    await page.getByRole('button', { name: '登录此设备', exact: true }).click();
+    await unlock(page);
+    const table = page.getByRole('table', { name: '有效设备' });
+    await expect(table.getByRole('row')).toHaveCount(3);
+    const response = page.waitForResponse(response => response.url().endsWith('/api/v1/admin/recovery-code'));
+    rotation.release(); await (await response).finished();
+    await page.getByRole('button', { name: '刷新设备列表' }).click();
+    await expect(table.getByRole('row').filter({ hasText: '重新登录的电脑' })).toContainText('当前设备');
+    await expect(page.getByRole('heading', { name: '请保存恢复码' })).toHaveCount(0);
+  } finally { release(); await f.close(); }
 });
