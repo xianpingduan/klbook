@@ -109,6 +109,7 @@ test('后台原文保存及关联响应丢失可重试，修改不重复创建�
     await page.getByRole('button', { name: '登录此设备', exact: true }).click();
     await page.getByLabel('家长密码', { exact: true }).fill('family password 123'); await page.getByRole('button', { name: '验证并进入管理', exact: true }).click();
     await page.getByRole('table', { name: '已收集资料' }).getByRole('button', { name: '打开', exact: true }).click();
+    await expect(page.getByLabel('追加跨页图片', { exact: true })).toBeEnabled();
     await page.getByLabel('追加跨页图片', { exact: true }).setInputFiles({ name: '新追加原始页.png', mimeType: 'image/png', buffer: await sharp(bytes).flop().png().toBuffer() });
     await expect(page.getByRole('button', { name: '题目区 2', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await page.getByRole('button', { name: '选择整页', exact: true }).click();
