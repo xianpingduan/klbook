@@ -245,3 +245,11 @@ select:focus-visible, textarea:focus-visible { outline: 3px solid #ceac53; outli
 .reading-editor { max-width: 960px; margin-inline: auto; }
 .reading-editor fieldset { min-width: 0; }
 .reading-picker { margin-top: 1.25rem; }
+.answer-editor { max-width: 960px; }
+.answer-view { margin-block: 1rem; border: 1px solid var(--border, #dce5e2); border-radius: 12px; padding: 1rem; }
+.answer-view summary { cursor: pointer; font-weight: 650; }
+.answer-sources { margin-block: 1rem; }
+.answer-capture { display: flex; flex-wrap: wrap; gap: .75rem; margin-block: .75rem; }
+.answer-page-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 1rem; }
+.answer-page-list > div { max-width: 240px; min-width: 0; }
+.answer-page-list .paper-image { max-height: 220px; object-fit: contain; }

@@ -30,7 +30,7 @@ export function QuestionImage({ api, page, region, original = false, label = '�
   </svg>;
 }
 
-export function CropSelector({ api, page, region, onChange, disabled, reading = false }: { api: FamilyApi; page: OriginalPage; region: Region | null; onChange(value: Region | null): void; disabled: boolean; reading?: boolean }) {
+export function CropSelector({ api, page, region, onChange, disabled, instruction = '一道可以独立作答的小题', label = '框选题目范围' }: { api: FamilyApi; page: OriginalPage; region: Region | null; onChange(value: Region | null): void; disabled: boolean; instruction?: string; label?: string }) {
   const image = usePageImage(api, page.id, 'preview');
   const start = useRef<{ x: number; y: number } | null>(null);
   function point(event: PointerEvent<SVGSVGElement>) {
@@ -45,11 +45,11 @@ export function CropSelector({ api, page, region, onChange, disabled, reading = 
     onChange({ x: Math.min(start.current.x, end.x), y: Math.min(start.current.y, end.y), width, height });
   }
   return <div>
-    <p className="hint">{reading ? '在图片上拖动，框住阅读原文。' : '在图片上拖动，框住一道可以独立作答的小题。'}可以重新拖动，也可以选择整页。</p>
+    <p className="hint">在图片上拖动，框住{instruction}。可以重新拖动，也可以选择整页。</p>
     {image.error && <p role="alert" className="message error">{image.error} <button onClick={image.retry}>重试加载图片</button></p>}
     {image.url ? <div className="image-stage" style={{ width: `min(100%, ${62 * page.width / page.height}dvh)`, marginInline: 'auto' }}>
       <img src={image.url} width={page.width} height={page.height} alt="用于框题的原始页预览" draggable={false} />
-      <svg role="img" aria-label="框选题目范围" viewBox="0 0 1000 1000" preserveAspectRatio="none"
+      <svg role="img" aria-label={label} viewBox="0 0 1000 1000" preserveAspectRatio="none"
         onPointerDown={event => { if (disabled) return; event.preventDefault(); start.current = point(event); event.currentTarget.setPointerCapture(event.pointerId); }}
         onPointerMove={move} onPointerUp={event => { move(event); start.current = null; }} onPointerCancel={() => { start.current = null; }}>
         {region && <rect x={region.x * 1000} y={region.y * 1000} width={region.width * 1000} height={region.height * 1000} className="crop-selection" />}

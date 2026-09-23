@@ -92,7 +92,13 @@ const migrations = [
   CREATE TABLE readingOperations (
     libraryId TEXT NOT NULL, accountId TEXT NOT NULL, operationId TEXT NOT NULL, requestHash TEXT NOT NULL,
     materialId TEXT NOT NULL REFERENCES readingMaterials(id), PRIMARY KEY(libraryId, accountId, operationId)
-  );`
+  );`,
+  `CREATE TABLE answerParts (
+    questionId TEXT NOT NULL REFERENCES questions(id), id TEXT NOT NULL,
+    pageId TEXT NOT NULL REFERENCES originalPages(id), position INTEGER NOT NULL, region TEXT NOT NULL,
+    PRIMARY KEY(questionId, id), UNIQUE(questionId, position)
+  );
+  CREATE INDEX answerPartsByPage ON answerParts(pageId);`
 ];
 
 export function openDatabase(dataDir: string) {

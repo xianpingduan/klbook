@@ -11,14 +11,16 @@ import { CaptureInput } from './CaptureInput.tsx';
 import { NewQuestionFromPage } from './NewQuestionFromPage.tsx';
 import { ReadingMaterialPicker } from './ReadingMaterialPicker.tsx';
 import { ReadingMaterialView } from './ReadingMaterialView.tsx';
+import { AnswerView } from './AnswerView.tsx';
 
 function editable(question: Question) {
   return { subjectId: question.subjectId, parts: question.parts, sourceId: question.sourceId, pageNumber: question.pageNumber, questionNumber: question.questionNumber, note: question.note, readingMaterialId: question.readingMaterial?.id ?? null };
 }
 
-export function QuestionEditor({ api, question, subjects, sources, active, admin = false, creating = false, grant, pageCache, onSaved, onBack, onAccessError, onNewFromPage, onReading }: {
+export function QuestionEditor({ api, question, subjects, sources, active, admin = false, creating = false, grant, pageCache, onSaved, onBack, onAccessError, onNewFromPage, onReading, onAnswers }: {
   api: FamilyApi; question: Question; subjects: Subject[]; sources: Source[]; active: boolean; admin?: boolean; creating?: boolean; grant?: string; pageCache: CaptureCache; onSaved(question: Question): void; onBack(): void; onNewFromPage(page: OriginalPage): void; onAccessError(error: ApiError): Promise<void>;
   onReading(id: string | null): void;
+  onAnswers(): void;
 }) {
   const [fields, setFields] = useState(() => editable(question));
   const [busy, setBusy] = useState(false);
@@ -101,8 +103,9 @@ export function QuestionEditor({ api, question, subjects, sources, active, admin
     {!admin && step === 'crop' ? <div className="crop-step">{crop}{addition}<div className="save-actions"><button disabled={working || !validRegion} onClick={() => setStep('confirm')}>下一步，选学科</button>{question.state === 'draft' && <button className="quiet" disabled={working} onClick={() => void save('draft')}>保存草稿</button>}</div></div> : <div className="editor-grid">
       <section className="confirmation-material" aria-label="题目与原始页">
         {admin && step === 'crop' ? <>{crop}<button className="quiet" disabled={working || !validRegion} onClick={() => setStep('confirm')}>确认题目范围</button></> : <>
-          <QuestionParts api={api} parts={originalOpen ? [...fields.parts, ...(question.readingMaterial?.parts ?? [])] : fields.parts} original={originalOpen} />
+          <QuestionParts api={api} parts={originalOpen ? [...fields.parts, ...question.answerParts, ...(question.readingMaterial?.parts ?? [])] : fields.parts} original={originalOpen} />
           {!originalOpen && question.readingMaterial && fields.readingMaterialId === question.readingMaterial.id && <ReadingMaterialView api={api} material={question.readingMaterial} />}
+          {!originalOpen && <AnswerView api={api} parts={question.answerParts} />}
           <div className="material-actions"><button className="quiet" disabled={working} onClick={() => { setOriginalOpen(false); setStep('crop'); }}>调整题目范围</button>{admin && <button className="quiet" onClick={() => setOriginalOpen(value => !value)}>{originalOpen ? '查看题目区' : '查看原始页'}</button>}</div>
         </>}
         {addition}
@@ -121,6 +124,8 @@ export function QuestionEditor({ api, question, subjects, sources, active, admin
         <ReadingMaterialPicker api={api} grant={grant} active={active} current={question.readingMaterial} value={fields.readingMaterialId} onChange={readingMaterialId => setFields(current => ({ ...current, readingMaterialId }))} onAccessError={onAccessError} />
         <div className="reading-actions"><button className="quiet" disabled={creating} onClick={() => leave.requestLeave(() => onReading(null))}>从原始页新建阅读材料</button>{question.readingMaterial && <button className="quiet" disabled={creating || fields.readingMaterialId !== question.readingMaterial.id} onClick={() => leave.requestLeave(() => onReading(question.readingMaterial!.id))}>编辑已关联原文</button>}</div>
         {creating && <p className="hint">可先选已有原文；新建阅读材料需先保存本题。</p>}
+        <button className="quiet" disabled={creating} onClick={() => leave.requestLeave(onAnswers)}>{question.answerParts.length ? '整理纸质答案' : '补充纸质答案'}</button>
+        <p className="hint">{creating ? '先保存本题，再补充纸质答案。' : '答案可以以后补充，不影响先收集题目。'}</p>
         <div className="save-actions">{question.state === 'draft' && <button className="quiet" onClick={() => void save('draft')}>保存草稿</button>}<button disabled={!fields.subjectId || !validRegion} onClick={() => void save('collected')}>{busy ? '正在保存…' : question.state === 'draft' ? '保存到错题集' : '保存修改'}</button></div>
       </fieldset></div>
     </div>}

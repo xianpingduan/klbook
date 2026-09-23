@@ -1,7 +1,7 @@
 import type { Device, Home, LoginInput, ParentGrant, RecoveryInput, ServerInfo, SessionResult, SetupInput } from '../shared/contracts.ts';
 import type { ClientPlatform, SavedCredential } from './platform.ts';
 import { serverOrigin } from './platform.ts';
-import type { OriginalPage, Question, QuestionCreate, QuestionEdit, QuestionList, Subject } from '../shared/collection.ts';
+import type { AnswerEdit, AnswerPageList, OriginalPage, Question, QuestionCreate, QuestionEdit, QuestionList, Subject } from '../shared/collection.ts';
 import type { Source, SourceEdit } from '../shared/sources.ts';
 import type { ReadingMaterial, ReadingMaterialEdit, ReadingMaterialList } from '../shared/reading-materials.ts';
 
@@ -50,6 +50,8 @@ export class FamilyApi {
     return response.status === 204 ? undefined as T : response.json();
   }
   subjects() { return this.request<Subject[]>('/collection/subjects'); }
+  answerPages(offset = 0, grant?: string) { return this.request<AnswerPageList>(`/collection/answer-pages?offset=${offset}`, 'GET', undefined, grant); }
+  saveAnswers(id: string, input: AnswerEdit, grant?: string) { return this.request<Question>(`/collection/questions/${encodeURIComponent(id)}/answers`, 'PUT', input, grant); }
   readingMaterials(offset = 0, grant?: string) { return this.request<ReadingMaterialList>(`/collection/reading-materials?offset=${offset}`, 'GET', undefined, grant); }
   readingMaterial(id: string, grant?: string) { return this.request<ReadingMaterial>(`/collection/reading-materials/${encodeURIComponent(id)}`, 'GET', undefined, grant); }
   saveReadingMaterial(id: string, input: ReadingMaterialEdit, grant?: string) { return this.request<ReadingMaterial>(`/collection/reading-materials/${encodeURIComponent(id)}`, 'PUT', input, grant); }

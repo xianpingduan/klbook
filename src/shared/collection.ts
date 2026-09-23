@@ -19,7 +19,10 @@ export interface Question {
   originalPage: OriginalPage;
   parts: QuestionPart[];
   readingMaterial: ReadingMaterial | null;
+  answerParts: QuestionPart[];
 }
+export interface AnswerEdit { operationId: string; expectedRevision: number; parts: QuestionPartEdit[] }
+export interface AnswerPageList { items: OriginalPage[]; total: number; offset: number; limit: number }
 export interface QuestionList { items: Question[]; total: number; offset: number; limit: number }
 export interface QuestionEdit {
   operationId: string; expectedRevision: number; state: 'draft' | 'collected';

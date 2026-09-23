@@ -63,7 +63,7 @@ export function ReadingMaterialEditor({ api, material, cache, grant, active, onB
     {error && !leave.leaving && <p className="message error" role="alert">{error}</p>}{leave.dialog}
     <fieldset disabled={working || !active}>
       <label>阅读材料名称<input maxLength={120} value={fields.title} onChange={event => setFields(value => ({ ...value, title: event.target.value }))} placeholder="例如：春天的故事" /></label>
-      <QuestionPartsEditor api={api} parts={fields.parts} selectedId={selected} onSelect={setSelected} onChange={parts => setFields(value => ({ ...value, parts }))} disabled={working || !active} reading />
+      <QuestionPartsEditor api={api} parts={fields.parts} selectedId={selected} onSelect={setSelected} onChange={parts => setFields(value => ({ ...value, parts }))} disabled={working || !active} kind="reading" />
       <div className="page-addition">
         {append.error && <p className="message error" role="alert">{append.error}</p>}
         {append.capture ? <><p className="hint">{append.capture.name} · {append.appended ? '保存原文后完成关联。' : '本机保留的追加材料，可继续。'}</p>{!append.appended && <><button className="quiet" onClick={append.retry}>继续追加 {append.capture.name}</button><button className="quiet" onClick={append.cancel}>取消追加</button></>}</> : <CaptureInput label="追加原文图片" multiple={false} busy={working || !active || material.revision === 0 || fields.parts.length >= 50} onChoose={append.choose} onCancel={() => {}} />}
@@ -71,6 +71,6 @@ export function ReadingMaterialEditor({ api, material, cache, grant, active, onB
       </div>
       <div className="save-actions"><button disabled={!fields.title.trim() || !fields.parts.every(part => validQuestionRegion(part.region))} onClick={() => void save()}>{busy ? '正在保存…' : '保存并返回题目'}</button><button className="quiet" onClick={() => setOriginal(value => !value)}>{original ? '收起原文原始页' : '查看原文原始页'}</button></div>
     </fieldset>
-    {original && <QuestionParts api={api} parts={fields.parts} original reading />}
+    {original && <QuestionParts api={api} parts={fields.parts} original kind="reading" />}
   </section>;
 }

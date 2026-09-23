@@ -20,12 +20,15 @@ import { CaptureInput } from './CaptureInput.tsx';
 import type { ReadingMaterial } from '../shared/reading-materials.ts';
 import { ReadingMaterialEditor } from './ReadingMaterialEditor.tsx';
 import { ReadingMaterialView } from './ReadingMaterialView.tsx';
+import { AnswerEditor } from './AnswerEditor.tsx';
+import { AnswerView } from './AnswerView.tsx';
 
 export function CollectionWorkspace({ api, home, platform, path, grant, onAccessError, onEditing, active = true, mode = 'workspace' }: {
   api: FamilyApi; home: Home; platform: ClientPlatform; path: PagePath; grant?: string; onAccessError(error: ApiError): Promise<void>; onEditing(active: boolean): void; active?: boolean; mode?: 'home' | 'collect' | 'workspace';
 }) {
   const cache = useMemo(() => new CaptureCache(platform, { libraryId: home.library.id, accountId: home.account.id }), [platform, home.library.id, home.account.id]);
-  const [screen, setScreen] = useState<'list' | 'edit' | 'detail' | 'reading'>('list');
+  const [screen, setScreen] = useState<'list' | 'edit' | 'detail' | 'reading' | 'answers'>('list');
+  const answerReturn = useRef<'edit' | 'detail'>('detail');
   const [state, setState] = useState<'draft' | 'collected'>('collected');
   const [list, setList] = useState<QuestionList>({ items: [], total: 0, offset: 0, limit: 50 });
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -36,6 +39,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
   const readingLinkOperation = useRef('');
   const readingCache = useMemo(() => new CaptureCache(platform, { libraryId: home.library.id, accountId: home.account.id }, `reading-pages:${reading?.id}`), [platform, home.library.id, home.account.id, reading?.id]);
   const pageCache = useMemo(() => new CaptureCache(platform, { libraryId: home.library.id, accountId: home.account.id }, `question-pages:${selected?.id}`), [platform, home.library.id, home.account.id, selected?.id]);
+  const answerCache = useMemo(() => new CaptureCache(platform, { libraryId: home.library.id, accountId: home.account.id }, `answer-pages:${selected?.id}`), [platform, home.library.id, home.account.id, selected?.id]);
   const [batch, setBatch] = useState<CaptureBatch>();
   const pending = batch?.items[0];
   const [busy, setBusy] = useState(false);
@@ -119,12 +123,20 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
   function newFromPage(page: OriginalPage) {
     if (!selected || !active || busy || (admin && !grant)) return;
     setSelected({ ...selected, id: crypto.randomUUID(), revision: 1, state: 'draft', subjectId: null, region: null, questionNumber: '', note: '', collectedAt: null,
-      originalPage: page, parts: [{ id: crypto.randomUUID(), originalPage: page, region: null }],
+      originalPage: page, parts: [{ id: crypto.randomUUID(), originalPage: page, region: null }], answerParts: [],
       sourceId: sources.some(source => source.id === selected.sourceId && source.active) ? selected.sourceId : null });
     setCreating(true); setOriginalOpen(false); setScreen('edit');
   }
   function open(question: Question) {
     void run(async () => { const latest = await api.question(question.id, managementGrant); setSelected(latest); setOriginalOpen(false); setScreen(admin || latest.state === 'draft' ? 'edit' : 'detail'); });
+  }
+  function openAnswers() {
+    if (!selected || creating) return;
+    void run(async () => {
+      const latest = await api.question(selected.id, managementGrant);
+      if (!mounted.current) return;
+      answerReturn.current = screen === 'edit' ? 'edit' : 'detail'; setSelected(latest); setScreen('answers');
+    });
   }
   function openReading(id: string | null) {
     if (!selected || creating) return;
@@ -175,18 +187,21 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
       </article>)}</div>}
       {list.items.length < list.total && <button className="quiet" disabled={busy || cacheLoading} onClick={() => void run(async () => { const more = await api.questions(listState, list.items.length, managementGrant); setList(current => ({ ...more, items: [...current.items, ...more.items] })); })}>加载更多</button>}
     </section>}
-    {screen === 'edit' && selected && <QuestionEditor key={selected.id} api={api} question={selected} subjects={subjects} sources={sources} active={active} admin={admin} creating={creating} grant={managementGrant} pageCache={pageCache} onBack={back} onNewFromPage={newFromPage} onReading={openReading} onAccessError={onAccessError} onSaved={question => { setSelected(question); setCreating(false); setRefresh(value => value + 1); if (!admin && question.state === 'collected') setScreen('detail'); }} />}
+    {screen === 'edit' && selected && <QuestionEditor key={selected.id} api={api} question={selected} subjects={subjects} sources={sources} active={active} admin={admin} creating={creating} grant={managementGrant} pageCache={pageCache} onBack={back} onNewFromPage={newFromPage} onReading={openReading} onAnswers={openAnswers} onAccessError={onAccessError} onSaved={question => { setSelected(question); setCreating(false); setRefresh(value => value + 1); if (!admin && question.state === 'collected') setScreen('detail'); }} />}
+    {screen === 'answers' && selected && <AnswerEditor key={selected.id} api={api} question={selected} cache={answerCache} grant={managementGrant} active={active} onBack={() => setScreen(answerReturn.current)} onSaved={question => { setSelected(question); setScreen(answerReturn.current); setRefresh(value => value + 1); }} onAccessError={onAccessError} />}
     {screen === 'reading' && reading && <ReadingMaterialEditor key={reading.id} api={api} material={reading} cache={readingCache} grant={managementGrant} active={active} onBack={() => { setReading(undefined); setScreen('edit'); }} onSaved={readingSaved} onAccessError={onAccessError} />}
     {admin && screen === 'edit' && continuation}
     {screen === 'detail' && selected && <section className="card collection-card">
       <div className="section-heading"><div><p className="eyebrow">{subjectName(selected.subjectId)} · 已收集</p><h1>错题详情</h1></div><button className="quiet" disabled={busy} onClick={back}>返回列表</button></div>
       <p className="sync-state">已同步到家庭资料库</p><div className="detail-material"><QuestionParts api={api} parts={selected.parts} /></div>
       {selected.readingMaterial && <ReadingMaterialView api={api} material={selected.readingMaterial} />}
+      <AnswerView api={api} parts={selected.answerParts} />
+      <button className="quiet" disabled={busy} onClick={openAnswers}>{selected.answerParts.length ? '整理纸质答案' : '补充纸质答案'}</button>
       {continuation}
       <dl><div><dt>收集时间</dt><dd>{date(selected.collectedAt!)}</dd></div><div><dt>来源</dt><dd>{selected.source || '未填写'}</dd></div><div><dt>页码 / 题号</dt><dd>{selected.pageNumber || '未填写'} / {selected.questionNumber || '未填写'}</dd></div><div><dt>备注</dt><dd className="note-text">{selected.note || '未填写'}</dd></div></dl>
       <button disabled={busy} onClick={() => setScreen('edit')}>补充或更正信息</button><button className="quiet" onClick={() => setOriginalOpen(value => !value)}>{originalOpen ? '收起原始页' : '查看原始页'}</button>
       <NewQuestionFromPage parts={selected.parts} disabled={busy} onChoose={newFromPage} />
-      {originalOpen && <div className="original-material"><h2>原始页</h2><p className="hint">这是上传时保留的完整原图，包含题目、作答和批改。</p><QuestionParts api={api} parts={[...selected.parts, ...(selected.readingMaterial?.parts ?? [])]} original /></div>}
+      {originalOpen && <div className="original-material"><h2>原始页</h2><p className="hint">这是上传时保留的完整原图，包含题目、作答和批改。</p><QuestionParts api={api} parts={[...selected.parts, ...selected.answerParts, ...(selected.readingMaterial?.parts ?? [])]} original /></div>}
     </section>}
   </div>;
 }

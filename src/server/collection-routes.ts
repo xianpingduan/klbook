@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { FamilyAccess } from './family-access.ts';
 import { CollectionStore } from './collection-store.ts';
 import { MAX_IMAGE_BYTES } from '../shared/collection.ts';
-import type { QuestionCreate, QuestionEdit } from '../shared/collection.ts';
+import type { AnswerEdit, QuestionCreate, QuestionEdit } from '../shared/collection.ts';
 import { AccessError } from './family-access.ts';
 import type { ReadingMaterialEdit } from '../shared/reading-materials.ts';
 
@@ -36,6 +36,12 @@ export function collectionRoutes(app: FastifyInstance, access: FamilyAccess, col
     routes.addHook('onRequest', async request => { authorize(request.headers); });
     routes.addContentTypeParser(['image/jpeg', 'image/png', 'image/webp'], { parseAs: 'buffer', bodyLimit: MAX_IMAGE_BYTES }, (_request, body, done) => done(null, body));
     routes.get('/subjects', async () => collection.subjects());
+    routes.get<{ Querystring: { offset?: string } }>('/answer-pages', { schema: { querystring: { type: 'object', additionalProperties: false, properties: { offset: { type: 'string', pattern: '^[0-9]{1,7}$' } } } } }, async request => collection.answerPages(authorize(request.headers).library.id, Number(request.query.offset ?? 0)));
+    routes.put<{ Params: { id: string }; Body: AnswerEdit }>('/questions/:id/answers', { schema: { params: idParams, body: {
+      type: 'object', additionalProperties: false, required: ['operationId', 'expectedRevision', 'parts'], properties: {
+        operationId: { type: 'string', format: 'uuid' }, expectedRevision: { type: 'integer', minimum: 1 }, parts: { ...createBody.properties.parts, minItems: 0 }
+      }
+    } } }, async request => collection.saveAnswers(() => authorize(request.headers), request.params.id, request.body));
     routes.get<{ Querystring: { offset?: string } }>('/reading-materials', { schema: { querystring: { type: 'object', additionalProperties: false, properties: { offset: { type: 'string', pattern: '^[0-9]{1,7}$' } } } } }, async request => collection.readings.list(authorize(request.headers).library.id, Number(request.query.offset ?? 0)));
     routes.get<{ Params: { id: string } }>('/reading-materials/:id', { schema: { params: idParams } }, async request => collection.readings.get(authorize(request.headers).library.id, request.params.id));
     routes.put<{ Params: { id: string }; Body: ReadingMaterialEdit }>('/reading-materials/:id', { schema: { params: idParams, body: {

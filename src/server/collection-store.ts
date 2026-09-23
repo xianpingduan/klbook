@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import type { Home } from '../shared/contracts.ts';
-import type { Question, QuestionCreate, QuestionEdit, QuestionList, QuestionPartEdit, Region, Subject } from '../shared/collection.ts';
+import type { AnswerEdit, AnswerPageList, Question, QuestionCreate, QuestionEdit, QuestionList, QuestionPartEdit, Region, Subject } from '../shared/collection.ts';
 import { validQuestionRegion } from '../shared/collection.ts';
 import { AccessError } from './family-access.ts';
 import { Attachments, fileHash } from './attachments.ts';
@@ -9,7 +9,7 @@ import type { StoredPage } from './attachments.ts';
 import { Sources } from './sources.ts';
 import { ReadingMaterials } from './reading-materials.ts';
 
-interface QuestionRow extends Omit<Question, 'originalPage' | 'parts' | 'region' | 'syncState' | 'readingMaterial'> { originalPageId: string; region: string | null }
+interface QuestionRow extends Omit<Question, 'originalPage' | 'parts' | 'region' | 'syncState' | 'readingMaterial' | 'answerParts'> { originalPageId: string; region: string | null }
 export class CollectionStore {
   private db: Database.Database;
   private files: Attachments;
@@ -41,7 +41,9 @@ export class CollectionStore {
     const parts = this.db.prepare<[string], { id: string; pageId: string; region: string | null }>('SELECT id, pageId, region FROM questionParts WHERE questionId = ? ORDER BY position').all(id)
       .map(part => ({ id: part.id, originalPage: this.publicPage(libraryId, part.pageId), region: part.region ? JSON.parse(part.region) as Region : null }));
     const reading = this.db.prepare<[string], { materialId: string }>('SELECT materialId FROM questionReadings WHERE questionId = ?').get(id);
-    return { ...rest, source: rest.sourceId ? this.sources.get(rest.sourceId).name : rest.source, region: region ? JSON.parse(region) as Region : null, originalPage: this.publicPage(libraryId, originalPageId), parts, readingMaterial: reading ? this.readings.get(libraryId, reading.materialId) : null, syncState: 'synced' };
+    const answerParts = this.db.prepare<[string], { id: string; pageId: string; region: string }>('SELECT id, pageId, region FROM answerParts WHERE questionId = ? ORDER BY position').all(id)
+      .map(part => ({ id: part.id, originalPage: this.publicPage(libraryId, part.pageId), region: JSON.parse(part.region) as Region }));
+    return { ...rest, source: rest.sourceId ? this.sources.get(rest.sourceId).name : rest.source, region: region ? JSON.parse(region) as Region : null, originalPage: this.publicPage(libraryId, originalPageId), parts, answerParts, readingMaterial: reading ? this.readings.get(libraryId, reading.materialId) : null, syncState: 'synced' };
   }
   list(libraryId: string, state: 'draft' | 'collected', offset: number): QuestionList {
     const ids = this.db.prepare<[string, string, number], { id: string }>('SELECT id FROM questions WHERE libraryId = ? AND state = ? ORDER BY createdAt DESC, id LIMIT 50 OFFSET ?').all(libraryId, state, offset);
@@ -53,6 +55,38 @@ export class CollectionStore {
     if (!operation) return null;
     if (operation.requestHash !== requestHash) throw new AccessError(409, '此次重试内容已改变，请重新确认后保存');
     return this.get(home.library.id, operation.questionId);
+  }
+  answerPages(libraryId: string, offset: number): AnswerPageList {
+    const selection = 'FROM originalPages WHERE libraryId = ? AND EXISTS (SELECT 1 FROM answerParts WHERE pageId = originalPages.id)';
+    const ids = this.db.prepare<[string, number], { id: string }>(`SELECT id ${selection} ORDER BY id LIMIT 50 OFFSET ?`).all(libraryId, offset);
+    const total = this.db.prepare<[string], { count: number }>(`SELECT COUNT(*) AS count ${selection}`).get(libraryId)!.count;
+    return { items: ids.map(row => this.publicPage(libraryId, row.id)), total, offset, limit: 50 };
+  }
+  async saveAnswers(authorize: () => Home, id: string, input: AnswerEdit) {
+    const home = authorize();
+    const question = this.get(home.library.id, id);
+    if (input.parts.length > 50 || new Set(input.parts.map(part => part.id)).size !== input.parts.length
+      || input.parts.some(part => !validQuestionRegion(part.region))) throw new AccessError(422, '请确认不超过 50 个不重复的解答区，范围需在图片内；也可以移除全部解答区');
+    const parts = input.parts.map(part => ({ id: part.id, pageId: part.pageId, region: { x: part.region!.x, y: part.region!.y, width: part.region!.width, height: part.region!.height } }));
+    const requestHash = `answers:${fileHash(Buffer.from(JSON.stringify({ id, expectedRevision: input.expectedRevision, parts })))}`;
+    for (const pageId of new Set([...parts.map(part => part.pageId), ...question.parts.map(part => part.originalPage.id), ...(question.readingMaterial?.parts.map(part => part.originalPage.id) ?? [])])) await this.verifyPage(home.library.id, pageId);
+    const saved = this.db.transaction(() => {
+      authorize();
+      const duplicate = this.replay(home, input.operationId, requestHash);
+      if (duplicate) return duplicate;
+      const latest = this.get(home.library.id, id);
+      if (latest.revision !== input.expectedRevision) throw new AccessError(409, '这道题已在其他页面更新，请返回列表重新打开后核对；当前解答区仍保留');
+      this.db.prepare('DELETE FROM answerParts WHERE questionId = ?').run(id);
+      const add = this.db.prepare('INSERT INTO answerParts VALUES (?, ?, ?, ?, ?)');
+      parts.forEach((part, position) => add.run(id, part.id, part.pageId, position, JSON.stringify(part.region)));
+      this.db.prepare('UPDATE questions SET revision = revision + 1, updatedAt = ? WHERE id = ?').run(this.now(), id);
+      this.db.prepare('INSERT INTO collectionOperations VALUES (?, ?, ?, ?, ?)').run(home.library.id, home.account.id, input.operationId, requestHash, id);
+      return this.get(home.library.id, id);
+    })();
+    // A replay can return a newer question; verify exactly the attachments in that snapshot.
+    for (const pageId of new Set([...saved.parts, ...saved.answerParts, ...(saved.readingMaterial?.parts ?? [])].map(part => part.originalPage.id))) await this.verifyPage(home.library.id, pageId);
+    authorize();
+    return saved;
   }
   async upload(authorize: () => Home, operationId: string, bytes: Buffer) {
     const requestHash = `upload:${fileHash(bytes)}`;
@@ -130,7 +164,7 @@ export class CollectionStore {
     const readingId = input.readingMaterialId === undefined ? current?.readingMaterial?.id : input.readingMaterialId;
     const reading = readingId ? await this.readings.verify(home.library.id, readingId) : null;
     // Verify the actual required files before publishing a collected record or acknowledging a retry.
-    for (const required of new Set(parts.map(part => part.pageId))) {
+    for (const required of new Set([...parts.map(part => part.pageId), ...(current?.answerParts.map(part => part.originalPage.id) ?? [])])) {
       await this.verifyPage(home.library.id, required);
     }
     return this.db.transaction(() => {
