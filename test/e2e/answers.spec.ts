@@ -22,6 +22,7 @@ test('学习端先无答案收集，再补同页和另页解答，其他小题�
     await page.getByRole('button', { name: '登录此设备', exact: true }).click();
     await page.getByRole('button', { name: '打开错题', exact: true }).click();
     await page.getByRole('button', { name: '补充纸质答案', exact: true }).click();
+    await expect(page.getByLabel('拍摄答案', { exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: '从本题原始页 1 框选', exact: true }).click();
     await page.getByRole('button', { name: '选择整页', exact: true }).click();
     await page.getByRole('button', { name: '保存答案并返回', exact: true }).click();
@@ -84,6 +85,13 @@ test('后台后补答案保护未保存修改，上传和保存响应丢失可�
     await page.getByRole('button', { name: '登录此设备', exact: true }).click();
     await page.getByLabel('家长密码', { exact: true }).fill('family password 123'); await page.getByRole('button', { name: '验证并进入管理', exact: true }).click();
     await page.getByRole('table', { name: '已收集资料' }).getByRole('button', { name: '打开', exact: true }).click();
+    let resumeRead!: () => void;
+    const pausedRead = new Promise<void>(resolve => { resumeRead = resolve; });
+    await page.route(`${server.url}/api/v1/collection/questions/${question.id}`, async route => { await pausedRead; await route.continue(); }, { times: 1 });
+    await page.getByRole('button', { name: '补充纸质答案', exact: true }).click();
+    try { await expect(page.getByLabel('备注（选填）')).toBeDisabled(); } finally { resumeRead(); }
+    await expect(page.getByRole('heading', { name: '整理纸质答案', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '返回题目', exact: true }).click();
     await page.getByLabel('备注（选填）').fill('先保护本题的备注');
     await page.getByRole('button', { name: '补充纸质答案', exact: true }).click();
     await page.getByRole('button', { name: '保存后离开', exact: true }).click();

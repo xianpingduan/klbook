@@ -100,3 +100,27 @@ test('答案保存拒绝无效范围和越权，修订冲突不覆盖，答案�
     assert.deepEqual((await f.app.inject({ url: `/api/v1/collection/questions/${question.id}`, headers })).json(), updated.json());
   } finally { await f.close(); }
 });
+
+test('重放最初的上传或建题请求，也会核验后来补充的答案原件', async () => {
+  const f = await familyFixture();
+  try {
+    const headers = auth(f.first.token);
+    const bytes = await sharp(await readFile('test/fixtures/paper.svg')).png().toBuffer();
+    const upload = { method: 'POST' as const, url: '/api/v1/collection/drafts', headers: { ...headers, 'content-type': 'image/png', 'idempotency-key': randomUUID() }, payload: bytes };
+    const draft = (await f.app.inject(upload)).json();
+    const create = { method: 'POST' as const, url: `/api/v1/collection/pages/${draft.originalPage.id}/questions`, headers, payload: { ...fields, operationId: randomUUID() } };
+    const question = (await f.app.inject(create)).json();
+    const answerPage: OriginalPage = (await f.app.inject({ method: 'POST', url: '/api/v1/collection/pages', headers: { ...headers, 'content-type': 'image/png', 'idempotency-key': randomUUID() }, payload: bytes })).json();
+    for (const item of [draft, question]) assert.equal((await f.app.inject({ method: 'PUT', url: `/api/v1/collection/questions/${item.id}/answers`, headers, payload: { operationId: randomUUID(), expectedRevision: item.revision, parts: [{ id: randomUUID(), pageId: answerPage.id, region: answer }] } })).statusCode, 200);
+    const original = join(f.dataDir, 'attachments', 'pages', answerPage.id, 'original');
+    await rename(original, `${original}.unavailable`);
+    try {
+      assert.equal((await f.app.inject(create)).statusCode, 503, '建题重放不能忽略后补答案');
+      assert.equal((await f.app.inject(upload)).statusCode, 503, '上传重放不能忽略后补答案');
+    } finally { await rename(`${original}.unavailable`, original); }
+    assert.equal((await f.app.inject(create)).json().answerParts[0].originalPage.id, answerPage.id);
+    assert.equal((await f.app.inject(upload)).json().answerParts[0].originalPage.id, answerPage.id);
+    assert.equal((await f.app.inject({ url: '/api/v1/collection/questions?state=collected', headers })).json().total, 1);
+    assert.equal((await f.app.inject({ url: '/api/v1/collection/questions?state=draft', headers })).json().total, 1);
+  } finally { await f.close(); }
+});

@@ -1,7 +1,19 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { randomInt } from 'node:crypto';
 
 export async function startServer(dataDir: string, port = 0) {
+  if (port) return startAtPort(dataDir, port);
+  // The OS may allocate an ephemeral port that browsers block (e.g. 5060).
+  for (let attempt = 0; ; attempt++) {
+    try { return await startAtPort(dataDir, randomInt(49152, 65536)); }
+    catch (error) {
+      if (attempt >= 9 || !(error instanceof Error) || !error.message.includes('EADDRINUSE')) throw error;
+    }
+  }
+}
+
+async function startAtPort(dataDir: string, port: number) {
   const child = spawn(process.execPath, ['dist/node/server/main.js'], {
     env: { ...process.env, KLBOOK_DATA_DIR: dataDir, KLBOOK_PORT: String(port), KLBOOK_ALLOWED_ORIGINS: '' },
     windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']

@@ -17,10 +17,11 @@ function editable(question: Question) {
   return { subjectId: question.subjectId, parts: question.parts, sourceId: question.sourceId, pageNumber: question.pageNumber, questionNumber: question.questionNumber, note: question.note, readingMaterialId: question.readingMaterial?.id ?? null };
 }
 
-export function QuestionEditor({ api, question, subjects, sources, active, admin = false, creating = false, grant, pageCache, onSaved, onBack, onAccessError, onNewFromPage, onReading, onAnswers }: {
+export function QuestionEditor({ api, question, subjects, sources, active, admin = false, creating = false, externalBusy = false, grant, pageCache, onSaved, onBack, onAccessError, onNewFromPage, onReading, onAnswers }: {
   api: FamilyApi; question: Question; subjects: Subject[]; sources: Source[]; active: boolean; admin?: boolean; creating?: boolean; grant?: string; pageCache: CaptureCache; onSaved(question: Question): void; onBack(): void; onNewFromPage(page: OriginalPage): void; onAccessError(error: ApiError): Promise<void>;
   onReading(id: string | null): void;
   onAnswers(): void;
+  externalBusy?: boolean;
 }) {
   const [fields, setFields] = useState(() => editable(question));
   const [busy, setBusy] = useState(false);
@@ -33,7 +34,7 @@ export function QuestionEditor({ api, question, subjects, sources, active, admin
     setFields(current => ({ ...current, parts: current.parts.some(part => part.id === partId) ? current.parts : [...current.parts, { id: partId, originalPage: page, region: null }] }));
     setSelectedPart(partId); setStep('crop');
   } });
-  const working = busy || append.busy || append.loading;
+  const working = externalBusy || busy || append.busy || append.loading;
   const baseline = useRef(JSON.stringify(editable(question)));
   const pending = useRef<{ fingerprint: string; operationId: string } | null>(null);
   const creation = useRef<{ pageId: string; input: QuestionCreate } | null>(null);

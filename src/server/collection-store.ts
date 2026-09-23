@@ -34,6 +34,9 @@ export class CollectionStore {
     const page = this.page(libraryId, id);
     await this.files.read(page, 'original'); await this.files.read(page, 'preview');
   }
+  private async verifyQuestion(question: Question) {
+    for (const pageId of new Set([...question.parts, ...question.answerParts, ...(question.readingMaterial?.parts ?? [])].map(part => part.originalPage.id))) await this.verifyPage(question.libraryId, pageId);
+  }
   get(libraryId: string, id: string): Question {
     const row = this.db.prepare<[string, string], QuestionRow>('SELECT * FROM questions WHERE libraryId = ? AND id = ?').get(libraryId, id);
     if (!row) throw new AccessError(404, '找不到这道题');
@@ -84,13 +87,13 @@ export class CollectionStore {
       return this.get(home.library.id, id);
     })();
     // A replay can return a newer question; verify exactly the attachments in that snapshot.
-    for (const pageId of new Set([...saved.parts, ...saved.answerParts, ...(saved.readingMaterial?.parts ?? [])].map(part => part.originalPage.id))) await this.verifyPage(home.library.id, pageId);
+    await this.verifyQuestion(saved);
     authorize();
     return saved;
   }
   async upload(authorize: () => Home, operationId: string, bytes: Buffer) {
     const requestHash = `upload:${fileHash(bytes)}`;
-    return this.storeUpload(authorize, bytes, home => {
+    const saved = await this.storeUpload(authorize, bytes, home => {
       const result = this.replay(home, operationId, requestHash);
       return result ? { pageId: result.originalPage.id, result } : undefined;
     }, (home, page) => {
@@ -100,6 +103,8 @@ export class CollectionStore {
       this.db.prepare('INSERT INTO collectionOperations VALUES (?, ?, ?, ?, ?)').run(home.library.id, home.account.id, operationId, requestHash, id);
       return this.get(home.library.id, id);
     });
+    await this.verifyQuestion(saved); authorize();
+    return saved;
   }
   async uploadPage(authorize: () => Home, operationId: string, bytes: Buffer) {
     const requestHash = fileHash(bytes);
@@ -167,7 +172,7 @@ export class CollectionStore {
     for (const required of new Set([...parts.map(part => part.pageId), ...(current?.answerParts.map(part => part.originalPage.id) ?? [])])) {
       await this.verifyPage(home.library.id, required);
     }
-    return this.db.transaction(() => {
+    const saved = this.db.transaction(() => {
       authorize();
       const duplicate = this.replay(home, input.operationId, requestHash);
       if (duplicate) return duplicate;
@@ -201,5 +206,7 @@ export class CollectionStore {
       this.db.prepare('INSERT INTO collectionOperations VALUES (?, ?, ?, ?, ?)').run(home.library.id, home.account.id, input.operationId, requestHash, questionId);
       return this.get(home.library.id, questionId);
     })();
+    await this.verifyQuestion(saved); authorize();
+    return saved;
   }
 }

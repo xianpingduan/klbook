@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import type { ReadingMaterial, ReadingMaterialEdit } from '../shared/reading-materials.ts';
+import type { ReadingMaterial } from '../shared/reading-materials.ts';
 import { validQuestionRegion } from '../shared/collection.ts';
 import { ApiError, FamilyApi } from './api.ts';
 import type { CaptureCache } from './capture-cache.ts';
@@ -7,6 +7,7 @@ import { usePageAppend } from './usePageAppend.ts';
 import { useEditorLeave } from './useEditorLeave.tsx';
 import { QuestionParts, QuestionPartsEditor } from './QuestionParts.tsx';
 import { CaptureInput } from './CaptureInput.tsx';
+import { useRevisionedSave } from './useRevisionedSave.ts';
 
 const editable = (material: ReadingMaterial) => ({ title: material.title, parts: material.parts });
 const content = (fields: ReturnType<typeof editable>) => ({ title: fields.title.trim(), parts: fields.parts.map(part => ({ id: part.id, pageId: part.originalPage.id, region: part.region })) });
@@ -19,8 +20,8 @@ export function ReadingMaterialEditor({ api, material, cache, grant, active, onB
   const [error, setError] = useState('');
   const [original, setOriginal] = useState(false);
   const [selected, setSelected] = useState(material.parts[0]!.id);
-  const current = useRef(material);
-  const pending = useRef<ReadingMaterialEdit | null>(null);
+  const saver = useRevisionedSave({ initial: material, contentOf: value => content(editable(value)),
+    persist: input => api.saveReadingMaterial(material.id, input, grant), conflictMessage: '阅读材料已在其他页面更新，请返回题目重新打开后核对' });
   const baseline = useRef(JSON.stringify(fields));
   const append = usePageAppend({ api, cache, grant, onAccessError, onAppend: (page, id) => {
     setFields(value => ({ ...value, parts: value.parts.some(part => part.id === id) ? value.parts : [...value.parts, { id, originalPage: page, region: null }] })); setSelected(id);
@@ -28,27 +29,14 @@ export function ReadingMaterialEditor({ api, material, cache, grant, active, onB
   const working = busy || append.busy || append.loading;
   const leave = useEditorLeave({ dirty: JSON.stringify(fields) !== baseline.current, busy: working, canSave: active, title: '阅读材料还有未保存的修改', error,
     description: <p>保存后返回题目；放弃只丢弃本次范围和名称修改，已保存的材料及其他小题保持原样。</p>, save,
-    discard: () => { setFields(editable(current.current)); baseline.current = JSON.stringify(editable(current.current)); pending.current = null; } });
-  async function send(input: ReadingMaterialEdit) {
-    pending.current = input;
-    try {
-      const saved = await api.saveReadingMaterial(material.id, input, grant);
-      if (saved.revision !== input.expectedRevision + 1) throw new ApiError(409, '阅读材料已在其他页面更新，请返回题目重新打开后核对');
-      current.current = saved; pending.current = null;
-    }
-    catch (failure) { if (failure instanceof ApiError && [400, 422].includes(failure.status)) pending.current = null; throw failure; }
-  }
+    discard: () => { const saved = editable(saver.discard()); setFields(saved); baseline.current = JSON.stringify(saved); } });
   async function save() {
     if (working || !active) return false;
     setBusy(true); setError('');
     try {
-      const desired = content(fields);
-      if (pending.current) await send(pending.current);
-      if (!current.current.revision || JSON.stringify(desired) !== JSON.stringify(content(editable(current.current)))) {
-        await send({ ...desired, expectedRevision: current.current.revision, operationId: crypto.randomUUID() });
-      }
-      await append.committed(current.current);
-      await onSaved(current.current);
+      const saved = await saver.save(content(fields));
+      await append.committed(saved);
+      await onSaved(saved);
       baseline.current = JSON.stringify(fields);
       return true;
     } catch (failure) {
