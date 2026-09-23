@@ -200,4 +200,31 @@ select:focus-visible, textarea:focus-visible { outline: 3px solid #ceac53; outli
   .card { border-radius: 12px; border-color: #e1e7f0; box-shadow: none; }
   .source-form, .empty-state { background: #f5f7fb; }
   .source-manager { margin-top: 12px; }
+  .management-table.source-table { min-width: 580px; }
+  .source-form { max-width: none; margin: 24px 0 30px; padding: 24px; border: 1px solid #e1e7f0; border-radius: 10px; }
+  .source-form label { max-width: 520px; }
+  .admin-upload { min-width: 150px; }
+  .admin-upload .file-picker { margin: 0; padding: 10px 20px; border: 0; background: var(--accent); color: white; text-align: center; border-radius: 9px; min-height: 48px; }
+  .admin-upload .capture-symbol { display: none; }
+  .admin-upload input[type="file"] { position: absolute; inset: 0; margin: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+  .table-count { font-size: 13px; color: #66778d; margin: 18px 0 12px; }
+  .table-scroll { width: 100%; overflow-x: auto; border: 1px solid #e1e7f0; border-radius: 10px; }
+  .table-scroll:focus-visible { outline: 3px solid #ceac53; outline-offset: 3px; }
+  .management-table { width: 100%; min-width: 850px; border-collapse: collapse; font-size: 14px; text-align: left; }
+  .management-table th { background: #f5f7fb; color: #687990; font-weight: 500; }
+  .management-table th, .management-table td { padding: 14px 16px; border-bottom: 1px solid #e9edf4; }
+  .management-table tbody tr:last-child td { border-bottom: 0; }
+  .management-table tbody tr:hover { background: #fafbff; }
+  .management-table button { margin: 0; white-space: nowrap; }
+  .management-table time { white-space: nowrap; font-size: 13px; color: #6b7b91; }
+  .table-source { max-width: 220px; overflow-wrap: anywhere; }
+  .table-thumbnail { width: 84px; background: #f6f7f5; border-radius: 8px; padding: 5px; }
+  .table-thumbnail .paper-image, .table-thumbnail .question-crop { height: 64px; object-fit: contain; }
+  .state-pill { display: inline-block; border-radius: 6px; background: #e8f3ed; color: #34735d; padding: 3px 9px; white-space: nowrap; font-size: 12px; }
+  .state-pill.draft { color: #8e682b; background: #fff4df; }
+  .editor-grid { grid-template-columns: minmax(0, 1.2fr) minmax(300px, 1fr); align-items: start; }
+  .confirmation-material { background: #f8f9fc; padding: 18px; border: 1px solid #e1e7f0; border-radius: 10px; }
+  .material-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .material-actions .quiet { margin-right: 0; }
+  @media (max-width: 1050px) { .editor-grid { grid-template-columns: 1fr; } }
 }

@@ -11,6 +11,26 @@ async function paperImage() {
   return sharp(await readFile(new URL('../fixtures/paper.svg', import.meta.url))).png().toBuffer();
 }
 
+test('后台提交携带的管理授权失效时被拒绝，日常学习仍可收集和修改', async () => {
+  const f = await familyFixture();
+  try {
+    const grant = (await f.app.inject({ method: 'POST', url: '/api/v1/admin/grants', headers: auth(f.first.token), payload: { password: 'family password 123' } })).json();
+    const upload = { method: 'POST' as const, url: '/api/v1/collection/drafts', headers: { ...auth(f.first.token, grant.token), 'content-type': 'image/png', 'idempotency-key': randomUUID() }, payload: await paperImage() };
+    const draft = (await f.app.inject(upload)).json();
+    assert.ok(draft.id);
+    f.advance(5 * 60 * 1000 + 1);
+    assert.equal((await f.app.inject(upload)).statusCode, 403);
+    const edit = { method: 'PUT' as const, url: `/api/v1/collection/questions/${draft.id}`, headers: auth(f.first.token, grant.token), payload: { operationId: randomUUID(), expectedRevision: 1, state: 'collected', subjectId: 'math', region: { x: 0, y: 0, width: 1, height: 1 }, sourceId: null, pageNumber: '', questionNumber: '', note: '同一道题' } };
+    assert.equal((await f.app.inject(edit)).statusCode, 403);
+    assert.equal((await f.app.inject({ url: '/api/v1/collection/questions?state=draft', headers: auth(f.first.token, grant.token) })).statusCode, 403);
+    assert.equal((await f.app.inject({ ...edit, headers: auth(f.first.token) })).statusCode, 200);
+    assert.equal((await f.app.inject({ ...upload, headers: { ...upload.headers, 'x-parent-authorization': '' } })).statusCode, 403);
+    const learnerUpload = { ...upload.headers }; delete learnerUpload['x-parent-authorization'];
+    assert.equal((await f.app.inject({ ...upload, headers: learnerUpload })).statusCode, 201);
+    assert.equal((await f.app.inject({ url: '/api/v1/admin/sources', headers: auth(f.first.token) })).statusCode, 403);
+  } finally { await f.close(); }
+});
+
 test('真实图片经鉴权上传为可重开的草稿，原始页字节不变且未登录不能读取', async () => {
   const f = await familyFixture();
   try {

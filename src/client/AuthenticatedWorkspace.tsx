@@ -73,7 +73,7 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
     {path === '/admin' && grant && <AdminOverview api={api} grant={grant.token} onAccessError={accessError} />}
     {path === '/learn' && !collecting && <section className="learn-welcome"><h1>{home.library.learnerName}的错题集</h1><div className="encouragement"><span>给自己一点鼓励</span><h2>不会的题，可以慢慢弄懂。</h2><p>每一次认真回看，都是一点进步。</p></div></section>}
     <div hidden={!collectionVisible} inert={!collectionVisible}>
-      {collectionStarted && <CollectionWorkspace api={api} home={home} platform={platform} path={path} active={collectionVisible} mode={path === '/learn' ? 'home' : path === '/learn/collect' ? 'collect' : 'workspace'} onEditing={setCollecting} onExpired={onSignedOut} />}
+      {collectionStarted && <CollectionWorkspace api={api} home={home} platform={platform} path={path} active={collectionVisible} mode={path === '/learn' ? 'home' : path === '/learn/collect' ? 'collect' : 'workspace'} grant={grant?.token} onEditing={setCollecting} onAccessError={accessError} />}
     </div>
     <div hidden={path !== '/admin/sources' || !grant} inert={path !== '/admin/sources' || !grant}>
       {sourcesStarted && <section className="card"><h1>来源管理</h1><SourceManager api={api} grant={grant?.token} active={path === '/admin/sources'} onAccessError={accessError} /></section>}

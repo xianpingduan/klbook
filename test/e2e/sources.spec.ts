@@ -55,9 +55,16 @@ test('家长独立管理来源并安全重试，孩子下拉选择，来源停�
     await page.getByRole('button', { name: '停用 每周课堂小测', exact: true }).click();
     await expect(page.getByRole('button', { name: '启用 每周课堂小测', exact: true })).toBeVisible();
     await page.screenshot({ path: `test-results/sources-management-${test.info().project.name}.png`, fullPage: true });
+    await page.getByRole('button', { name: '错题资料', exact: true }).click();
+    await page.getByRole('table', { name: '已收集资料' }).getByRole('button', { name: '打开', exact: true }).click();
+    await expect(page.getByRole('option', { name: '每周课堂小测（已停用）', exact: true })).toHaveAttribute('disabled', '');
+    await page.getByLabel('备注（选填）').fill('家长保留原来源继续补充');
+    await page.getByRole('button', { name: '保存修改' }).click();
+    await expect(page.getByRole('status')).toHaveText('已同步到家庭资料库');
     await page.getByRole('button', { name: '结束管理', exact: true }).click();
     await page.getByRole('button', { name: '打开错题' }).click();
     await expect(page.getByRole('definition').filter({ hasText: /^每周课堂小测$/ })).toBeVisible();
+    await expect(page.getByText('家长保留原来源继续补充', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: '补充或更正信息' }).click();
     await expect(page.getByRole('option', { name: '每周课堂小测（已停用）', exact: true })).toHaveAttribute('disabled', '');
     await page.getByLabel('备注（选填）').fill('来源停用也可以补充');

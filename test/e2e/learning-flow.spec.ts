@@ -197,15 +197,13 @@ test('更正校验失败不离开，保存后离开不降级，切管理页面�
     await login(page, `${f.url}/admin/materials`);
     await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
     await page.getByRole('button', { name: '验证并进入管理' }).click();
-    await page.getByRole('button', { name: '收集一道错题' }).click();
-    await expect(page.getByLabel('选择题目图片')).toBeEnabled();
-    await page.getByLabel('选择题目图片').setInputFiles({ name: '管理切换.png', mimeType: 'image/png', buffer: f.image });
+    await expect(page.getByLabel('上传材料', { exact: true })).toBeEnabled();
+    await page.getByLabel('上传材料', { exact: true }).setInputFiles({ name: '管理切换.png', mimeType: 'image/png', buffer: f.image });
     await page.getByRole('button', { name: '选择整页' }).click();
-    await page.getByRole('button', { name: '下一步，选学科' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('math');
     await page.getByRole('button', { name: '保存到错题集' }).click();
     const before = await (await request.get(`${f.url}/api/v1/collection/questions?state=collected`, { headers: f.headers })).json();
-    await page.getByRole('button', { name: '补充或更正信息' }).click();
+    await expect(page.getByRole('status')).toHaveText('已同步到家庭资料库');
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('');
     await page.getByRole('button', { name: '管理概览', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: '还有未保存的修改' });
