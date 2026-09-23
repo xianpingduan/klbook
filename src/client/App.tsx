@@ -6,6 +6,7 @@ import { ApiError, FamilyApi } from './api.ts';
 import { AuthenticatedWorkspace } from './AuthenticatedWorkspace.tsx';
 import { SurfaceLayout } from './SurfaceLayout.tsx';
 import { LeaveContext, usePage } from './navigation.ts';
+import { RecoveryCodeNotice } from './RecoveryCodeNotice.tsx';
 
 function Field({ label, name, type = 'text', value, autoComplete, minLength }: { label: string; name: string; type?: string; value?: string; autoComplete?: string; minLength?: number }) {
   return <label>{label}<input name={name} type={type} defaultValue={value} autoComplete={autoComplete} minLength={minLength} maxLength={name.toLowerCase().includes('password') || name.includes('Code') ? 128 : 64} required /></label>;
@@ -17,12 +18,15 @@ export function App({ platform }: { platform: ClientPlatform }) {
   const [screen, setScreen] = useState<'loading' | 'setup' | 'login' | 'recovery' | 'save-code' | 'home'>('loading');
   const [home, setHome] = useState<Home>();
   const [recoveryCode, setRecoveryCode] = useState('');
-  const [acknowledged, setAcknowledged] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const { path, navigate, boundary } = usePage();
-  const signedOut = useCallback(async () => { await api?.forget(); setHome(undefined); setScreen('login'); }, [api]);
+  const signedOut = useCallback(async () => {
+    try { await api?.forget(); }
+    catch { setNotice('本机登录记录暂时无法清理，请检查浏览器存储。当前页面已退出。'); }
+    finally { setRecoveryCode(''); setHome(undefined); setScreen('login'); }
+  }, [api]);
 
   async function boot() {
     setError(''); setScreen('loading');
@@ -48,7 +52,7 @@ export function App({ platform }: { platform: ClientPlatform }) {
   async function signedIn(result: SessionResult) {
     if (!await api!.remember(result)) setNotice('此浏览器无法保存登录状态；本次可以使用，关闭后需重新登录。');
     setHome({ account: result.account, library: result.library, session: result.session });
-    if (result.recoveryCode) { setRecoveryCode(result.recoveryCode); setAcknowledged(false); setScreen('save-code'); }
+    if (result.recoveryCode) { setRecoveryCode(result.recoveryCode); setScreen('save-code'); }
     else setScreen('home');
   }
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -65,8 +69,8 @@ export function App({ platform }: { platform: ClientPlatform }) {
     });
   }
 
-  if (screen === 'home' && home && api) return <LeaveContext.Provider value={boundary}><AuthenticatedWorkspace key={home.session.id} api={api} home={home} platform={platform} path={path} navigate={navigate} notice={notice} onSignedOut={signedOut} onRecoveryCode={code => { setRecoveryCode(code); setAcknowledged(false); setScreen('save-code'); }} /></LeaveContext.Provider>;
-  return <SurfaceLayout path={path} navigate={navigate}>
+  if (screen === 'home' && home && api) return <LeaveContext.Provider value={boundary}><AuthenticatedWorkspace key={home.session.id} api={api} home={home} platform={platform} path={path} navigate={navigate} notice={notice} onSignedOut={signedOut} onRecoveryCode={code => { setRecoveryCode(code); setScreen('save-code'); }} /></LeaveContext.Provider>;
+  return <LeaveContext.Provider value={boundary}><SurfaceLayout path={path} navigate={navigate}>
     {error && <p role="alert" className="message error">{error}</p>}
     {notice && <p role="status" className="message">{notice}</p>}
     {screen === 'loading' && <section className="card"><h1>连接家庭资料库</h1><p>请保持家庭电脑开机，并运行错题集服务。</p>{error ? <button onClick={() => void boot()}>重新连接</button> : <p role="status">正在连接…</p>}</section>}
@@ -86,6 +90,6 @@ export function App({ platform }: { platform: ClientPlatform }) {
       {screen === 'login' && <button className="quiet" disabled={busy} onClick={() => { setError(''); setScreen('recovery'); }}>忘记密码，使用恢复码</button>}
       {screen === 'recovery' && <button className="quiet" disabled={busy} onClick={() => { setError(''); setScreen('login'); }}>返回登录</button>}
     </section>}
-    {screen === 'save-code' && <section className="card"><p className="eyebrow">家长专用 · 请单独保管</p><h1>请保存恢复码</h1><p>忘记密码时，用它恢复账号。此码只显示这一次；恢复账号后会生成新码，旧码失效。</p><label>恢复码<input className="recovery-code" readOnly value={recoveryCode} /></label><label className="check"><input type="checkbox" checked={acknowledged} onChange={event => setAcknowledged(event.target.checked)} />我已将恢复码保存在安全的地方</label><button disabled={!acknowledged} onClick={() => { setRecoveryCode(''); setScreen('home'); }}>进入错题集</button></section>}
-  </SurfaceLayout>;
+    {screen === 'save-code' && <RecoveryCodeNotice code={recoveryCode} onContinue={() => { setRecoveryCode(''); setScreen('home'); }} />}
+  </SurfaceLayout></LeaveContext.Provider>;
 }
