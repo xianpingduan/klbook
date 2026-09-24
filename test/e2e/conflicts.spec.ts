@@ -5,6 +5,63 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import { startServer } from './server.ts';
 
+test('新建小题期间原文并发更新可保留输入后重试，不读取尚不存在的题目', async ({ page, request }) => {
+  const dir = await mkdtemp(join(tmpdir(), 'klbook-create-conflict-'));
+  const server = await startServer(dir);
+  try {
+    const setupCode = (await readFile(join(dir, 'setup-code.txt'), 'utf8')).trim();
+    const first = await (await request.post(`${server.url}/api/v1/setup`, { data: { setupCode, username: 'parent', password: 'family password 123', learnerName: '小明', deviceName: '另一设备' } })).json();
+    const headers = { Authorization: `Bearer ${first.token}` };
+    const bytes = await sharp(await readFile('test/fixtures/paper.svg')).png().toBuffer();
+    const paper = await (await request.post(`${server.url}/api/v1/collection/pages`, { headers: { ...headers, 'Content-Type': 'image/png', 'Idempotency-Key': crypto.randomUUID() }, data: bytes })).json();
+    const region = { x: 0, y: 0, width: 1, height: 1 };
+    const createUrl = `${server.url}/api/v1/collection/pages/${paper.id}/questions`;
+    expect((await request.post(createUrl, { headers, data: { operationId: crypto.randomUUID(), state: 'collected', subjectId: 'chinese', region, sourceId: null, pageNumber: '', questionNumber: '1', note: '' } })).ok()).toBeTruthy();
+    const readingId = crypto.randomUUID(), readingUrl = `${server.url}/api/v1/collection/reading-materials/${readingId}`;
+    const reading = { operationId: crypto.randomUUID(), expectedRevision: 0, title: '可共享的原文', parts: [{ id: crypto.randomUUID(), pageId: paper.id, region }] };
+    expect((await request.put(readingUrl, { headers, data: reading })).ok()).toBeTruthy();
+    await page.goto(`${server.url}/learn`);
+    await page.getByLabel('家长账号').fill('parent'); await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
+    await page.getByRole('button', { name: '登录此设备', exact: true }).click();
+    await page.getByRole('button', { name: '打开错题', exact: true }).click();
+    let conflicted = false, accepted = 1, note = '';
+    // A non-overlapping schedule may legitimately create the question. Start another real edit, at most five times.
+    for (let attempt = 0; attempt < 5 && !conflicted; attempt++) {
+      await page.getByRole('button', { name: '从此原始页再收集一道', exact: true }).click();
+      await page.getByRole('button', { name: '选择整页', exact: true }).click();
+      await page.getByRole('button', { name: '下一步，选学科', exact: true }).click();
+      await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('chinese');
+      note = `本次新建小题 ${attempt + 1}`;
+      await page.getByLabel('备注（选填）').fill(note);
+      await page.getByRole('combobox', { name: '阅读材料（选填）', exact: true }).selectOption(readingId);
+      // Forward the real service response; no fabricated conflict or internal store replacement.
+      await page.route(createUrl, async route => {
+        const [creation, updated] = await Promise.all([
+          route.fetch(),
+          request.put(readingUrl, { headers, data: { ...reading, operationId: crypto.randomUUID(), expectedRevision: attempt + 1, title: '另一设备更新后的原文' } })
+        ]);
+        expect([201, 409]).toContain(creation.status()); expect(updated.ok()).toBeTruthy();
+        conflicted = creation.status() === 409;
+        await route.fulfill({ response: creation });
+      }, { times: 1 });
+      const response = page.waitForResponse(createUrl);
+      await page.getByRole('button', { name: '保存到错题集', exact: true }).click();
+      await response;
+      if (!conflicted) { accepted++; await expect(page.getByRole('heading', { name: '错题详情', exact: true })).toBeVisible(); }
+    }
+    expect(conflicted, '需要实际触发创建前的原文并发更新，才能验证冲突后重试').toBe(true);
+    await expect(page.getByRole('alert').filter({ hasText: '阅读材料已更新' })).toBeVisible();
+    await expect(page.getByLabel('备注（选填）')).toHaveValue(note);
+    await expect(page.getByRole('region', { name: '处理保存冲突', exact: true })).not.toBeVisible();
+    await page.getByRole('button', { name: '保存到错题集', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '错题详情', exact: true })).toBeVisible();
+    const questions = await (await request.get(`${server.url}/api/v1/collection/questions?state=collected`, { headers })).json();
+    expect(questions.total).toBe(accepted + 1);
+    const created = questions.items.find((question: { note: string }) => question.note === note);
+    expect(created.readingMaterial.title).toBe('另一设备更新后的原文'); expect(created.revision).toBe(1);
+  } finally { await server.stop(); await rm(dir, { recursive: true, force: true }); }
+});
+
 test('两个独立登录页面核对双方修改，保留本次编辑后再次冲突仍保护输入，最终保存重开不重复', async ({ page, browser, request }) => {
   const dir = await mkdtemp(join(tmpdir(), 'klbook-conflicts-'));
   const server = await startServer(dir);
@@ -170,8 +227,11 @@ test('共享原文和答案冲突可核对材料并选择版本，处理后的�
     await page.getByLabel('阅读材料名称').fill('新建但还没关联的原文');
     await page.getByRole('button', { name: '选择整页', exact: true }).click();
     expect((await request.put(url, { headers, data: { operationId: crypto.randomUUID(), expectedRevision: 4, state: 'collected', subjectId: 'chinese', region, sourceId: null, pageNumber: '', questionNumber: '1', note: '关联原文期间另一设备补的备注' } })).ok()).toBeTruthy();
-    await page.getByRole('button', { name: '保存并返回题目', exact: true }).click();
+    await page.getByRole('button', { name: '返回题目', exact: true }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.getByRole('button', { name: '保存后离开', exact: true }).click();
     await expect(page.getByText('原文已保存，关联题目时发生冲突。', { exact: true })).toBeVisible();
+    await expect(page.getByRole('dialog')).not.toBeVisible();
     await expect(conflict.getByRole('region', { name: '当前版本', exact: true })).toContainText('关联原文期间另一设备补的备注');
     await conflict.getByRole('button', { name: '保留本次编辑，继续核对', exact: true }).click();
     await expect(page.getByLabel('备注（选填）')).toHaveValue('关联原文期间另一设备补的备注');

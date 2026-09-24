@@ -176,8 +176,8 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
       setReading(material); readingLinkOperation.current = crypto.randomUUID(); setScreen('reading');
     });
   }
-  async function readingSaved(material: ReadingMaterial) {
-    if (!selected) return;
+  async function readingSaved(material: ReadingMaterial): Promise<boolean> {
+    if (!selected) return false;
     try {
     const alreadyLinked = selected.readingMaterial?.id === material.id;
     const latest = alreadyLinked ? await api.question(selected.id, managementGrant) : await api.saveQuestion(selected.id, {
@@ -185,13 +185,14 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
       region: selected.region, parts: selected.parts.map(part => ({ id: part.id, pageId: part.originalPage.id, region: part.region })),
       sourceId: selected.sourceId, pageNumber: selected.pageNumber, questionNumber: selected.questionNumber, note: selected.note, readingMaterialId: material.id
     }, managementGrant);
-    if (!mounted.current) return;
+    if (!mounted.current) return false;
     if (latest.readingMaterial?.id !== material.id || (!alreadyLinked && latest.revision !== selected.revision + 1)) {
       throw new ApiError(409, '题目已在其他页面更新，请核对双方内容', { entity: 'question', id: selected.id });
     }
     setSelected(latest); setReading(undefined); setScreen('edit'); setRefresh(value => value + 1);
+    return true;
     } catch (failure) {
-      if (failure instanceof ApiError && failure.status === 409) { setReading(material); setScreen('reading-conflict'); return; }
+      if (failure instanceof ApiError && failure.status === 409) { setReading(material); setScreen('reading-conflict'); return false; }
       throw failure;
     }
   }

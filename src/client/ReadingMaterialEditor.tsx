@@ -15,7 +15,7 @@ const editable = (material: ReadingMaterial) => ({ title: material.title, parts:
 const content = (fields: ReturnType<typeof editable>) => ({ title: fields.title.trim(), parts: fields.parts.map(part => ({ id: part.id, pageId: part.originalPage.id, region: part.region })) });
 
 export function ReadingMaterialEditor({ api, material, cache, grant, active, onBack, onSaved, onAccessError }: {
-  api: FamilyApi; material: ReadingMaterial; cache: CaptureCache; grant?: string; active: boolean; onBack(): void; onSaved(material: ReadingMaterial): Promise<void>; onAccessError(error: ApiError): Promise<void>;
+  api: FamilyApi; material: ReadingMaterial; cache: CaptureCache; grant?: string; active: boolean; onBack(): void; onSaved(material: ReadingMaterial): Promise<boolean>; onAccessError(error: ApiError): Promise<void>;
 }) {
   const [fields, setFields] = useState(() => editable(material));
   const [busy, setBusy] = useState(false);
@@ -40,7 +40,7 @@ export function ReadingMaterialEditor({ api, material, cache, grant, active, onB
     try {
       const saved = await saver.save(content(fields));
       await append.committed(saved);
-      await onSaved(saved);
+      if (!await onSaved(saved)) { leave.dismiss(); return false; }
       baseline.current = JSON.stringify(fields);
       return true;
     } catch (failure) {

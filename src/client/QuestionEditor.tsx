@@ -78,7 +78,8 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
     } catch (failure) {
       if (failure instanceof ApiError && [401, 403].includes(failure.status)) { leave.dismiss(); await onAccessError(failure); return false; }
       setError(`${failure instanceof Error ? failure.message : '保存失败'}。当前填写内容仍保留，请核对后重试。`);
-      if (failure instanceof ApiError && failure.status === 409) { leave.dismiss(); await conflict.show(); }
+      // A creation precondition can fail before any question exists; only revision conflicts have a record to compare.
+      if (failure instanceof ApiError && failure.status === 409 && failure.conflict?.entity === 'question') { leave.dismiss(); await conflict.show(); }
       return false;
     } finally { setBusy(false); }
   }
