@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Device, Home, LoginInput, RecoveryInput, SetupInput } from '../shared/contracts.ts';
 import { digest, hashPassword, newSecret, verifyPassword } from './secrets.ts';
+import type { ConflictTarget } from '../shared/conflicts.ts';
 
 interface Family {
   libraryId: string; learnerId: string; learnerName: string;
@@ -15,9 +16,11 @@ interface Session {
 
 export class AccessError extends Error {
   statusCode: number;
-  constructor(statusCode: number, message: string) {
+  conflict?: ConflictTarget;
+  constructor(statusCode: number, message: string, conflict?: ConflictTarget) {
     super(message);
     this.statusCode = statusCode;
+    this.conflict = conflict;
   }
 }
 

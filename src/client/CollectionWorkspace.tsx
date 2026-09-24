@@ -25,12 +25,13 @@ import { AnswerView } from './AnswerView.tsx';
 import { emptyStage, stageLabel } from '../shared/study.ts';
 import { QuestionFilters } from './QuestionFilters.tsx';
 import type { FilterOptions, QuestionFilters as Filters } from '../shared/collection.ts';
+import { ReadingLinkConflict } from './ReadingLinkConflict.tsx';
 
 export function CollectionWorkspace({ api, home, platform, path, grant, onAccessError, onEditing, active = true, mode = 'workspace' }: {
   api: FamilyApi; home: Home; platform: ClientPlatform; path: PagePath; grant?: string; onAccessError(error: ApiError): Promise<void>; onEditing(active: boolean): void; active?: boolean; mode?: 'home' | 'collect' | 'workspace';
 }) {
   const cache = useMemo(() => new CaptureCache(platform, { libraryId: home.library.id, accountId: home.account.id }), [platform, home.library.id, home.account.id]);
-  const [screen, setScreen] = useState<'list' | 'edit' | 'detail' | 'reading' | 'answers'>('list');
+  const [screen, setScreen] = useState<'list' | 'edit' | 'detail' | 'reading' | 'answers' | 'reading-conflict'>('list');
   const answerReturn = useRef<'edit' | 'detail'>('detail');
   const [state, setState] = useState<'draft' | 'collected'>('collected');
   const [list, setList] = useState<QuestionList>({ items: [], total: 0, offset: 0, limit: 50 });
@@ -42,6 +43,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
   const [selected, setSelected] = useState<Question>();
   const [creating, setCreating] = useState(false);
   const [reading, setReading] = useState<ReadingMaterial>();
+  const [proposedReading, setProposedReading] = useState<ReadingMaterial>();
   const readingLinkOperation = useRef('');
   const readingCache = useMemo(() => new CaptureCache(platform, { libraryId: home.library.id, accountId: home.account.id }, `reading-pages:${reading?.id}`), [platform, home.library.id, home.account.id, reading?.id]);
   const pageCache = useMemo(() => new CaptureCache(platform, { libraryId: home.library.id, accountId: home.account.id }, `question-pages:${selected?.id}`), [platform, home.library.id, home.account.id, selected?.id]);
@@ -62,7 +64,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const { requestLeave } = useLeaveGuard(busy && screen !== 'edit', () => setError('正在处理材料，请稍候再离开。当前材料仍保留。'));
-  useEffect(() => { setScreen('list'); setSelected(undefined); setCreating(false); setOriginalOpen(false); }, [path]);
+  useEffect(() => { setScreen('list'); setSelected(undefined); setProposedReading(undefined); setCreating(false); setOriginalOpen(false); }, [path]);
 
   useEffect(() => { onEditing(screen !== 'list'); }, [screen, onEditing]);
   useEffect(() => {
@@ -134,9 +136,10 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
     setNotice('已取消这张材料。若此前已上传成功，服务器草稿仍会保留。');
     setRefresh(value => value + 1);
   }
-  function back() { setError(''); setNotice(''); setSelected(undefined); setCreating(false); setOriginalOpen(false); setScreen('list'); setRefresh(value => value + 1); }
+  function back() { setError(''); setNotice(''); setSelected(undefined); setProposedReading(undefined); setCreating(false); setOriginalOpen(false); setScreen('list'); setRefresh(value => value + 1); }
   function newFromPage(page: OriginalPage) {
     if (!selected || !active || busy || (admin && !grant)) return;
+    setProposedReading(undefined);
     void run(async () => {
     const settings = await api.studySettings();
     if (!mounted.current) return;
@@ -147,10 +150,12 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
     });
   }
   function open(question: Question) {
+    setProposedReading(undefined);
     void run(async () => { const latest = await api.question(question.id, managementGrant); setSelected(latest); setOriginalOpen(false); setScreen(admin || latest.state === 'draft' ? 'edit' : 'detail'); });
   }
   function openAnswers() {
     if (!selected || creating) return;
+    setProposedReading(undefined);
     void run(async () => {
       const latest = await api.question(selected.id, managementGrant);
       if (!mounted.current) return;
@@ -159,6 +164,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
   }
   function openReading(id: string | null) {
     if (!selected || creating) return;
+    setProposedReading(undefined);
     void run(async () => {
       // Leaving the question editor can save new pages before this queued callback runs.
       const question = id ? undefined : await api.question(selected.id, managementGrant);
@@ -172,6 +178,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
   }
   async function readingSaved(material: ReadingMaterial) {
     if (!selected) return;
+    try {
     const alreadyLinked = selected.readingMaterial?.id === material.id;
     const latest = alreadyLinked ? await api.question(selected.id, managementGrant) : await api.saveQuestion(selected.id, {
       operationId: readingLinkOperation.current, expectedRevision: selected.revision, state: selected.state, subjectId: selected.subjectId,
@@ -180,9 +187,13 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
     }, managementGrant);
     if (!mounted.current) return;
     if (latest.readingMaterial?.id !== material.id || (!alreadyLinked && latest.revision !== selected.revision + 1)) {
-      throw new ApiError(409, '题目已在其他页面更新，请返回列表重新打开题目后核对');
+      throw new ApiError(409, '题目已在其他页面更新，请核对双方内容', { entity: 'question', id: selected.id });
     }
     setSelected(latest); setReading(undefined); setScreen('edit'); setRefresh(value => value + 1);
+    } catch (failure) {
+      if (failure instanceof ApiError && failure.status === 409) { setReading(material); setScreen('reading-conflict'); return; }
+      throw failure;
+    }
   }
   const subjectName = (id: string | null) => subjects.find(subject => subject.id === id)?.name ?? '待选学科';
   const date = (time: number) => new Date(time).toLocaleString('zh-CN');
@@ -211,9 +222,12 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
       </article>)}</div>}
       {list.items.length < list.total && <button className="quiet" disabled={busy || cacheLoading || loading} onClick={() => void run(async () => { const more = await api.questions(listState, list.items.length, managementGrant, mode === 'collect' ? {} : filters); setList(current => ({ ...more, items: [...current.items, ...more.items] })); })}>加载更多</button>}
     </section>}
-    {screen === 'edit' && selected && <QuestionEditor key={selected.id} api={api} question={selected} subjects={subjects} sources={sources} active={active} externalBusy={busy} admin={admin} creating={creating} grant={managementGrant} pageCache={pageCache} onBack={back} onNewFromPage={newFromPage} onReading={openReading} onAnswers={openAnswers} onAccessError={onAccessError} onSaved={question => { setSelected(question); setCreating(false); setRefresh(value => value + 1); if (!admin && question.state === 'collected') setScreen('detail'); }} />}
-    {screen === 'answers' && selected && <AnswerEditor key={selected.id} api={api} question={selected} cache={answerCache} grant={managementGrant} active={active} onBack={() => setScreen(answerReturn.current)} onSaved={question => { setSelected(question); setScreen(answerReturn.current); setRefresh(value => value + 1); }} onAccessError={onAccessError} />}
+    {screen === 'edit' && selected && <QuestionEditor key={selected.id} api={api} question={selected} proposedReading={proposedReading} subjects={subjects} sources={sources} active={active} externalBusy={busy} admin={admin} creating={creating} grant={managementGrant} pageCache={pageCache} onBack={back} onNewFromPage={newFromPage} onReading={openReading} onAnswers={openAnswers} onAccessError={onAccessError} onCurrent={setSelected} onSaved={question => { setSelected(question); setProposedReading(undefined); setCreating(false); setRefresh(value => value + 1); if (!admin && question.state === 'collected') setScreen('detail'); }} />}
+    {screen === 'answers' && selected && <AnswerEditor key={selected.id} api={api} question={selected} subjects={subjects} sources={sources} cache={answerCache} grant={managementGrant} active={active} onBack={() => setScreen(answerReturn.current)} onCurrent={setSelected} onSaved={question => { setSelected(question); setScreen(answerReturn.current); setRefresh(value => value + 1); }} onAccessError={onAccessError} />}
     {screen === 'reading' && reading && <ReadingMaterialEditor key={reading.id} api={api} material={reading} cache={readingCache} grant={managementGrant} active={active} onBack={() => { setReading(undefined); setScreen('edit'); }} onSaved={readingSaved} onAccessError={onAccessError} />}
+    {screen === 'reading-conflict' && reading && selected && <ReadingLinkConflict api={api} question={selected} material={reading} subjects={subjects} sources={sources} grant={managementGrant} active={active} onAccessError={onAccessError}
+      onResolve={(current, keep) => { setSelected(current); setProposedReading(keep ? reading : undefined); setReading(undefined); setScreen('edit'); }}
+      onBack={() => { setReading(undefined); setScreen('edit'); }} />}
     {admin && screen === 'edit' && continuation}
     {screen === 'detail' && selected && <section className="card collection-card">
       <div className="section-heading"><div><p className="eyebrow">{subjectName(selected.subjectId)} · 已收集</p><h1>错题详情</h1></div><button className="quiet" disabled={busy} onClick={back}>返回列表</button></div>

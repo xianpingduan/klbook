@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { OriginalPage, Question, QuestionPart } from '../shared/collection.ts';
+import type { OriginalPage, Question, QuestionPart, Subject } from '../shared/collection.ts';
+import type { Source } from '../shared/sources.ts';
 import { validQuestionRegion } from '../shared/collection.ts';
 import { ApiError, FamilyApi } from './api.ts';
 import type { CaptureCache } from './capture-cache.ts';
@@ -10,12 +11,16 @@ import { CaptureInput } from './CaptureInput.tsx';
 import { AnswerPagePicker } from './AnswerPagePicker.tsx';
 import { useTouchInput } from './useTouchInput.ts';
 import { useRevisionedSave } from './useRevisionedSave.ts';
+import { useSaveConflict } from './useSaveConflict.ts';
+import { SaveConflict } from './SaveConflict.tsx';
+import { ConflictQuestionView } from './ConflictQuestionView.tsx';
 
 const content = (parts: QuestionPart[]) => parts.map(part => ({ id: part.id, pageId: part.originalPage.id, region: part.region }));
 
-export function AnswerEditor({ api, question, cache, grant, active, onBack, onSaved, onAccessError }: {
-  api: FamilyApi; question: Question; cache: CaptureCache; grant?: string; active: boolean; onBack(): void; onSaved(question: Question): void; onAccessError(error: ApiError): Promise<void>;
+export function AnswerEditor({ api, question: initialQuestion, subjects, sources, cache, grant, active, onBack, onSaved, onCurrent, onAccessError }: {
+  api: FamilyApi; question: Question; subjects: Subject[]; sources: Source[]; cache: CaptureCache; grant?: string; active: boolean; onBack(): void; onSaved(question: Question): void; onCurrent(question: Question): void; onAccessError(error: ApiError): Promise<void>;
 }) {
+  const [question, setQuestion] = useState(initialQuestion);
   const [parts, setParts] = useState(question.answerParts);
   const touch = useTouchInput();
   const [selected, setSelected] = useState(parts[0]?.id ?? '');
@@ -24,7 +29,8 @@ export function AnswerEditor({ api, question, cache, grant, active, onBack, onSa
   const [original, setOriginal] = useState(false);
   const [picking, setPicking] = useState(false);
   const saver = useRevisionedSave({ initial: question, contentOf: value => ({ parts: content(value.answerParts) }),
-    persist: input => api.saveAnswers(question.id, input, grant), conflictMessage: '这道题已在其他页面更新，请返回列表重新打开后核对' });
+    persist: input => api.saveAnswers(question.id, input, grant), conflictMessage: '这道题已在其他页面更新，请核对双方内容', conflictTarget: { entity: 'question', id: question.id } });
+  const conflict = useSaveConflict({ read: () => api.question(question.id, grant), onAccessError });
   const baseline = useRef(JSON.stringify(parts));
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -32,16 +38,17 @@ export function AnswerEditor({ api, question, cache, grant, active, onBack, onSa
     setParts(value => value.some(part => part.id === id) ? value : [...value, { id, originalPage: page, region: null }]); setSelected(id); setPicking(false);
   }
   const append = usePageAppend({ api, cache, grant, onAccessError, onAppend: add });
-  const working = busy || append.busy || append.loading;
+  const working = busy || append.busy || append.loading || conflict.loading;
   const leave = useEditorLeave({ dirty: JSON.stringify(parts) !== baseline.current, busy: working, canSave: active, title: '纸质答案还有未保存的修改', error,
     description: <p>保存会更新本题的解答区；放弃本次修改不会删除原始图片或其他题目的答案。</p>, save,
     discard: () => { const saved = saver.discard(); setParts(saved.answerParts); baseline.current = JSON.stringify(saved.answerParts); } });
   async function save() {
     if (working || !active) return false;
+    if (conflict.open) { setError('请先在冲突核对区选择处理方式，再保存。'); leave.dismiss(); return false; }
     if (parts.some(part => !validQuestionRegion(part.region))) { setError('请先框选每个解答区，或移除不需要的区域。'); return false; }
     setBusy(true); setError('');
     try {
-      const saved = await saver.save({ parts: content(parts) });
+      const saved = await saver.save({ parts: content(parts) }, true);
       await append.committed({ parts: saved.answerParts });
       if (!mounted.current) return false;
       baseline.current = JSON.stringify(parts); onSaved(saved); return true;
@@ -49,14 +56,26 @@ export function AnswerEditor({ api, question, cache, grant, active, onBack, onSa
       if (!mounted.current) return false;
       if (failure instanceof ApiError && [401, 403].includes(failure.status)) { leave.dismiss(); await onAccessError(failure); }
       else setError(`${failure instanceof Error ? failure.message : '保存失败'}。当前图片和解答区仍保留，请核对后重试。`);
+      if (failure instanceof ApiError && failure.status === 409) { leave.dismiss(); await conflict.show(); }
       return false;
     } finally { if (mounted.current) setBusy(false); }
+  }
+  function resolveConflict(keep: boolean) {
+    const latest = conflict.current;
+    if (!latest || working || !active) return;
+    saver.adopt(latest); setQuestion(latest); onCurrent(latest); baseline.current = JSON.stringify(latest.answerParts);
+    if (!keep) { setParts(latest.answerParts); setSelected(latest.answerParts[0]?.id ?? ''); }
+    conflict.clear(); setError('');
   }
   const pages = [...question.parts, ...(question.readingMaterial?.parts ?? [])].map(part => part.originalPage).filter((page, index, all) => all.findIndex(other => other.id === page.id) === index);
   return <section className="card collection-card answer-editor">
     <div className="section-heading"><div><p className="eyebrow">纸质答案 · {question.questionNumber ? `第 ${question.questionNumber} 题` : '当前小题'}</p><h1>整理纸质答案</h1></div><button className="quiet" disabled={working} onClick={() => leave.requestLeave(onBack)}>返回题目</button></div>
     <p className="hint">答案可以以后再补。答案与题干交叠时保留真实图片和原批改。</p>
     {error && !leave.leaving && <p role="alert" className="message error">{error}</p>}{leave.dialog}
+    {conflict.open && <><p className="hint">本页只保存纸质答案；题目整理信息和阅读材料关联使用资料库当前版本。</p><SaveConflict
+      current={conflict.current && <ConflictQuestionView api={api} question={conflict.current} subjects={subjects} sources={sources} />}
+      local={<ConflictQuestionView api={api} question={{ ...question, answerParts: parts }} subjects={subjects} sources={sources} />}
+      loading={conflict.loading} error={conflict.error} disabled={working || !active} onRefresh={() => void conflict.refresh()} onKeep={() => resolveConflict(true)} onAdopt={() => resolveConflict(false)} /></>}
     <fieldset disabled={working || !active}>
       {parts.length ? <QuestionPartsEditor api={api} parts={parts} selectedId={selected} onSelect={setSelected} onChange={setParts} disabled={working || !active} kind="answer" /> : <p className="empty-state">还没有解答区，可以从下面选择材料；没有答案也能保存题目。</p>}
       <div className="answer-sources"><h2>选择答案材料</h2>

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import type { OriginalPage, Question, QuestionCreate, QuestionEdit, Subject } from '../shared/collection.ts';
+import type { OriginalPage, Question, Subject } from '../shared/collection.ts';
 import { validQuestionRegion } from '../shared/collection.ts';
 import { ApiError, FamilyApi } from './api.ts';
 import { QuestionParts, QuestionPartsEditor } from './QuestionParts.tsx';
@@ -13,18 +13,24 @@ import { ReadingMaterialPicker } from './ReadingMaterialPicker.tsx';
 import { ReadingMaterialView } from './ReadingMaterialView.tsx';
 import { AnswerView } from './AnswerView.tsx';
 import { StudyStageFields } from './StudyStageFields.tsx';
+import { questionFields as editable, questionContent } from './question-edit.ts';
+import { useRevisionedSave } from './useRevisionedSave.ts';
+import { useSaveConflict } from './useSaveConflict.ts';
+import { SaveConflict } from './SaveConflict.tsx';
+import { ConflictQuestionView } from './ConflictQuestionView.tsx';
+import type { ReadingMaterial } from '../shared/reading-materials.ts';
 
-function editable(question: Question) {
-  return { subjectId: question.subjectId, parts: question.parts, sourceId: question.sourceId, pageNumber: question.pageNumber, questionNumber: question.questionNumber, note: question.note, readingMaterialId: question.readingMaterial?.id ?? null, studyStage: question.studyStage };
-}
-
-export function QuestionEditor({ api, question, subjects, sources, active, admin = false, creating = false, externalBusy = false, grant, pageCache, onSaved, onBack, onAccessError, onNewFromPage, onReading, onAnswers }: {
+export function QuestionEditor({ api, question: initialQuestion, proposedReading, subjects, sources, active, admin = false, creating = false, externalBusy = false, grant, pageCache, onSaved, onCurrent, onBack, onAccessError, onNewFromPage, onReading, onAnswers }: {
   api: FamilyApi; question: Question; subjects: Subject[]; sources: Source[]; active: boolean; admin?: boolean; creating?: boolean; grant?: string; pageCache: CaptureCache; onSaved(question: Question): void; onBack(): void; onNewFromPage(page: OriginalPage): void; onAccessError(error: ApiError): Promise<void>;
   onReading(id: string | null): void;
   onAnswers(): void;
   externalBusy?: boolean;
+  onCurrent(question: Question): void;
+  proposedReading?: ReadingMaterial;
 }) {
-  const [fields, setFields] = useState(() => editable(question));
+  const [question, setQuestion] = useState(initialQuestion);
+  const recordId = useRef(initialQuestion.id);
+  const [fields, setFields] = useState(() => ({ ...editable(question), ...(proposedReading ? { readingMaterialId: proposedReading.id } : {}) }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -35,49 +41,35 @@ export function QuestionEditor({ api, question, subjects, sources, active, admin
     setFields(current => ({ ...current, parts: current.parts.some(part => part.id === partId) ? current.parts : [...current.parts, { id: partId, originalPage: page, region: null }] }));
     setSelectedPart(partId); setStep('crop');
   } });
-  const working = externalBusy || busy || append.busy || append.loading;
+  const conflict = useSaveConflict({ read: () => api.question(recordId.current, grant), onAccessError });
+  const saver = useRevisionedSave({ initial: creating ? { ...question, revision: 0 } : question,
+    contentOf: value => questionContent(editable(value), value.state),
+    persist: async input => {
+      const { expectedRevision, ...creation } = input;
+      const result = expectedRevision === 0 && creating
+        ? await api.createQuestion(input.parts[0]!.pageId, creation, grant)
+        : await api.saveQuestion(recordId.current, input, grant);
+      recordId.current = result.id;
+      return result;
+    }, conflictMessage: '这道题已在其他页面更新，请核对双方内容', conflictTarget: { entity: 'question', id: recordId.current } });
+  const working = externalBusy || busy || append.busy || append.loading || conflict.loading;
   const baseline = useRef(JSON.stringify(editable(question)));
-  const pending = useRef<{ fingerprint: string; operationId: string } | null>(null);
-  const creation = useRef<{ pageId: string; input: QuestionCreate } | null>(null);
-  const created = useRef<Question | null>(null);
   const dirty = JSON.stringify(fields) !== baseline.current;
   const leave = useEditorLeave({
     dirty, busy: working, canSave: active, title: '还有未保存的修改', error,
     description: <><p>{question.state === 'draft' ? '保存后离开会保留为草稿，稍后可以继续整理。' : '保存后离开会更新这道错题，保留原来的收集时间。'}</p>{!active && <p className="message">管理验证已到期。选择继续编辑，重新验证家长身份后就能保存；也可以放弃本次修改并离开。</p>}</>,
     save: () => save(question.state),
-    discard: () => { setFields(editable(question)); baseline.current = JSON.stringify(editable(question)); pending.current = null; },
+    discard: () => { const saved = saver.discard(); setQuestion(saved); setFields(editable(saved)); baseline.current = JSON.stringify(editable(saved)); conflict.clear(); },
   });
 
   async function save(state: 'draft' | 'collected') {
     if (!active || working || (admin && !grant)) return false;
+    if (conflict.open) { setError('请先在冲突核对区选择处理方式，再保存。'); leave.dismiss(); return false; }
     setBusy(true); setError(''); setNotice('');
-    const content = { state, ...fields, region: fields.parts[0]!.region,
-      parts: fields.parts.map(part => ({ id: part.id, pageId: part.originalPage.id, region: part.region })) };
+    const content = questionContent(fields, question.state === 'collected' ? 'collected' : state);
     try {
-      let saved: Question | undefined;
-      if (creating && !created.current) {
-        // Replay the exact unresolved creation before applying edits, so a lost response cannot create a second question.
-        creation.current ??= { pageId: fields.parts[0]!.originalPage.id, input: { ...content, operationId: crypto.randomUUID() } };
-        const attempt = creation.current;
-        try { created.current = await api.createQuestion(attempt.pageId, attempt.input, grant); }
-        catch (failure) {
-          if (failure instanceof ApiError && [400, 422].includes(failure.status)) creation.current = null;
-          throw failure;
-        }
-        creation.current = null;
-        const { operationId: _operation, ...submitted } = attempt.input;
-        if (JSON.stringify(submitted) === JSON.stringify(content)) saved = created.current;
-      }
-      if (!saved) {
-        const current = created.current ?? question;
-        const update = { ...content, expectedRevision: current.revision, state: current.state === 'collected' ? 'collected' as const : state };
-        const fingerprint = JSON.stringify(update);
-        if (pending.current?.fingerprint !== fingerprint) pending.current = { fingerprint, operationId: crypto.randomUUID() };
-        const input: QuestionEdit = { ...update, operationId: pending.current.operationId };
-        saved = await api.saveQuestion(current.id, input, grant);
-      }
-      if (creating) created.current = saved;
-      setFields(editable(saved)); baseline.current = JSON.stringify(editable(saved)); pending.current = null;
+      const saved = await saver.save(content, true);
+      setQuestion(saved); setFields(editable(saved)); baseline.current = JSON.stringify(editable(saved));
       await append.committed(saved);
       setNotice(saved.state === 'draft' ? '草稿已保存到家庭资料库，可以稍后继续。' : '已同步到家庭资料库');
       onSaved(saved);
@@ -86,8 +78,17 @@ export function QuestionEditor({ api, question, subjects, sources, active, admin
     } catch (failure) {
       if (failure instanceof ApiError && [401, 403].includes(failure.status)) { leave.dismiss(); await onAccessError(failure); return false; }
       setError(`${failure instanceof Error ? failure.message : '保存失败'}。当前填写内容仍保留，请核对后重试。`);
+      if (failure instanceof ApiError && failure.status === 409) { leave.dismiss(); await conflict.show(); }
       return false;
     } finally { setBusy(false); }
+  }
+  function resolveConflict(keep: boolean) {
+    const latest = conflict.current;
+    if (!latest || working || !active) return;
+    saver.adopt(latest); setQuestion(latest); baseline.current = JSON.stringify(editable(latest));
+    if (!creating) onCurrent(latest);
+    if (!keep) { setFields(editable(latest)); setSelectedPart(latest.parts[0]!.id); setStep(latest.region ? 'confirm' : 'crop'); }
+    conflict.clear(); setError(''); setNotice(keep ? '本次编辑已保留。请合并需要的信息，再保存。' : '已采用资料库当前版本。');
   }
   const validRegion = fields.parts.every(part => validQuestionRegion(part.region));
   const crop = <QuestionPartsEditor api={api} parts={fields.parts} selectedId={selectedPart} onSelect={setSelectedPart} onChange={parts => setFields(current => ({ ...current, parts }))} disabled={working || !active} />;
@@ -101,6 +102,9 @@ export function QuestionEditor({ api, question, subjects, sources, active, admin
     {error && !leave.leaving && <p role="alert" className="message error">{error}</p>}
     {notice && !dirty && <p role="status" className="message">{notice}</p>}
     {leave.dialog}
+    {conflict.open && <SaveConflict current={conflict.current && <ConflictQuestionView api={api} question={conflict.current} subjects={subjects} sources={sources} />}
+      local={<ConflictQuestionView api={api} question={question} fields={fields} subjects={subjects} sources={sources} />}
+      loading={conflict.loading} error={conflict.error} disabled={working || !active} onRefresh={() => void conflict.refresh()} onKeep={() => resolveConflict(true)} onAdopt={() => resolveConflict(false)} />}
     {admin && !creating && question.state === 'collected' && <NewQuestionFromPage parts={question.parts} disabled={working || !active} onChoose={page => leave.requestLeave(() => onNewFromPage(page))} />}
     {!admin && step === 'crop' ? <div className="crop-step">{crop}{addition}<div className="save-actions"><button disabled={working || !validRegion} onClick={() => setStep('confirm')}>下一步，选学科</button>{question.state === 'draft' && <button className="quiet" disabled={working} onClick={() => void save('draft')}>保存草稿</button>}</div></div> : <div className="editor-grid">
       <section className="confirmation-material" aria-label="题目与原始页">

@@ -33,7 +33,7 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
   });
   app.addHook('onClose', async () => db.close());
   app.setErrorHandler((error, _request, reply) => {
-    if (error instanceof AccessError) return reply.code(error.statusCode).send({ message: error.message });
+    if (error instanceof AccessError) return reply.code(error.statusCode).send({ message: error.message, ...(error.conflict ? { conflict: error.conflict } : {}) });
     if (error instanceof Error && 'validation' in error) return reply.code(400).send({ message: '请检查填写内容' });
     if (error instanceof Error && 'statusCode' in error && typeof error.statusCode === 'number' && error.statusCode >= 400 && error.statusCode < 500) return reply.code(error.statusCode).send({ message: '请求格式不正确' });
     return reply.code(500).send({ message: '本地服务暂时无法处理，请稍后重试' });

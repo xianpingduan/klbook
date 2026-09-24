@@ -52,7 +52,7 @@ export class ReadingMaterials {
         return this.get(home.library.id, previous.materialId);
       }
       const current = this.db.prepare<[string, string], ReadingRow>('SELECT * FROM readingMaterials WHERE libraryId = ? AND id = ?').get(home.library.id, id);
-      if ((current?.revision ?? 0) !== input.expectedRevision) throw new AccessError(409, '阅读材料已更新，你的修改仍保留，请返回题目重新打开后核对');
+      if ((current?.revision ?? 0) !== input.expectedRevision) throw new AccessError(409, '阅读材料已更新，你的修改仍保留，请核对双方内容', { entity: 'readingMaterial', id });
       if (current) this.db.prepare('UPDATE readingMaterials SET title = ?, revision = revision + 1, updatedAt = ? WHERE id = ?').run(title, this.now(), id);
       else this.db.prepare('INSERT INTO readingMaterials VALUES (?, ?, ?, 1, ?, ?)').run(id, home.library.id, title, this.now(), this.now());
       this.db.prepare('DELETE FROM readingParts WHERE materialId = ?').run(id);

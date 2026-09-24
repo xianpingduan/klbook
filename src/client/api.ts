@@ -6,10 +6,12 @@ import type { Source, SourceEdit } from '../shared/sources.ts';
 import type { ReadingMaterial, ReadingMaterialEdit, ReadingMaterialList } from '../shared/reading-materials.ts';
 import type { StudySettings, StudySettingsEdit, StudyStage } from '../shared/study.ts';
 import type { FilterOptions, QuestionFilters } from '../shared/collection.ts';
+import type { ConflictTarget } from '../shared/conflicts.ts';
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) { super(message); this.status = status; }
+  conflict?: ConflictTarget;
+  constructor(status: number, message: string, conflict?: ConflictTarget) { super(message); this.status = status; this.conflict = conflict; }
 }
 
 export class FamilyApi {
@@ -40,7 +42,7 @@ export class FamilyApi {
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
       const unavailable = response.status === 502 || response.status === 504;
-      throw new ApiError(response.status, typeof detail.message === 'string' ? detail.message : unavailable ? '家庭电脑上的服务暂时不可达，请确认服务运行后重试' : '请求失败，请重试');
+      throw new ApiError(response.status, typeof detail.message === 'string' ? detail.message : unavailable ? '家庭电脑上的服务暂时不可达，请确认服务运行后重试' : '请求失败，请重试', detail.conflict);
     }
     return response;
   }

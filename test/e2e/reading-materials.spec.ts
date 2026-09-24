@@ -87,8 +87,9 @@ test('从小题建立跨页共享原文，另一小题选择同一材料，解�
     } });
     expect(unlinked.status()).toBe(200);
     await page.getByRole('button', { name: '保存并返回题目', exact: true }).click();
-    await expect(page.getByRole('alert')).toContainText('题目已在其他页面更新');
-    await expect(page.getByLabel('阅读材料名称')).toHaveValue('重试时保留的原文');
+    await expect(page.getByText('原文已保存，关联题目时发生冲突。', { exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: '本次编辑', exact: true })).toContainText('重试时保留的原文');
+    await expect(page.getByRole('region', { name: '当前版本', exact: true })).toContainText('另一设备已解除引用');
     expect(await (await request.get(`${server.url}/api/v1/collection/questions/${question.id}`, { headers })).json()).toEqual(await unlinked.json());
   } finally { await server.stop(); await rm(dir, { recursive: true, force: true }); }
 });

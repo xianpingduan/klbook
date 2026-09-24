@@ -96,7 +96,7 @@ export class CollectionStore {
       const duplicate = this.replay(home, input.operationId, requestHash);
       if (duplicate) return duplicate;
       const latest = this.get(home.library.id, id);
-      if (latest.revision !== input.expectedRevision) throw new AccessError(409, '这道题已在其他页面更新，请返回列表重新打开后核对；当前解答区仍保留');
+      if (latest.revision !== input.expectedRevision) throw new AccessError(409, '这道题已在其他页面更新，请核对双方内容；当前解答区仍保留', { entity: 'question', id });
       this.db.prepare('DELETE FROM answerParts WHERE questionId = ?').run(id);
       const add = this.db.prepare('INSERT INTO answerParts VALUES (?, ?, ?, ?, ?)');
       parts.forEach((part, position) => add.run(id, part.id, part.pageId, position, JSON.stringify(part.region)));
@@ -197,9 +197,9 @@ export class CollectionStore {
       const duplicate = this.replay(home, input.operationId, requestHash);
       if (duplicate) return duplicate;
       const latest = id ? this.get(home.library.id, id) : undefined;
+      if (latest && latest.revision !== input.expectedRevision) throw new AccessError(409, '这道题已在其他页面更新。你的修改仍在当前页面，请先重新读取并核对', { entity: 'question', id: latest.id });
       if (latest?.state === 'collected' && input.state === 'draft') throw new AccessError(409, '已收集的题目不能改回草稿');
-      if (latest && latest.revision !== input.expectedRevision) throw new AccessError(409, '这道题已在其他页面更新。你的修改仍在当前页面，请先重新读取并核对');
-      if (reading && this.readings.get(home.library.id, reading.id).revision !== reading.revision) throw new AccessError(409, '阅读材料已更新，请核对后重试');
+      if (reading && this.readings.get(home.library.id, reading.id).revision !== reading.revision) throw new AccessError(409, '阅读材料已更新，请核对后重试', id ? { entity: 'question', id } : undefined);
       let selectedSource = input.sourceId ? this.sources.get(input.sourceId) : undefined;
       if (input.sourceId === undefined && input.source!.trim()) {
         const name = input.source!.trim();

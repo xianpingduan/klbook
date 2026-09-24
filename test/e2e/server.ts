@@ -8,7 +8,8 @@ export async function startServer(dataDir: string, port = 0) {
   for (let attempt = 0; ; attempt++) {
     try { return await startAtPort(dataDir, randomInt(49152, 65536)); }
     catch (error) {
-      if (attempt >= 9 || !(error instanceof Error) || !error.message.includes('EADDRINUSE')) throw error;
+      const unavailablePort = error instanceof Error && (error.message.includes('EADDRINUSE') || (process.platform === 'win32' && error.message.includes('listen EACCES')));
+      if (attempt >= 9 || !unavailablePort) throw error;
     }
   }
 }
