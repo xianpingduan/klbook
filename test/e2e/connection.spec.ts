@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import type { APIRequestContext, Page } from '@playwright/test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +7,17 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import sharp from 'sharp';
 import { startServer } from './server.ts';
+
+async function setupFamily(request: APIRequestContext, url: string, dataDir: string, learnerName: string) {
+  return (await request.post(`${url}/api/v1/setup`, { data: {
+    setupCode: (await readFile(join(dataDir, 'setup-code.txt'), 'utf8')).trim(), username: 'parent', password: 'family password 123', learnerName, deviceName: '设置电脑'
+  } })).json();
+}
+
+async function login(page: Page) {
+  await page.getByLabel('家长账号').fill('parent'); await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
+  await page.getByRole('button', { name: '登录此设备', exact: true }).click();
+}
 
 test('拒绝未允许网页来源和不兼容服务，测试不发送原凭据；旧服务停机时仍可进入设置', async ({ page, request, context }) => {
   const root = await mkdtemp(join(tmpdir(), 'klbook-connection-denied-'));
@@ -23,10 +35,9 @@ test('拒绝未允许网页来源和不兼容服务，测试不发送原凭据�
   const address = incompatible.address(); if (!address || typeof address === 'string') throw new Error('Missing fixture address');
   const incompatibleUrl = `http://127.0.0.1:${address.port}`;
   try {
-    const setup = await (await request.post(`${first.url}/api/v1/setup`, { data: { setupCode: (await readFile(join(root, 'first', 'setup-code.txt'), 'utf8')).trim(), username: 'parent', password: 'family password 123', learnerName: '原库', deviceName: '设置电脑' } })).json();
+    const setup = await setupFamily(request, first.url, join(root, 'first'), '原库');
     await page.goto(`${first.url}/learn/mine`);
-    await page.getByLabel('家长账号').fill('parent'); await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
-    await page.getByRole('button', { name: '登录此设备', exact: true }).click();
+    await login(page);
     await expect(page.getByTestId('library-id')).toHaveText(setup.library.id);
     if (process.platform === 'win32' && test.info().project.name === 'webkit') {
       test.info().annotations.push({ type: 'browser limitation', description: 'Windows WebKit原生fetch在credentials:omit时仍发送人工Cookie，独立探针另记失败；本用例仍核对应用真实令牌、无业务请求及兼容性处理。' });
@@ -82,12 +93,11 @@ test('首次连接和登录前可设置地址，格式错误不保存，不可�
     await expect(page.getByLabel('后端服务地址', { exact: true })).toHaveValue(unavailable.url);
     await expect(page.getByRole('definition')).toHaveText(active.url);
     await page.getByRole('button', { name: '返回', exact: true }).click();
-    const setup = await (await request.post(`${active.url}/api/v1/setup`, { data: { setupCode: (await readFile(join(root, 'active', 'setup-code.txt'), 'utf8')).trim(), username: 'parent', password: 'family password 123', learnerName: '原资料库', deviceName: '设置电脑' } })).json();
+    const setup = await setupFamily(request, active.url, join(root, 'active'), '原资料库');
     await page.reload(); await expect(page.getByRole('heading', { name: '登录家庭资料库', exact: true })).toBeVisible();
     await page.getByRole('button', { name: '连接设置', exact: true }).click();
     await page.getByRole('button', { name: '返回', exact: true }).click();
-    await page.getByLabel('家长账号').fill('parent'); await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
-    await page.getByRole('button', { name: '登录此设备', exact: true }).click();
+    await login(page);
     await page.getByRole('button', { name: '我的', exact: true }).click();
     await expect(page.getByTestId('library-id')).toHaveText(setup.library.id);
     await page.getByRole('button', { name: '连接设置', exact: true }).click();
@@ -104,17 +114,10 @@ test('配置另一服务先无凭据测试，再登录读取该库题目和附�
   const second = await startServer(join(root, 'second'), 0, [first.url]);
   const other = await browser.newContext();
   try {
-    const setup = async (url: string, dir: string, learnerName: string) => (await request.post(`${url}/api/v1/setup`, { data: {
-      setupCode: (await readFile(join(root, dir, 'setup-code.txt'), 'utf8')).trim(), username: 'parent', password: 'family password 123', learnerName, deviceName: '设置电脑'
-    } })).json();
-    const a = await setup(first.url, 'first', '第一资料库');
-    const b = await setup(second.url, 'second', '第二资料库');
+    const a = await setupFamily(request, first.url, join(root, 'first'), '第一资料库');
+    const b = await setupFamily(request, second.url, join(root, 'second'), '第二资料库');
     const bytes = await sharp(await readFile('test/fixtures/paper.svg')).png().toBuffer();
     const draft = await (await request.post(`${second.url}/api/v1/collection/drafts`, { headers: { Authorization: `Bearer ${b.token}`, 'Content-Type': 'image/png', 'Idempotency-Key': crypto.randomUUID() }, data: bytes })).json();
-    const login = async (target: typeof page) => {
-      await target.getByLabel('家长账号').fill('parent'); await target.getByLabel('家长密码', { exact: true }).fill('family password 123');
-      await target.getByRole('button', { name: '登录此设备', exact: true }).click();
-    };
     const otherPage = await other.newPage();
     for (const device of [page, otherPage]) { await device.goto(`${first.url}/learn/mine`); await login(device); await expect(device.getByTestId('library-id')).toHaveText(a.library.id); }
     const sent: { path: string; authorization?: string; cookie?: string; method: string }[] = [];
