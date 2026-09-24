@@ -2,11 +2,11 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { randomInt } from 'node:crypto';
 
-export async function startServer(dataDir: string, port = 0) {
-  if (port) return startAtPort(dataDir, port);
+export async function startServer(dataDir: string, port = 0, allowedOrigins: string[] = []) {
+  if (port) return startAtPort(dataDir, port, allowedOrigins);
   // The OS may allocate an ephemeral port that browsers block (e.g. 5060).
   for (let attempt = 0; ; attempt++) {
-    try { return await startAtPort(dataDir, randomInt(49152, 65536)); }
+    try { return await startAtPort(dataDir, randomInt(49152, 65536), allowedOrigins); }
     catch (error) {
       const unavailablePort = error instanceof Error && (error.message.includes('EADDRINUSE') || (process.platform === 'win32' && error.message.includes('listen EACCES')));
       if (attempt >= 9 || !unavailablePort) throw error;
@@ -14,9 +14,9 @@ export async function startServer(dataDir: string, port = 0) {
   }
 }
 
-async function startAtPort(dataDir: string, port: number) {
+async function startAtPort(dataDir: string, port: number, allowedOrigins: string[]) {
   const child = spawn(process.execPath, ['dist/node/server/main.js'], {
-    env: { ...process.env, KLBOOK_DATA_DIR: dataDir, KLBOOK_PORT: String(port), KLBOOK_ALLOWED_ORIGINS: '' },
+    env: { ...process.env, KLBOOK_DATA_DIR: dataDir, KLBOOK_PORT: String(port), KLBOOK_ALLOWED_ORIGINS: allowedOrigins.join(',') },
     windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']
   });
   let output = '';

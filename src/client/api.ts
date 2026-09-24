@@ -22,14 +22,27 @@ export class FamilyApi {
   private constructor(platform: ClientPlatform, target: string, credential: SavedCredential | null) {
     this.platform = platform; this.target = target; this.credential = credential;
   }
-  static async connect(platform: ClientPlatform) {
-    const target = serverOrigin(await platform.target.read());
+  get address() { return this.target; }
+  static async probe(platform: ClientPlatform, address: string) {
+    const target = serverOrigin(address);
     const api = new FamilyApi(platform, target, null);
-    // Probe without credentials, even when the device remembers a session.
-    const info = await api.info();
-    if (info.app !== 'klbook' || info.apiVersion !== 1 || typeof info.initialized !== 'boolean') throw new Error('此服务与当前客户端不兼容');
-    api.credential = await platform.credentials.read(target);
+    const response = await api.send('/info');
+    const info: ServerInfo = await response.json().catch(() => { throw new Error('此服务与当前客户端不兼容，请确认填写的是错题集后端地址'); });
+    if (!info || info.app !== 'klbook' || info.apiVersion !== 1 || typeof info.initialized !== 'boolean') throw new Error('此服务与当前客户端不兼容');
     return { api, info };
+  }
+  static async connect(platform: ClientPlatform) {
+    // Remembered sessions are read only after the anonymous compatibility check.
+    const connection = await FamilyApi.probe(platform, await platform.target.read());
+    connection.api.credential = await platform.credentials.read(connection.api.address);
+    return connection;
+  }
+  static async select(platform: ClientPlatform, address: string) {
+    const connection = await FamilyApi.probe(platform, address);
+    // An explicit selection always requires a new login, including a previously used address.
+    await platform.credentials.remove(connection.api.address);
+    await platform.target.write(connection.api.address);
+    return connection;
   }
   private async send(path: string, options: RequestInit = {}): Promise<Response> {
     let response: Response;

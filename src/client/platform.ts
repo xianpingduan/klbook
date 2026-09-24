@@ -6,7 +6,7 @@ export interface SavedCredential {
 }
 export interface DraftScope { libraryId: string; accountId: string }
 export interface ClientPlatform {
-  target: { read(): Promise<string>; write(value: string): Promise<void> };
+  target: { read(): Promise<string>; write(value: string): Promise<void>; readPending(): Promise<string | null>; writePending(value: string): Promise<void> };
   credentials: {
     read(target: string): Promise<SavedCredential | null>;
     write(value: SavedCredential): Promise<void>;
@@ -21,10 +21,13 @@ export interface ClientPlatform {
 }
 
 export function serverOrigin(value: string) {
-  const url = new URL(value);
-  const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
-  if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
-    throw new Error('服务地址需为 HTTPS 主机与端口；本机开发可使用 HTTP 回环地址');
-  }
-  return url.origin;
+  const message = '服务地址需为 HTTPS 主机与端口，不含账号、路径或查询参数；本机开发可使用 HTTP 回环地址';
+  try {
+    const input = value.trim();
+    if (!/^https?:\/\/[^/?#\\\s]+\/?$/i.test(input)) throw new Error(message);
+    const url = new URL(input);
+    const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+    if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) || url.username || url.password || url.port === '0' || url.pathname !== '/') throw new Error(message);
+    return url.origin;
+  } catch { throw new Error(message); }
 }

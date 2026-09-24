@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { Home, SessionResult } from '../shared/contracts.ts';
 import type { ClientPlatform } from './platform.ts';
@@ -7,6 +7,7 @@ import { AuthenticatedWorkspace } from './AuthenticatedWorkspace.tsx';
 import { SurfaceLayout } from './SurfaceLayout.tsx';
 import { LeaveContext, usePage } from './navigation.ts';
 import { RecoveryCodeNotice } from './RecoveryCodeNotice.tsx';
+import { ConnectionSettings } from './ConnectionSettings.tsx';
 
 function Field({ label, name, type = 'text', value, autoComplete, minLength }: { label: string; name: string; type?: string; value?: string; autoComplete?: string; minLength?: number }) {
   return <label>{label}<input name={name} type={type} defaultValue={value} autoComplete={autoComplete} minLength={minLength} maxLength={name.toLowerCase().includes('password') || name.includes('Code') ? 128 : 64} required /></label>;
@@ -21,6 +22,8 @@ export function App({ platform }: { platform: ClientPlatform }) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [connectionOpen, setConnectionOpen] = useState(false);
+  const bootVersion = useRef(0);
   const { path, navigate, boundary } = usePage();
   const signedOut = useCallback(async () => {
     try { await api?.forget(); }
@@ -29,17 +32,20 @@ export function App({ platform }: { platform: ClientPlatform }) {
   }, [api]);
 
   async function boot() {
+    const version = ++bootVersion.current;
     setError(''); setScreen('loading');
     try {
       const connection = await FamilyApi.connect(platform);
+      if (version !== bootVersion.current) return;
       setApi(connection.api);
       if (!connection.info.initialized) { setScreen('setup'); return; }
-      try { setHome(await connection.api.home()); setScreen('home'); }
+      try { const next = await connection.api.home(); if (version === bootVersion.current) { setHome(next); setScreen('home'); } }
       catch (failure) {
+        if (version !== bootVersion.current) return;
         if (!(failure instanceof ApiError && failure.status === 401)) throw failure;
-        await connection.api.forget(); setScreen('login');
+        await connection.api.forget(); if (version === bootVersion.current) setScreen('login');
       }
-    } catch (failure) { setError(failure instanceof Error ? failure.message : '连接失败'); }
+    } catch (failure) { if (version === bootVersion.current) setError(failure instanceof Error ? failure.message : '连接失败'); }
   }
   useEffect(() => { void boot(); }, [platform]);
 
@@ -50,7 +56,7 @@ export function App({ platform }: { platform: ClientPlatform }) {
     finally { setBusy(false); }
   }
   async function signedIn(result: SessionResult) {
-    if (!await api!.remember(result)) setNotice('此浏览器无法保存登录状态；本次可以使用，关闭后需重新登录。');
+    setNotice(await api!.remember(result) ? '' : '此浏览器无法保存登录状态；本次可以使用，关闭后需重新登录。');
     setHome({ account: result.account, library: result.library, session: result.session });
     if (result.recoveryCode) { setRecoveryCode(result.recoveryCode); setScreen('save-code'); }
     else setScreen('home');
@@ -69,10 +75,15 @@ export function App({ platform }: { platform: ClientPlatform }) {
     });
   }
 
-  if (screen === 'home' && home && api) return <LeaveContext.Provider value={boundary}><AuthenticatedWorkspace key={home.session.id} api={api} home={home} platform={platform} path={path} navigate={navigate} notice={notice} onSignedOut={signedOut} onRecoveryCode={code => { setRecoveryCode(code); setScreen('save-code'); }} /></LeaveContext.Provider>;
+  const openConnection = () => boundary.requestLeave(() => { bootVersion.current++; setConnectionOpen(true); });
+  if (connectionOpen) return <LeaveContext.Provider value={boundary}><SurfaceLayout path={path} navigate={navigate}><ConnectionSettings platform={platform}
+    onBack={() => { setConnectionOpen(false); if (screen === 'loading') void boot(); }}
+    onConnected={({ api: next, info }) => { bootVersion.current++; setApi(next); setHome(undefined); setRecoveryCode(''); setError(''); setNotice('服务地址已更新，请由家长登录目标资料库。'); setScreen(info.initialized ? 'login' : 'setup'); setConnectionOpen(false); }} /></SurfaceLayout></LeaveContext.Provider>;
+  if (screen === 'home' && home && api) return <LeaveContext.Provider value={boundary}><AuthenticatedWorkspace key={home.session.id} api={api} home={home} platform={platform} path={path} navigate={navigate} notice={notice} onConnection={openConnection} onSignedOut={signedOut} onRecoveryCode={code => { setRecoveryCode(code); setScreen('save-code'); }} /></LeaveContext.Provider>;
   return <LeaveContext.Provider value={boundary}><SurfaceLayout path={path} navigate={navigate}>
     {error && <p role="alert" className="message error">{error}</p>}
     {notice && <p role="status" className="message">{notice}</p>}
+    {screen !== 'save-code' && <button className="quiet" disabled={busy} onClick={openConnection}>连接设置</button>}
     {screen === 'loading' && <section className="card"><h1>连接家庭资料库</h1><p>请保持家庭电脑开机，并运行错题集服务。</p>{error ? <button onClick={() => void boot()}>重新连接</button> : <p role="status">正在连接…</p>}</section>}
     {['setup', 'login', 'recovery'].includes(screen) && <section className="card auth-card" key={screen}>
       <p className="eyebrow">由家长完成</p>

@@ -2,6 +2,13 @@ import type { ClientPlatform, DraftScope, SavedCredential } from './platform.ts'
 import { serverOrigin } from './platform.ts';
 
 function draftKey(scope: DraftScope, id: string) { return [scope.libraryId, scope.accountId, id]; }
+function connectionSettings(): { active: string; pending: string | null } {
+  const raw = localStorage.getItem('klbook.connection');
+  if (!raw) return { active: localStorage.getItem('klbook.target') ?? window.location.origin, pending: null };
+  const value = JSON.parse(raw);
+  if (!value || typeof value.active !== 'string' || (value.pending !== null && typeof value.pending !== 'string')) throw new Error('本机连接配置无法读取，请重新设置服务地址');
+  return value;
+}
 async function drafts<T>(mode: IDBTransactionMode, operation: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open('klbook-device-drafts', 1);
@@ -24,8 +31,10 @@ async function drafts<T>(mode: IDBTransactionMode, operation: (store: IDBObjectS
 export function browserPlatform(): ClientPlatform {
   return {
     target: {
-      async read() { return serverOrigin(localStorage.getItem('klbook.target') ?? window.location.origin); },
-      async write(value) { localStorage.setItem('klbook.target', serverOrigin(value)); }
+      async read() { return serverOrigin(connectionSettings().active); },
+      async write(value) { localStorage.setItem('klbook.connection', JSON.stringify({ active: serverOrigin(value), pending: null })); },
+      async readPending() { return connectionSettings().pending; },
+      async writePending(value) { localStorage.setItem('klbook.connection', JSON.stringify({ ...connectionSettings(), pending: serverOrigin(value) })); }
     },
     credentials: {
       async read(target) {

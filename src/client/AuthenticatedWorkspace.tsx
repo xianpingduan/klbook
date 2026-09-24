@@ -13,8 +13,8 @@ import { DeviceManager } from './DeviceManager.tsx';
 import { StudyManager } from './StudyManager.tsx';
 import { LeaveContext } from './navigation.ts';
 
-export function AuthenticatedWorkspace({ api, home, platform, path, navigate, onSignedOut, onRecoveryCode, notice }: {
-  api: FamilyApi; home: Home; platform: ClientPlatform; path: PagePath; navigate(path: PagePath): void; onSignedOut(): Promise<void>; onRecoveryCode(code: string): void; notice: string;
+export function AuthenticatedWorkspace({ api, home, platform, path, navigate, onSignedOut, onRecoveryCode, onConnection, notice }: {
+  api: FamilyApi; home: Home; platform: ClientPlatform; path: PagePath; navigate(path: PagePath): void; onSignedOut(): Promise<void>; onRecoveryCode(code: string): void; onConnection(): void; notice: string;
 }) {
   const [grant, setGrant] = useState<ParentGrant>();
   const sessionActive = useRef(true);
@@ -94,6 +94,6 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
       {studyStarted && <StudyManager api={api} grant={grant?.token} active={path === '/admin/study'} onAccessError={accessError} />}
     </div>
     {path === '/admin/devices' && grant && <DeviceManager api={api} grant={grant.token} onAccessError={accessError} onSignedOut={deviceSignedOut} onRecoveryCode={recoveryCodeReady} />}
-    {path === '/learn/mine' && <section className="card"><h1>我的</h1><p role="status">{connection}</p><dl><div><dt>学习者</dt><dd>{home.library.learnerName}</dd></div><div><dt>家长账号</dt><dd>{home.account.username}</dd></div><div><dt>当前设备</dt><dd>{home.session.deviceName}</dd></div></dl><details open><summary>资料库身份</summary><code data-testid="library-id">{home.library.id}</code></details><button onClick={() => { setError(''); navigate('/admin'); }}>家长管理</button><button className="quiet" disabled={busy} onClick={() => void run(async () => { await api.logout(); await onSignedOut(); })}>退出此设备</button></section>}
+    {path === '/learn/mine' && <section className="card"><h1>我的</h1><p role="status">{connection}</p><dl><div><dt>学习者</dt><dd>{home.library.learnerName}</dd></div><div><dt>家长账号</dt><dd>{home.account.username}</dd></div><div><dt>当前设备</dt><dd>{home.session.deviceName}</dd></div></dl><details open><summary>资料库身份</summary><code data-testid="library-id">{home.library.id}</code></details><button className="quiet" disabled={busy} onClick={onConnection}>连接设置</button><button onClick={() => { setError(''); navigate('/admin'); }}>家长管理</button><button className="quiet" disabled={busy} onClick={() => void run(async () => { await api.logout(); await onSignedOut(); })}>退出此设备</button></section>}
   </SurfaceLayout>;
 }
