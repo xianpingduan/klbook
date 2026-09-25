@@ -118,6 +118,32 @@ test('讯飞鉴权和嵌套业务异常均不伪报成功，错误与畸形响�
   } finally { await f.close(); }
 });
 
+test('讯飞鉴权失败区分无效APIKey、签名和时间，未知响应不回显凭据', async () => {
+  const failures = [
+    { status: 401, message: 'HMAC signature cannot be verified: invalid api_key', expected: /APIKey 无效/ },
+    { status: 401, message: 'HMAC signature does not match', expected: /签名校验失败/ },
+    { status: 403, message: 'HMAC signature cannot be verified, a valid date or x-date header is required for HMAC Authentication', expected: /同步家庭电脑系统时间/ },
+    { status: 401, message: 'HMAC signature cannot be verified', expected: /无法验证签名/ },
+    { status: 403, message: `unknown ${xfyun.apiKey} ${xfyun.secretKey} ${xfyun.appId}`, expected: /讯飞鉴权失败/ }
+  ];
+  let index = 0, calls = 0;
+  const f = await familyFixture({ ocrHttp: async () => { calls++; return Response.json({ message: failures[index]!.message }, { status: failures[index]!.status }); } });
+  try {
+    const headers = await parent(f);
+    await f.app.inject({ method: 'PUT', url: path, headers, payload: { operationId: randomUUID(), expectedRevision: 0, config: { ...config, provider: 'xfyun', formulas: false, retries: 2, priceCents: 3.5 }, credentials: xfyun } });
+    for (index = 0; index < failures.length; index++) {
+      await f.app.inject({ method: 'PUT', url: `${path}/tests/${randomUUID()}`, headers, payload: { expectedRevision: 1, sample: 'school-v1' } });
+      const data = await finish(f, headers);
+      assert.equal(data.tests[0].status, 'failed');
+      assert.equal(data.tests[0].attempts, 1);
+      assert.match(data.tests[0].message, failures[index]!.expected);
+      for (const secret of Object.values(xfyun)) assert.equal(JSON.stringify(data).includes(secret), false);
+      assert.equal(data.usage.estimatedCents, 0);
+    }
+    assert.equal(calls, failures.length);
+  } finally { await f.close(); }
+});
+
 test('讯飞在途调用切换百度后保留原供应商结果，重试不会把旧凭据发送给新供应商', async () => {
   let resolveRequest: ((value: Response) => void) | undefined, calls = 0;
   const f = await familyFixture({ ocrHttp: async url => {

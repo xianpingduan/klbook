@@ -2,6 +2,19 @@ import { createHmac } from 'node:crypto';
 import type { OcrConfig, OcrCredentials, OcrLine } from '../shared/ocr.ts';
 import { OcrFailure, object, readOcrResponse, type VendorHttp } from './ocr-provider.ts';
 
+async function authenticationFailure(response: Response): Promise<OcrFailure> {
+  const data = await readOcrResponse(response).catch(() => ({}));
+  const message = object(data).message;
+  // Match known error categories only; vendor messages may contain credentials or signed URLs.
+  if (typeof message === 'string') {
+    if (/invalid api[_ -]?key|api[_ -]?key.*(?:invalid|not exist|not found)/i.test(message)) return new OcrFailure('讯飞 APIKey 无效，请从已开通“通用文字识别”的同一应用重新复制 APPID、APIKey、APISecret 并保存');
+    if (/a valid date or x-date header is required/i.test(message)) return new OcrFailure('讯飞拒绝了请求时间，请同步家庭电脑系统时间后重新测试');
+    if (/HMAC signature does not match/i.test(message)) return new OcrFailure('讯飞签名校验失败，请核对同一应用的 APIKey 和 APISecret');
+    if (/HMAC signature cannot be verified/i.test(message)) return new OcrFailure('讯飞无法验证签名，请核对通用文字识别应用的 APIKey、APISecret');
+  }
+  return new OcrFailure('讯飞鉴权失败，请检查 APPID、APIKey、APISecret、服务权限及电脑系统时间');
+}
+
 function textLines(data: Record<string, unknown>, credentials: OcrCredentials): OcrLine[] {
   const result = object(object(data.payload).result);
   if (result.compress !== 'raw' || result.encoding !== 'utf8' || result.format !== 'json' || typeof result.text !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(result.text) || result.text.length % 4 !== 0) throw new OcrFailure('讯飞返回的识别数据格式不完整，请稍后重新测试', false, true);
@@ -58,8 +71,8 @@ export class XfyunOcr {
       permit(); timed.throwIfAborted(); dispatched = true;
       const response = await this.http(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, redirect: 'error', signal: timed });
       if (!response.ok) {
+        if ([401, 403].includes(response.status)) throw await authenticationFailure(response);
         await response.body?.cancel();
-        if ([401, 403].includes(response.status)) throw new OcrFailure('讯飞鉴权失败，请检查 APPID、APIKey、APISecret、服务权限及电脑系统时间');
         throw new OcrFailure('讯飞服务暂时无法响应，请稍后测试', response.status >= 500 || response.status === 429, true);
       }
       const data = await readOcrResponse(response), code = object(data.header).code;
