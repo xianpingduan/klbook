@@ -120,7 +120,16 @@ const migrations = [
   UPDATE ocrSettings SET config = json_set(config, '$.provider', 'baidu'), credentials = NULL;
   ALTER TABLE ocrTests ADD COLUMN provider TEXT NOT NULL DEFAULT 'baidu';
   ALTER TABLE serviceAttempts RENAME COLUMN estimatedCents TO estimatedMills;
-  UPDATE serviceAttempts SET estimatedMills = estimatedMills * 10;`
+  UPDATE serviceAttempts SET estimatedMills = estimatedMills * 10;`,
+  `ALTER TABLE ocrTests ADD COLUMN libraryId TEXT;
+  ALTER TABLE ocrTests ADD COLUMN pageId TEXT REFERENCES originalPages(id);
+  ALTER TABLE ocrTests ADD COLUMN inputWidth INTEGER;
+  ALTER TABLE ocrTests ADD COLUMN inputHeight INTEGER;
+  ALTER TABLE ocrTests ADD COLUMN candidates TEXT NOT NULL DEFAULT '[]';
+  CREATE INDEX ocrByPage ON ocrTests(libraryId, pageId, createdAt);
+  CREATE TABLE initialPageRecognition (pageId TEXT PRIMARY KEY REFERENCES originalPages(id), message TEXT NOT NULL DEFAULT '');
+  ALTER TABLE questionParts ADD COLUMN transcription TEXT NOT NULL DEFAULT '';
+  ALTER TABLE questionParts ADD COLUMN recognition TEXT;`
 ];
 
 export function openDatabase(dataDir: string) {

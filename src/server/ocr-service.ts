@@ -9,24 +9,83 @@ import { XfyunOcr } from './xfyun-ocr.ts';
 import { OcrFailure, type VendorHttp } from './ocr-provider.ts';
 import { ocrSample } from './ocr-sample.ts';
 import { setTimeout as pause } from 'node:timers/promises';
+import sharp from 'sharp';
+import type { PageRecognition, PageRecognitions } from '../shared/ocr.ts';
+import type { CollectionStore } from './collection-store.ts';
+import { recognitionCandidates } from './recognition-candidates.ts';
 
 type SettingsRow = { revision: number; config: string };
-type TestRow = Omit<OcrTest, 'lines'> & { lines: string };
-const testFields = 'id, revision, provider, sample, status, createdAt, finishedAt, durationMs, attempts, message, lines';
-const testResult = (row: TestRow): OcrTest => ({ ...row, lines: JSON.parse(row.lines) });
+type TestRow = Omit<PageRecognition, 'lines' | 'candidates'> & { lines: string; candidates: string };
+const testFields = 'id, revision, provider, sample, status, createdAt, finishedAt, durationMs, attempts, message, lines, pageId, inputWidth, inputHeight, candidates';
+const testResult = (row: TestRow): PageRecognition => ({ ...row, lines: JSON.parse(row.lines), candidates: JSON.parse(row.candidates) });
 export class OcrService {
   private db: Database.Database;
   private vault: CredentialVault;
   private now: () => number;
   private vendors: Record<OcrProvider, BaiduOcr | XfyunOcr>;
+  private collection: CollectionStore;
   private work?: Promise<void>;
+  private pendingCount = 0;
   private stopping = new AbortController();
-  constructor(db: Database.Database, dataDir: string, now = Date.now, http?: VendorHttp) {
+  constructor(db: Database.Database, dataDir: string, collection: CollectionStore, now = Date.now, http?: VendorHttp) {
     this.db = db; this.vault = new CredentialVault(dataDir); this.now = now;
+    this.collection = collection;
     this.vendors = { baidu: new BaiduOcr(http), xfyun: new XfyunOcr(http, now) };
     db.prepare('INSERT OR IGNORE INTO ocrSettings VALUES (1, 0, ?, NULL)').run(JSON.stringify(defaultOcrConfig));
     db.prepare('UPDATE ocrTests SET status = \'interrupted\', finishedAt = ?, message = ? WHERE status = \'running\'').run(now(), '电脑服务曾中断，结果不确定；不会自动重新发送');
     db.prepare('UPDATE serviceAttempts SET status = \'unknown\', finishedAt = ?, message = ? WHERE capability = \'ocr\' AND status = \'running\'').run(now(), '服务中断，保留估算费用');
+  }
+  pageRuns(authorize: () => Home, pageId: string): PageRecognitions {
+    const home = authorize(); this.collection.publicPage(home.library.id, pageId);
+    const { config, credentialAvailable } = this.settings();
+    return { initialMessage: this.db.prepare<[string], { message: string }>('SELECT message FROM initialPageRecognition WHERE pageId = ?').get(pageId)?.message ?? '',
+      service: { provider: config.provider, enabled: config.enabled, available: credentialAvailable, formulas: config.provider === 'baidu' && config.formulas },
+      runs: this.db.prepare<[string, string], TestRow>(`SELECT ${testFields} FROM ocrTests WHERE libraryId = ? AND pageId = ? ORDER BY createdAt DESC, rowid DESC LIMIT 20`).all(home.library.id, pageId).map(testResult) };
+  }
+  uploadedPage(authorize: () => Home, pageId: string) {
+    try {
+      const home = authorize(); this.collection.publicPage(home.library.id, pageId);
+      if (!this.db.prepare('INSERT OR IGNORE INTO initialPageRecognition (pageId) VALUES (?)').run(pageId).changes) return;
+      this.startPage(authorize, pageId, pageId);
+    } catch (error) {
+      // Original material is already durable; an optional external capability must not fail its upload.
+      try { this.db.prepare('UPDATE initialPageRecognition SET message = ? WHERE pageId = ?').run(error instanceof AccessError ? error.message : '识别暂不可用，可以继续手动框题', pageId); }
+      catch { /* Preserve the successful upload even if an auxiliary record cannot be written. */ }
+    }
+  }
+  pageRun(authorize: () => Home, pageId: string, id: string) {
+    const home = authorize(); this.collection.publicPage(home.library.id, pageId);
+    const row = this.db.prepare<[string, string, string], TestRow>(`SELECT ${testFields} FROM ocrTests WHERE libraryId = ? AND pageId = ? AND id = ?`).get(home.library.id, pageId, id);
+    if (!row) throw new AccessError(404, '找不到这次图片识别记录');
+    return testResult(row);
+  }
+  startPage(authorize: () => Home, pageId: string, id: string) {
+    this.db.transaction(() => {
+      const home = authorize(); this.collection.publicPage(home.library.id, pageId);
+      const previous = this.db.prepare<[string], { pageId: string; libraryId: string }>('SELECT pageId, libraryId FROM ocrTests WHERE id = ?').get(id);
+      if (previous) {
+        if (previous.pageId !== pageId || previous.libraryId !== home.library.id) throw new AccessError(409, '此识别请求已属于其他材料');
+        return;
+      }
+      if (this.pendingCount >= 10 || this.stopping.signal.aborted) throw new AccessError(409, '待识别材料较多，可以先手动框题，稍后重试');
+      if (this.db.prepare("SELECT 1 FROM ocrTests WHERE pageId = ? AND status = 'running'").get(pageId)) throw new AccessError(409, '这张图片正在识别，请等待读取结果');
+      const row = this.row(), config: OcrConfig = JSON.parse(row.config), sealed = this.sealed(config.provider);
+      if (!config.enabled) throw new AccessError(422, '图片识别已停用，可以继续手动框题');
+      if (!sealed) throw new AccessError(422, '尚未配置图片识别，可以继续手动框题');
+      this.vault.open(sealed); this.checkQuota(config);
+      this.db.prepare("INSERT INTO ocrTests (id, accountId, revision, provider, sample, status, createdAt, libraryId, pageId) VALUES (?, ?, ?, ?, 'original-page', 'running', ?, ?, ?)").run(id, home.account.id, row.revision, config.provider, this.now(), home.library.id, pageId);
+      this.db.prepare("INSERT INTO serviceAudit (capability, actor, at, action) VALUES ('ocr', ?, ?, '识别收集材料')").run(home.account.username, this.now());
+      this.schedule(id, () => this.runTest(id, row, sealed, { authorize, libraryId: home.library.id, pageId }));
+    })();
+    return this.pageRun(authorize, pageId, id);
+  }
+  private schedule(id: string, run: () => Promise<void>) {
+    this.pendingCount++;
+    const job = (this.work ?? Promise.resolve()).then(run).catch(() => {
+      try { this.db.prepare("UPDATE ocrTests SET status = 'interrupted', finishedAt = ?, message = ? WHERE id = ? AND status = 'running'").run(this.now(), '本地识别被中断，请读取记录后再决定是否重试', id); }
+      catch { /* Startup reconciles work if the disk cannot store the final status. */ }
+    }).finally(() => { this.pendingCount--; if (this.work === job) this.work = undefined; });
+    this.work = job;
   }
   private row() { return this.db.prepare<[], SettingsRow>('SELECT revision, config FROM ocrSettings WHERE singleton = 1').get()!; }
   private sealed(provider: OcrProvider) { return this.db.prepare<[string], { credentials: string }>('SELECT credentials FROM ocrProviderCredentials WHERE provider = ?').get(provider)?.credentials; }
@@ -99,10 +158,7 @@ export class OcrService {
       this.db.prepare('INSERT INTO ocrTests (id, accountId, revision, provider, sample, status, createdAt) VALUES (?, ?, ?, ?, \'school-v1\', \'running\', ?)').run(id, home.account.id, revision, config.provider, this.now());
       this.db.prepare('INSERT INTO serviceAudit (capability, actor, at, action) VALUES (\'ocr\', ?, ?, \'主动测试合成材料\')').run(home.account.username, this.now());
       // Defer work until after the transaction commits. The operation ID survives a lost HTTP response.
-      this.work = Promise.resolve().then(() => this.runTest(id, row, sealed)).catch(() => {
-        try { this.db.prepare('UPDATE ocrTests SET status = \'interrupted\', finishedAt = ?, message = ? WHERE id = ? AND status = \'running\'').run(this.now(), '本地测试被中断，请读取记录后再决定是否测试', id); }
-        catch { /* A failed disk must not cause an unhandled rejection; startup reconciles unfinished calls. */ }
-      }).finally(() => { this.work = undefined; });
+      this.schedule(id, () => this.runTest(id, row, sealed));
     })();
     return testResult(this.db.prepare<[string], TestRow>(`SELECT ${testFields} FROM ocrTests WHERE id = ?`).get(id)!);
   }
@@ -111,29 +167,46 @@ export class OcrService {
     if (usage.attempts >= config.monthlyLimit) throw new AccessError(422, '已达到图片识别本月次数上限');
     if (Math.round(usage.estimatedCents * 10) + Math.round(config.priceCents * 10) > config.monthlyBudgetCents * 10) throw new AccessError(422, '本次调用会超过图片识别本月估算预算');
   }
-  private permit(revision: number) {
+  private permit(revision: number, authorize?: () => Home) {
     if (this.stopping.signal.aborted || this.row().revision !== revision) throw new OcrFailure('配置已更改或服务已停用，尚未发送的调用已停止');
+    if (authorize) {
+      authorize();
+      if (!JSON.parse(this.row().config).enabled) throw new OcrFailure('图片识别已停用，可以继续手动框题');
+    }
   }
-  private async runTest(id: string, row: SettingsRow, sealed: string) {
+  private async runTest(id: string, row: SettingsRow, sealed: string, page?: { authorize: () => Home; libraryId: string; pageId: string }) {
     const started = performance.now(); const config: OcrConfig = JSON.parse(row.config);
     const credentials: OcrCredentials = JSON.parse(this.vault.open(sealed));
-    const image = await ocrSample();
+    let image: Buffer, width = 1000, height = 600;
+    if (page) {
+      const original = await this.collection.attachment(page.libraryId, page.pageId, 'original');
+      let bound = 2800;
+      for (;;) {
+        const prepared = await sharp(original.bytes).autoOrient().resize({ width: bound, height: bound, fit: 'inside', withoutEnlargement: true }).png().toBuffer({ resolveWithObject: true });
+        image = prepared.data; width = prepared.info.width; height = prepared.info.height;
+        if (image.length <= 3 * 1024 * 1024) break;
+        if (bound <= 700) throw new OcrFailure('材料暂无法转换为识别图片，可以继续手动框题');
+        bound = Math.floor(bound * .75);
+      }
+      this.db.prepare('UPDATE ocrTests SET inputWidth = ?, inputHeight = ? WHERE id = ?').run(width, height, id);
+    } else image = await ocrSample();
     let failure = new OcrFailure('测试未完成');
     for (let retry = 0; retry <= config.retries; retry++) {
       let attemptId: number;
       try {
         attemptId = this.db.transaction(() => {
-          this.permit(row.revision); this.checkQuota(config);
+          this.permit(row.revision, page?.authorize); this.checkQuota(config);
           const result = this.db.prepare('INSERT INTO serviceAttempts (capability, testId, month, startedAt, status, estimatedMills) VALUES (\'ocr\', ?, ?, ?, \'running\', ?)').run(id, this.month(), this.now(), Math.round(config.priceCents * 10));
           this.db.prepare('UPDATE ocrTests SET attempts = attempts + 1 WHERE id = ?').run(id);
           return Number(result.lastInsertRowid);
         })();
       } catch (error) { failure = new OcrFailure(error instanceof AccessError || error instanceof OcrFailure ? error.message : '本地调用记录无法保存'); break; }
       try {
-        const lines = await this.vendors[config.provider].recognize(credentials, config, image, this.stopping.signal, () => this.permit(row.revision));
+        const lines = await this.vendors[config.provider].recognize(credentials, config, image, this.stopping.signal, () => this.permit(row.revision, page?.authorize));
         this.db.transaction(() => {
           this.db.prepare('UPDATE serviceAttempts SET status = \'succeeded\', finishedAt = ?, message = \'识别成功\' WHERE id = ?').run(this.now(), attemptId);
           this.db.prepare('UPDATE ocrTests SET status = \'succeeded\', finishedAt = ?, durationMs = ?, message = \'测试成功，请核对识别文字\', lines = ? WHERE id = ?').run(this.now(), Math.round(performance.now() - started), JSON.stringify(lines), id);
+          if (page) this.db.prepare('UPDATE ocrTests SET message = ?, candidates = ? WHERE id = ?').run('识别完成，请确认题目范围和文字', JSON.stringify(recognitionCandidates(lines, width, height, this.collection.subjects())), id);
         })();
         return;
       } catch (error) {

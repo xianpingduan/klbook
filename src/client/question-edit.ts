@@ -7,5 +7,5 @@ export type QuestionFields = ReturnType<typeof questionFields>;
 export function questionContent(fields: QuestionFields, state: Question['state']) {
   return { state, subjectId: fields.subjectId, region: fields.parts[0]!.region,
     sourceId: fields.sourceId, pageNumber: fields.pageNumber.trim(), questionNumber: fields.questionNumber.trim(), note: fields.note.trim(),
-    parts: fields.parts.map(part => ({ id: part.id, pageId: part.originalPage.id, region: part.region })), readingMaterialId: fields.readingMaterialId, studyStage: fields.studyStage };
+    parts: fields.parts.map(part => ({ id: part.id, pageId: part.originalPage.id, region: part.region, transcription: part.transcription ?? '', recognition: part.recognition ?? null })), readingMaterialId: fields.readingMaterialId, studyStage: fields.studyStage };
 }

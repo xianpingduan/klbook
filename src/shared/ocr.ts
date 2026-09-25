@@ -12,8 +12,19 @@ export interface OcrCredentials { apiKey: string; secretKey: string; appId?: str
 export interface OcrEdit { operationId: string; expectedRevision: number; config: OcrConfig; credentials?: OcrCredentials }
 export interface OcrLine { text: string; box?: { left: number; top: number; width: number; height: number } }
 export interface OcrTest {
-  id: string; revision: number; provider: OcrProvider; sample: 'school-v1'; status: 'running' | 'succeeded' | 'failed' | 'interrupted' | 'stopped';
+  id: string; revision: number; provider: OcrProvider; sample: 'school-v1' | 'original-page'; status: 'running' | 'succeeded' | 'failed' | 'interrupted' | 'stopped';
   createdAt: number; finishedAt: number | null; durationMs: number | null; attempts: number; message: string; lines: OcrLine[];
+}
+export interface OcrCandidate {
+  id: string; text: string; region: import('./collection.ts').Region; questionNumber: string; subjectId: string | null;
+}
+export interface PageRecognition extends OcrTest {
+  pageId: string | null; inputWidth: number | null; inputHeight: number | null; candidates: OcrCandidate[];
+}
+export interface PageRecognitions {
+  initialMessage: string;
+  service: { provider: OcrProvider; enabled: boolean; available: boolean; formulas: boolean };
+  runs: PageRecognition[];
 }
 export interface OcrSettings {
   revision: number; config: OcrConfig; credentialsConfigured: boolean; credentialAvailable: boolean;

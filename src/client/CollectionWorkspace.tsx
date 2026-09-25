@@ -144,7 +144,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
     const settings = await api.studySettings();
     if (!mounted.current) return;
     setSelected({ ...selected, studyStage: settings.stage, id: crypto.randomUUID(), revision: 1, state: 'draft', subjectId: null, region: null, questionNumber: '', note: '', collectedAt: null,
-      originalPage: page, parts: [{ id: crypto.randomUUID(), originalPage: page, region: null }], answerParts: [],
+      originalPage: page, parts: [{ id: crypto.randomUUID(), originalPage: page, region: null, transcription: '', recognition: null }], answerParts: [],
       sourceId: sources.some(source => source.id === selected.sourceId && source.active) ? selected.sourceId : null });
     setCreating(true); setOriginalOpen(false); setScreen('edit');
     });

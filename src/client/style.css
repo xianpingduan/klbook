@@ -273,3 +273,11 @@ select:focus-visible, textarea:focus-visible { outline: 3px solid #ceac53; outli
 .ocr-sample { display: block; width: 100%; max-width: 650px; height: auto; border: 1px solid #dce3e8; border-radius: 8px; margin-bottom: 1rem; }
 .ocr-text { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1rem; background: #f6f8fa; border-radius: 8px; }
 .ocr-manager h2 { margin-top: 1.6rem; }
+/* Recognition suggestions remain optional beside the preserved paper image. */
+.recognition-panel { margin-block: 1rem; padding: 1rem; background: #f5f8fc; border: 1px solid #dce5ed; border-radius: 14px; min-width: 0; }
+.recognition-panel h2 { margin-top: 0; }
+.recognition-candidates { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: .7rem; }
+.recognition-candidates article { min-width: 0; padding: .8rem; background: white; border: 1px solid #dce5ed; border-radius: 10px; }
+.recognition-excerpt { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 9rem; overflow: auto; }
+.recognition-origin { margin-block: .7rem; }
+.confirmed-transcription { padding: .6rem; overflow-wrap: anywhere; }

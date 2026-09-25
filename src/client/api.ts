@@ -8,6 +8,7 @@ import type { StudySettings, StudySettingsEdit, StudyStage } from '../shared/stu
 import type { FilterOptions, QuestionFilters } from '../shared/collection.ts';
 import type { ConflictTarget } from '../shared/conflicts.ts';
 import type { OcrEdit, OcrSettings, OcrTest } from '../shared/ocr.ts';
+import type { PageRecognition, PageRecognitions } from '../shared/ocr.ts';
 
 export class ApiError extends Error {
   status: number;
@@ -68,6 +69,9 @@ export class FamilyApi {
     return response.status === 204 ? undefined as T : response.json();
   }
   subjects() { return this.request<Subject[]>('/collection/subjects'); }
+  pageRecognitions(pageId: string, grant?: string) { return this.request<PageRecognitions>(`/collection/pages/${encodeURIComponent(pageId)}/recognitions`, 'GET', undefined, grant); }
+  pageRecognition(pageId: string, id: string, grant?: string) { return this.request<PageRecognition>(`/collection/pages/${encodeURIComponent(pageId)}/recognitions/${encodeURIComponent(id)}`, 'GET', undefined, grant); }
+  recognizePage(pageId: string, id: string, grant?: string) { return this.request<PageRecognition>(`/collection/pages/${encodeURIComponent(pageId)}/recognitions/${encodeURIComponent(id)}`, 'PUT', undefined, grant); }
   ocrSettings(grant: string) { return this.request<OcrSettings>('/admin/ocr', 'GET', undefined, grant); }
   saveOcr(grant: string, input: OcrEdit) { return this.request<OcrSettings>('/admin/ocr', 'PUT', input, grant); }
   testOcr(grant: string, id: string, expectedRevision: number) { return this.request<OcrTest>(`/admin/ocr/tests/${encodeURIComponent(id)}`, 'PUT', { expectedRevision, sample: 'school-v1' }, grant); }

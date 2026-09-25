@@ -112,11 +112,11 @@ export function OcrManager({ api, grant, active, onAccessError }: { api: FamilyA
     setNotice('切换后请保存配置。未保存的凭据已清空；已保存的凭据分别保留，本月次数和费用继续合计。');
   }
   const provider = ocrProviders[config.provider];
-  const latest = data?.tests[0];
+  const latest = data?.tests.find(test => test.sample === 'school-v1');
   const state = !data?.credentialsConfigured ? '未配置' : !data.credentialAvailable ? '本机凭据无法读取' : !data.config.enabled ? '已停用' : latest?.revision !== data.revision ? '已启用，当前配置尚未测试' : latest.status === 'succeeded' ? '已启用，测试成功' : latest.status === 'running' ? '已启用，测试中' : '已启用，请检查测试结果';
   return <section className="card ocr-manager"><p className="eyebrow">外部能力管理</p><h1>图片识别服务</h1>
     <p>{provider.label}</p>
-    <p className="hint">当前用于配置和测试，学习端暂继续手动收集。识别文字和公式需要人工核对。</p>
+    <p className="hint">启用后，新收集的图片会送至所选服务提供建议；学习端仍可手动收集。识别结果需要人工核对。</p>
     {loading && <p role="status">正在读取配置…</p>}
     {data && <p className="message">{state}</p>}
     {error && !leave.leaving && <p className="message error" role="alert">{error}</p>}{leave.dialog}

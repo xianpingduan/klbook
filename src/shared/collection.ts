@@ -11,8 +11,9 @@ export function validQuestionRegion(region: Region | null): region is Region {
 export interface OriginalPage {
   id: string; mimeType: string; byteLength: number; sha256: string; width: number; height: number;
 }
-export interface QuestionPart { id: string; originalPage: OriginalPage; region: Region | null }
-export interface QuestionPartEdit { id: string; pageId: string; region: Region | null }
+export interface RecognitionReference { runId: string; candidateId: string | null }
+export interface QuestionPart { id: string; originalPage: OriginalPage; region: Region | null; transcription?: string; recognition?: RecognitionReference | null }
+export interface QuestionPartEdit { id: string; pageId: string; region: Region | null; transcription?: string; recognition?: RecognitionReference | null }
 export interface Question {
   id: string; libraryId: string; learnerId: string; revision: number;
   state: 'draft' | 'collected'; syncState: 'synced'; subjectId: string | null; region: Region | null;

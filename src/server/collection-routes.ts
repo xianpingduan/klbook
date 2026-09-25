@@ -7,6 +7,7 @@ import { AccessError } from './family-access.ts';
 import type { ReadingMaterialEdit } from '../shared/reading-materials.ts';
 import { stageSchema } from './study-routes.ts';
 import { normalizeStage } from './study.ts';
+import type { OcrService } from './ocr-service.ts';
 
 const regionSchema = { anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], properties: {
   x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 },
@@ -20,7 +21,8 @@ const createBody = {
     operationId: { type: 'string', format: 'uuid' }, state: { enum: ['draft', 'collected'] },
     subjectId: { type: ['string', 'null'], minLength: 1, maxLength: 64 }, region: regionSchema,
     parts: { type: 'array', minItems: 1, maxItems: 50, items: { type: 'object', additionalProperties: false, required: ['id', 'pageId', 'region'], properties: {
-      id: { type: 'string', format: 'uuid' }, pageId: { type: 'string', format: 'uuid' }, region: regionSchema
+      id: { type: 'string', format: 'uuid' }, pageId: { type: 'string', format: 'uuid' }, region: regionSchema,
+      transcription: { type: 'string', maxLength: 20000 }, recognition: { anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, required: ['runId', 'candidateId'], properties: { runId: { type: 'string', format: 'uuid' }, candidateId: { type: ['string', 'null'], maxLength: 20 } } }] }
     } } },
     sourceId: { type: ['string', 'null'], format: 'uuid' }, source: { type: 'string', maxLength: 200 },
     readingMaterialId: { type: ['string', 'null'], format: 'uuid' },
@@ -29,7 +31,7 @@ const createBody = {
   }
 };
 
-export function collectionRoutes(app: FastifyInstance, access: FamilyAccess, collection: CollectionStore) {
+export function collectionRoutes(app: FastifyInstance, access: FamilyAccess, collection: CollectionStore, ocr: OcrService) {
   app.register(async routes => {
     const token = (value: string | undefined) => /^Bearer [A-Za-z0-9_-]{43}$/.test(value ?? '') ? value!.slice(7) : '';
     // Learning keeps device-session access; management requests also validate their grant.
@@ -64,6 +66,7 @@ export function collectionRoutes(app: FastifyInstance, access: FamilyAccess, col
       }
       const result = path === '/drafts' ? await collection.upload(() => authorize(request.headers), request.headers['idempotency-key'], request.body, stage)
         : await collection.uploadPage(() => authorize(request.headers), request.headers['idempotency-key'], request.body);
+      if ('originalPage' in result) ocr.uploadedPage(() => authorize(request.headers), result.originalPage.id);
       return reply.code(201).send(result);
     });
     routes.get<{ Querystring: QuestionFilters & { state: 'draft' | 'collected'; offset?: string } }>('/questions', { schema: { querystring: {

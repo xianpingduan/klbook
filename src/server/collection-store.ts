@@ -29,7 +29,7 @@ export class CollectionStore {
     if (!page) throw new AccessError(404, '找不到原始页');
     return page;
   }
-  private publicPage(libraryId: string, id: string) {
+  publicPage(libraryId: string, id: string) {
     const { previewSha256: _preview, libraryId: _libraryId, ...page } = this.page(libraryId, id);
     return page;
   }
@@ -44,8 +44,8 @@ export class CollectionStore {
     const row = this.db.prepare<[string, string], QuestionRow>('SELECT * FROM questions WHERE libraryId = ? AND id = ?').get(libraryId, id);
     if (!row) throw new AccessError(404, '找不到这道题');
     const { originalPageId, region, schoolYear, grade, term, ...rest } = row;
-    const parts = this.db.prepare<[string], { id: string; pageId: string; region: string | null }>('SELECT id, pageId, region FROM questionParts WHERE questionId = ? ORDER BY position').all(id)
-      .map(part => ({ id: part.id, originalPage: this.publicPage(libraryId, part.pageId), region: part.region ? JSON.parse(part.region) as Region : null }));
+    const parts = this.db.prepare<[string], { id: string; pageId: string; region: string | null; transcription: string; recognition: string | null }>('SELECT id, pageId, region, transcription, recognition FROM questionParts WHERE questionId = ? ORDER BY position').all(id)
+      .map(part => ({ id: part.id, originalPage: this.publicPage(libraryId, part.pageId), region: part.region ? JSON.parse(part.region) as Region : null, transcription: part.transcription, recognition: part.recognition ? JSON.parse(part.recognition) : null }));
     const reading = this.db.prepare<[string], { materialId: string }>('SELECT materialId FROM questionReadings WHERE questionId = ?').get(id);
     const answerParts = this.db.prepare<[string], { id: string; pageId: string; region: string }>('SELECT id, pageId, region FROM answerParts WHERE questionId = ? ORDER BY position').all(id)
       .map(part => ({ id: part.id, originalPage: this.publicPage(libraryId, part.pageId), region: JSON.parse(part.region) as Region }));
@@ -118,7 +118,7 @@ export class CollectionStore {
       const id = randomUUID();
       this.db.prepare("INSERT INTO questions (id, libraryId, learnerId, originalPageId, revision, state, createdAt, updatedAt) VALUES (?, ?, ?, ?, 1, 'draft', ?, ?)").run(id, home.library.id, home.library.learnerId, page.id, this.now(), this.now());
       this.db.prepare('UPDATE questions SET schoolYear = @schoolYear, grade = @grade, term = @term WHERE id = @id').run({ id, ...(stage === undefined ? new Study(this.db).settings().stage : normalizeStage(stage)) });
-      this.db.prepare('INSERT INTO questionParts VALUES (?, ?, ?, 0, NULL)').run(id, randomUUID(), page.id);
+      this.db.prepare('INSERT INTO questionParts (questionId, id, pageId, position, region) VALUES (?, ?, ?, 0, NULL)').run(id, randomUUID(), page.id);
       this.db.prepare('INSERT INTO collectionOperations VALUES (?, ?, ?, ?, ?)').run(home.library.id, home.account.id, operationId, requestHash, id);
       return this.get(home.library.id, id);
     });
@@ -219,8 +219,16 @@ export class CollectionStore {
         updatedAt: this.now(), collectedAt: latest?.collectedAt ?? (input.state === 'collected' ? this.now() : null)
       });
       this.db.prepare('DELETE FROM questionParts WHERE questionId = ?').run(questionId);
-      const addPart = this.db.prepare('INSERT INTO questionParts VALUES (?, ?, ?, ?, ?)');
-      parts.forEach((part, index) => addPart.run(questionId, part.id, part.pageId, index, part.region ? JSON.stringify(part.region) : null));
+      const addPart = this.db.prepare('INSERT INTO questionParts (questionId, id, pageId, position, region, transcription, recognition) VALUES (?, ?, ?, ?, ?, ?, ?)');
+      parts.forEach((part, index) => {
+        const previous = latest?.parts.find(item => item.id === part.id && item.originalPage.id === part.pageId);
+        const reference = part.recognition === undefined ? previous?.recognition : part.recognition;
+        if (reference) {
+          const run = this.db.prepare<[string, string, string], { candidates: string }>("SELECT candidates FROM ocrTests WHERE id = ? AND pageId = ? AND libraryId = ? AND status = 'succeeded'").get(reference.runId, part.pageId, home.library.id);
+          if (!run || (reference.candidateId !== null && !JSON.parse(run.candidates).some((candidate: { id: string }) => candidate.id === reference.candidateId))) throw new AccessError(422, '所选识别结果不属于这个题目区，请重新选择');
+        }
+        addPart.run(questionId, part.id, part.pageId, index, part.region ? JSON.stringify(part.region) : null, part.transcription ?? previous?.transcription ?? '', reference ? JSON.stringify(reference) : null);
+      });
       if (input.readingMaterialId !== undefined) {
         this.db.prepare('DELETE FROM questionReadings WHERE questionId = ?').run(questionId);
         if (reading) this.db.prepare('INSERT INTO questionReadings VALUES (?, ?)').run(questionId, reading.id);

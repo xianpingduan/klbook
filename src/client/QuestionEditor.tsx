@@ -19,6 +19,7 @@ import { useSaveConflict } from './useSaveConflict.ts';
 import { SaveConflict } from './SaveConflict.tsx';
 import { ConflictQuestionView } from './ConflictQuestionView.tsx';
 import type { ReadingMaterial } from '../shared/reading-materials.ts';
+import { RecognitionPanel } from './RecognitionPanel.tsx';
 
 export function QuestionEditor({ api, question: initialQuestion, proposedReading, subjects, sources, active, admin = false, creating = false, externalBusy = false, grant, pageCache, onSaved, onCurrent, onBack, onAccessError, onNewFromPage, onReading, onAnswers }: {
   api: FamilyApi; question: Question; subjects: Subject[]; sources: Source[]; active: boolean; admin?: boolean; creating?: boolean; grant?: string; pageCache: CaptureCache; onSaved(question: Question): void; onBack(): void; onNewFromPage(page: OriginalPage): void; onAccessError(error: ApiError): Promise<void>;
@@ -92,6 +93,11 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
     conflict.clear(); setError(''); setNotice(keep ? '本次编辑已保留。请合并需要的信息，再保存。' : '已采用资料库当前版本。');
   }
   const validRegion = fields.parts.every(part => validQuestionRegion(part.region));
+  const recognitionPart = fields.parts.find(part => part.id === selectedPart) ?? fields.parts[0]!;
+  const recognition = <RecognitionPanel key={recognitionPart.id} api={api} part={recognitionPart} subjects={subjects} grant={grant} disabled={working || !active} onAccessError={onAccessError}
+    onText={text => setFields(current => ({ ...current, parts: current.parts.map(part => part.id === recognitionPart.id ? { ...part, transcription: text } : part) }))}
+    onAdopt={(run, candidate) => setFields(current => ({ ...current, subjectId: candidate.subjectId ?? current.subjectId, questionNumber: candidate.questionNumber || current.questionNumber,
+      parts: current.parts.map(part => part.id === recognitionPart.id ? { ...part, region: candidate.region, transcription: candidate.text, recognition: { runId: run.id, candidateId: candidate.id } } : part) }))} />;
   const crop = <QuestionPartsEditor api={api} parts={fields.parts} selectedId={selectedPart} onSelect={setSelectedPart} onChange={parts => setFields(current => ({ ...current, parts }))} disabled={working || !active} />;
   const addition = <div className="page-addition">
     {append.error && <p className="message error" role="alert">{append.error}</p>}
@@ -107,7 +113,7 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
       local={<ConflictQuestionView api={api} question={question} fields={fields} subjects={subjects} sources={sources} />}
       loading={conflict.loading} error={conflict.error} disabled={working || !active} onRefresh={() => void conflict.refresh()} onKeep={() => resolveConflict(true)} onAdopt={() => resolveConflict(false)} />}
     {admin && !creating && question.state === 'collected' && <NewQuestionFromPage parts={question.parts} disabled={working || !active} onChoose={page => leave.requestLeave(() => onNewFromPage(page))} />}
-    {!admin && step === 'crop' ? <div className="crop-step">{crop}{addition}<div className="save-actions"><button disabled={working || !validRegion} onClick={() => setStep('confirm')}>下一步，选学科</button>{question.state === 'draft' && <button className="quiet" disabled={working} onClick={() => void save('draft')}>保存草稿</button>}</div></div> : <div className="editor-grid">
+    {!admin && step === 'crop' ? <div className="crop-step">{crop}{recognition}{addition}<div className="save-actions"><button disabled={working || !validRegion} onClick={() => setStep('confirm')}>下一步，选学科</button>{question.state === 'draft' && <button className="quiet" disabled={working} onClick={() => void save('draft')}>保存草稿</button>}</div></div> : <div className="editor-grid">
       <section className="confirmation-material" aria-label="题目与原始页">
         {admin && step === 'crop' ? <>{crop}<button className="quiet" disabled={working || !validRegion} onClick={() => setStep('confirm')}>确认题目范围</button></> : <>
           <QuestionParts api={api} parts={originalOpen ? [...fields.parts, ...question.answerParts, ...(question.readingMaterial?.parts ?? [])] : fields.parts} original={originalOpen} />
@@ -115,7 +121,7 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
           {!originalOpen && <AnswerView api={api} parts={question.answerParts} />}
           <div className="material-actions"><button className="quiet" disabled={working} onClick={() => { setOriginalOpen(false); setStep('crop'); }}>调整题目范围</button>{admin && <button className="quiet" onClick={() => setOriginalOpen(value => !value)}>{originalOpen ? '查看题目区' : '查看原始页'}</button>}</div>
         </>}
-        {addition}
+        {recognition}{addition}
       </section>
       <div><fieldset disabled={working || !active}>
         <label>学科<select value={fields.subjectId ?? ''} onChange={event => setFields(current => ({ ...current, subjectId: event.target.value || null }))}><option value="">请选择</option>{subjects.map(subject => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></label>

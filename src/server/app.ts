@@ -34,7 +34,7 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
       access.limitAttempt(request.routeOptions.url!, request.ip);
     }
   });
-  const ocr = new OcrService(db, options.dataDir, options.now, options.ocrHttp);
+  const ocr = new OcrService(db, options.dataDir, collection, options.now, options.ocrHttp);
   app.addHook('onClose', async () => { await ocr.close(); db.close(); });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof AccessError) return reply.code(error.statusCode).send({ message: error.message, ...(error.conflict ? { conflict: error.conflict } : {}) });
@@ -75,7 +75,7 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
     type: 'object', required: ['recoveryCode', 'newPassword', 'deviceName'], additionalProperties: false,
     properties: { recoveryCode: text(128), newPassword: text(128, 12), deviceName: text(64) }
   } } }, async (request, reply) => reply.code(201).send(await access.recover(request.body)));
-  collectionRoutes(app, access, collection);
+  collectionRoutes(app, access, collection, ocr);
   sourceRoutes(app, access, new Sources(db));
   studyRoutes(app, access, new Study(db));
   ocrRoutes(app, access, ocr);

@@ -1,6 +1,7 @@
 import type { QuestionPart } from '../shared/collection.ts';
 import type { FamilyApi } from './api.ts';
 import { CropSelector, QuestionImage } from './QuestionImage.tsx';
+import { RecognitionOrigin } from './RecognitionPanel.tsx';
 
 const purposes = {
   question: { name: '题目区', image: '已收集的题目区', selection: '框选题目范围', instruction: '一道可以独立作答的小题', hint: '补充区域仍属于这道题；另一道独立题请保存后选择“从此原始页再收集一道”。' },
@@ -11,7 +12,7 @@ type Purpose = keyof typeof purposes;
 
 export function QuestionParts({ api, parts, original = false, kind = 'question' }: { api: FamilyApi; parts: QuestionPart[]; original?: boolean; kind?: Purpose }) {
   const visible = original ? parts.filter((part, index) => parts.findIndex(other => other.originalPage.id === part.originalPage.id) === index) : parts;
-  return <div className="question-parts">{visible.map((part, index) => <div key={part.id}>{visible.length > 1 && <p className="part-caption">{original ? '原始页' : purposes[kind].name} {index + 1}</p>}<QuestionImage api={api} page={part.originalPage} region={part.region} original={original} label={purposes[kind].image} /></div>)}</div>;
+  return <div className="question-parts">{visible.map((part, index) => <div key={part.id}>{visible.length > 1 && <p className="part-caption">{original ? '原始页' : purposes[kind].name} {index + 1}</p>}<QuestionImage api={api} page={part.originalPage} region={part.region} original={original} label={purposes[kind].image} />{!original && kind === 'question' && <>{part.transcription && <div className="confirmed-transcription"><p className="hint">已保存的题干文字</p><p className="note-text">{part.transcription}</p></div>}<RecognitionOrigin api={api} part={part} /></>}</div>)}</div>;
 }
 
 export function QuestionPartsEditor({ api, parts, selectedId, onSelect, onChange, disabled, kind = 'question' }: {
