@@ -91,4 +91,3 @@ test('家长配置图片识别、预览合成材料并测试，刷新保留结�
     expect(calls).toBe(3);
   } finally { await app.close(); await rm(dir, { recursive: true, force: true }); }
 });
-

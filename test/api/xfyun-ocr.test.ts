@@ -1,24 +1,12 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { auth, familyFixture, password } from './fixture.ts';
+import { familyFixture } from './fixture.ts';
+import { ocrPath as path, ocrParent as parent, finishedOcr as finish } from './ocr-fixture.ts';
 
-const path = '/api/v1/admin/ocr';
 const config = { provider: 'baidu', name: '家庭识别', enabled: false, language: 'CHN_ENG', handwriting: true, formulas: true, timeoutSeconds: 10, retries: 0, monthlyLimit: 300, monthlyBudgetCents: 5000, priceCents: 16 };
 const baidu = { apiKey: 'saved-baidu-key', secretKey: 'saved-baidu-secret' };
 const xfyun = { appId: 'test-app', apiKey: 'apikeyXXXXXXXXXXXXXXXXXXXXXXXXXX', secretKey: 'apisecretXXXXXXXXXXXXXXXXXXXXXXX' };
-async function parent(f: Awaited<ReturnType<typeof familyFixture>>) {
-  const grant = (await f.app.inject({ method: 'POST', url: '/api/v1/admin/grants', headers: auth(f.first.token), payload: { password } })).json().token;
-  return auth(f.first.token, grant);
-}
-async function finish(f: Awaited<ReturnType<typeof familyFixture>>, headers: ReturnType<typeof auth>) {
-  for (let i = 0; i < 200; i++) {
-    const data = (await f.app.inject({ url: path, headers })).json();
-    if (data.tests[0]?.status !== 'running') return data;
-    await new Promise(resolve => setTimeout(resolve, 10));
-  }
-  throw new Error('test did not settle');
-}
 test('家长切换识别供应商分别保存凭据，旧供应商凭据不串用，不支持的参数不能保存', async () => {
   let calls = 0;
   const f = await familyFixture({ ocrHttp: async () => { calls++; throw new Error('saving never calls vendor'); } });
@@ -41,6 +29,20 @@ test('家长切换识别供应商分别保存凭据，旧供应商凭据不串�
     assert.equal(back.statusCode, 200, back.body); assert.equal(back.json().credentialAvailable, true);
     assert.match(back.json().audit[0].action, /百度/);
     assert.equal(calls, 0);
+  } finally { await f.close(); }
+});
+
+test('三位小数的元单价可准确保存，超出厘精度的值拒绝', async () => {
+  const f = await familyFixture();
+  try {
+    const headers = await parent(f); let revision = 0;
+    const save = (priceCents: number) => f.app.inject({ method: 'PUT', url: path, headers, payload: { operationId: randomUUID(), expectedRevision: revision, config: { ...config, provider: 'xfyun', formulas: false, priceCents }, credentials: xfyun } });
+    for (const priceCents of [2.9, 0.3, 0.7, 4.1, 3.5, 0]) {
+      const result = await save(priceCents);
+      assert.equal(result.statusCode, 200, `priceCents=${priceCents}: ${result.body}`);
+      assert.equal(result.json().config.priceCents, priceCents); revision++;
+    }
+    assert.equal((await save(0.31)).statusCode, 422);
   } finally { await f.close(); }
 });
 

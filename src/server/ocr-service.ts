@@ -48,7 +48,9 @@ export class OcrService {
     return { revision: row.revision, config, credentialsConfigured: credentialStatus[config.provider].configured, credentialAvailable: credentialStatus[config.provider].available, credentialStatus, usage: this.usage(), tests, audit };
   }
   save(authorize: () => Home, input: OcrEdit) {
-    const config: OcrConfig = { ...input.config, name: input.config.name.trim() };
+    const priceMills = Math.round(input.config.priceCents * 10);
+    if (Math.abs(input.config.priceCents * 10 - priceMills) > 1e-8) throw new AccessError(422, '单价最多保留三位元小数');
+    const config: OcrConfig = { ...input.config, name: input.config.name.trim(), priceCents: priceMills / 10 };
     if (!config.name) throw new AccessError(422, '请填写服务名称');
     if (config.provider === 'xfyun' && (config.language !== 'CHN_ENG' || !config.handwriting || config.formulas)) throw new AccessError(422, '讯飞通用文字识别固定处理中英文印刷与手写文字，请关闭公式识别');
     const credentials = input.credentials && { apiKey: input.credentials.apiKey.trim(), secretKey: input.credentials.secretKey.trim(), ...(config.provider === 'xfyun' ? { appId: input.credentials.appId?.trim() } : {}) };

@@ -20,7 +20,7 @@ export function ocrRoutes(app: FastifyInstance, access: FamilyAccess, ocr: OcrSe
       config: { type: 'object', additionalProperties: false, required: ['provider', 'name', 'enabled', 'language', 'handwriting', 'formulas', 'timeoutSeconds', 'retries', 'monthlyLimit', 'monthlyBudgetCents', 'priceCents'], properties: {
         provider: { enum: ['baidu', 'xfyun'] },
         name: { type: 'string', minLength: 1, maxLength: 80 }, enabled: { type: 'boolean' }, language: { enum: ['CHN_ENG', 'ENG'] }, handwriting: { type: 'boolean' }, formulas: { type: 'boolean' },
-        timeoutSeconds: { type: 'integer', minimum: 5, maximum: 30 }, retries: { type: 'integer', minimum: 0, maximum: 2 }, monthlyLimit: { type: 'integer', minimum: 0, maximum: 10000 }, monthlyBudgetCents: { type: 'integer', minimum: 0, maximum: 500000 }, priceCents: { type: 'number', minimum: 0, maximum: 10000, multipleOf: 0.1 }
+        timeoutSeconds: { type: 'integer', minimum: 5, maximum: 30 }, retries: { type: 'integer', minimum: 0, maximum: 2 }, monthlyLimit: { type: 'integer', minimum: 0, maximum: 10000 }, monthlyBudgetCents: { type: 'integer', minimum: 0, maximum: 500000 }, priceCents: { type: 'number', minimum: 0, maximum: 10000 }
       } }
     } } } }, async request => ocr.save(() => parent(request.headers), request.body));
   }, { prefix: '/api/v1/admin/ocr' });

@@ -4,23 +4,11 @@ import { readFile, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { createApp } from '../../src/server/app.ts';
-import { auth, familyFixture, password } from './fixture.ts';
+import { auth, familyFixture } from './fixture.ts';
+import { ocrPath as path, ocrParent as parent, finishedOcr as finish } from './ocr-fixture.ts';
 
-const path = '/api/v1/admin/ocr';
 const credentials = { apiKey: 'test-baidu-api-key', secretKey: 'test-baidu-secret-key' };
 const config = { provider: 'baidu', name: '家庭试卷识别', enabled: false, language: 'CHN_ENG', handwriting: true, formulas: true, timeoutSeconds: 10, retries: 1, monthlyLimit: 300, monthlyBudgetCents: 5000, priceCents: 16 };
-async function finish(f: Awaited<ReturnType<typeof familyFixture>>, headers: ReturnType<typeof auth>) {
-  for (let i = 0; i < 200; i++) {
-    const data = (await f.app.inject({ url: path, headers })).json();
-    if (data.tests[0]?.status !== 'running') return data;
-    await new Promise(resolve => setTimeout(resolve, 10));
-  }
-  throw new Error('test did not settle');
-}
-async function parent(f: Awaited<ReturnType<typeof familyFixture>>) {
-  const grant = (await f.app.inject({ method: 'POST', url: '/api/v1/admin/grants', headers: auth(f.first.token), payload: { password } })).json().token;
-  return auth(f.first.token, grant);
-}
 
 test('图片识别配置只供家长管理，保存不出网，密钥加密持久化且不回显，重复保存和冲突受控', async () => {
   const f = await familyFixture();
