@@ -64,9 +64,12 @@ export function collectionRoutes(app: FastifyInstance, access: FamilyAccess, col
         try { stage = normalizeStage(JSON.parse(decodeURIComponent(String(request.headers['x-learning-stage'])))); }
         catch { throw new AccessError(422, '暂存的学习阶段格式不正确，请核对材料后重试'); }
       }
-      const result = path === '/drafts' ? await collection.upload(() => authorize(request.headers), request.headers['idempotency-key'], request.body, stage)
-        : await collection.uploadPage(() => authorize(request.headers), request.headers['idempotency-key'], request.body);
-      if ('originalPage' in result) ocr.uploadedPage(() => authorize(request.headers), result.originalPage.id);
+      if (path === '/drafts') {
+        const { question, created } = await collection.upload(() => authorize(request.headers), request.headers['idempotency-key'], request.body, stage);
+        if (created) ocr.uploadedPage(() => authorize(request.headers), question.originalPage.id);
+        return reply.code(201).send(question);
+      }
+      const result = await collection.uploadPage(() => authorize(request.headers), request.headers['idempotency-key'], request.body);
       return reply.code(201).send(result);
     });
     routes.get<{ Querystring: QuestionFilters & { state: 'draft' | 'collected'; offset?: string } }>('/questions', { schema: { querystring: {

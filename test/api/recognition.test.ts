@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import sharp from 'sharp';
+import Database from 'better-sqlite3';
+import { join } from 'node:path';
 import { auth, familyFixture } from './fixture.ts';
 import { ocrParent, finishedOcr } from './ocr-fixture.ts';
 
@@ -48,6 +50,31 @@ async function completed(f: Awaited<ReturnType<typeof familyFixture>>, pageId: s
   }
   throw new Error('recognition did not finish');
 }
+
+test('升级前的上传即使没有自动识别标记，响应丢失后的重传也不自动调用', async () => {
+  let calls = 0;
+  const f = await familyFixture({ ocrHttp: async () => { calls++; return vendorResult(); } });
+  try {
+    const headers = auth(f.first.token), parent = await ocrParent(f);
+    const bytes = await sharp(await readFile(new URL('../fixtures/paper.svg', import.meta.url))).png().toBuffer();
+    const upload = { method: 'POST' as const, url: '/api/v1/collection/drafts', headers: { ...headers, 'content-type': 'image/png', 'idempotency-key': randomUUID() }, payload: bytes };
+    const draft = (await f.app.inject(upload)).json();
+    // A schema 11 upload has an operation receipt and original, but no initial recognition marker after upgrade.
+    const legacy = new Database(join(f.dataDir, 'family.sqlite'));
+    try { legacy.prepare('DELETE FROM initialPageRecognition WHERE pageId = ?').run(draft.originalPage.id); }
+    finally { legacy.close(); }
+    assert.equal((await f.app.inject({ method: 'PUT', url: '/api/v1/admin/ocr', headers: parent, payload: { operationId: randomUUID(), expectedRevision: 0, config, credentials } })).statusCode, 200);
+    const replay = await f.app.inject(upload);
+    assert.equal(replay.statusCode, 201); assert.equal(replay.json().id, draft.id);
+    const result = await completed(f, draft.originalPage.id);
+    assert.equal(calls, 0, '旧上传重传不能因缺少识别标记而自动发送');
+    assert.deepEqual(result.runs, []);
+    const start = await f.app.inject({ method: 'PUT', url: `/api/v1/collection/pages/${draft.originalPage.id}/recognitions/${randomUUID()}`, headers });
+    assert.equal(start.statusCode, 202);
+    assert.equal((await completed(f, draft.originalPage.id)).runs[0].status, 'succeeded');
+    assert.equal(calls, 1, '仍可由用户明确请求识别旧材料');
+  } finally { await f.close(); }
+});
 
 test('原图先保存；停用不识别，启用后主动识别历史页，结果跨设备可见且不自动收集', async () => {
   let calls = 0;

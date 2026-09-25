@@ -111,6 +111,7 @@ export class CollectionStore {
   }
   async upload(authorize: () => Home, operationId: string, bytes: Buffer, stage?: StudyStage) {
     const requestHash = `upload:${fileHash(bytes)}`;
+    let created = false;
     const saved = await this.storeUpload(authorize, bytes, home => {
       const result = this.replay(home, operationId, requestHash);
       return result ? { pageId: result.originalPage.id, result } : undefined;
@@ -120,10 +121,11 @@ export class CollectionStore {
       this.db.prepare('UPDATE questions SET schoolYear = @schoolYear, grade = @grade, term = @term WHERE id = @id').run({ id, ...(stage === undefined ? new Study(this.db).settings().stage : normalizeStage(stage)) });
       this.db.prepare('INSERT INTO questionParts (questionId, id, pageId, position, region) VALUES (?, ?, ?, 0, NULL)').run(id, randomUUID(), page.id);
       this.db.prepare('INSERT INTO collectionOperations VALUES (?, ?, ?, ?, ?)').run(home.library.id, home.account.id, operationId, requestHash, id);
+      created = true;
       return this.get(home.library.id, id);
     });
     await this.verifyQuestion(saved); authorize();
-    return saved;
+    return { question: saved, created };
   }
   async uploadPage(authorize: () => Home, operationId: string, bytes: Buffer) {
     const requestHash = fileHash(bytes);
