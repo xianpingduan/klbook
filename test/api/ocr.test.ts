@@ -95,20 +95,23 @@ test('未配置、无授权、次数或预算耗尽均不出网；供应商错�
 
 test('停用保留在途成功结果并阻止失败重试；再次启用不扫描历史', async () => {
   let resolveVendor: ((response: Response) => void) | undefined, calls = 0;
-  const f = await familyFixture({ ocrHttp: async url => {
+  const f = await familyFixture({ ocrHttp: async (url, init) => {
     if (url.pathname.includes('/token')) return Response.json({ access_token: 'token', expires_in: 6000 });
+    assert.equal(new URLSearchParams(String(init.body)).get('recg_formula'), 'false');
     calls++; return new Promise(resolve => { resolveVendor = resolve; });
   } });
   try {
     const headers = await parent(f);
-    const save = (revision: number, enabled: boolean) => f.app.inject({ method: 'PUT', url: path, headers, payload: { operationId: randomUUID(), expectedRevision: revision, config: { ...config, enabled }, ...(revision === 0 ? { credentials } : {}) } });
+    const save = (revision: number, enabled: boolean) => f.app.inject({ method: 'PUT', url: path, headers, payload: { operationId: randomUUID(), expectedRevision: revision, config: { ...config, enabled, formulas: false }, ...(revision === 0 ? { credentials } : {}) } });
     const start = (revision: number) => f.app.inject({ method: 'PUT', url: `${path}/tests/${randomUUID()}`, headers, payload: { expectedRevision: revision, sample: 'school-v1' } });
     const waitForCall = async (count: number) => { for (let i = 0; i < 100 && calls < count; i++) await new Promise(resolve => setTimeout(resolve, 10)); assert.equal(calls, count); };
     await save(0, true); await start(1); await waitForCall(1);
     assert.equal((await start(1)).statusCode, 409);
     await save(1, false);
-    resolveVendor!(Response.json({ results: [{ words: [{ word: '原请求的结果' }] }] }));
-    assert.equal((await finish(f, headers)).tests[0].status, 'succeeded');
+    resolveVendor!(Response.json({ results: [{ words_type: 'print', words: { word: '原请求的结果', words_location: { left: 10, top: 20, width: 100, height: 24 } } }] }));
+    const completed = await finish(f, headers);
+    assert.equal(completed.tests[0].status, 'succeeded');
+    assert.deepEqual(completed.tests[0].lines, [{ text: '原请求的结果', box: { left: 10, top: 20, width: 100, height: 24 } }]);
     await save(2, true); assert.equal(calls, 1);
     await start(3); await waitForCall(2); await save(3, false);
     resolveVendor!(Response.json({ error_code: 282000 }));

@@ -10,6 +10,8 @@ import { setTimeout as pause } from 'node:timers/promises';
 
 type SettingsRow = { revision: number; config: string; credentials: string | null };
 type TestRow = Omit<OcrTest, 'lines'> & { lines: string };
+const testFields = 'id, revision, sample, status, createdAt, finishedAt, durationMs, attempts, message, lines';
+const testResult = (row: TestRow): OcrTest => ({ ...row, lines: JSON.parse(row.lines) });
 export class OcrService {
   private db: Database.Database;
   private vault: CredentialVault;
@@ -22,7 +24,7 @@ export class OcrService {
     this.vendor = new BaiduOcr(http);
     db.prepare('INSERT OR IGNORE INTO ocrSettings VALUES (1, 0, ?, NULL)').run(JSON.stringify(defaultOcrConfig));
     db.prepare('UPDATE ocrTests SET status = \'interrupted\', finishedAt = ?, message = ? WHERE status = \'running\'').run(now(), '电脑服务曾中断，结果不确定；不会自动重新发送');
-    db.prepare('UPDATE serviceAttempts SET status = \'unknown\', finishedAt = ?, message = ? WHERE status = \'running\'').run(now(), '服务中断，保留估算费用');
+    db.prepare('UPDATE serviceAttempts SET status = \'unknown\', finishedAt = ?, message = ? WHERE capability = \'ocr\' AND status = \'running\'').run(now(), '服务中断，保留估算费用');
   }
   private row() { return this.db.prepare<[], SettingsRow>('SELECT revision, config, credentials FROM ocrSettings WHERE singleton = 1').get()!; }
   private month() { return new Date(this.now() + 8 * 3600_000).toISOString().slice(0, 7); }
@@ -33,7 +35,7 @@ export class OcrService {
   settings(): OcrSettings {
     const row = this.row(); let credentialAvailable = false;
     if (row.credentials) { try { this.vault.open(row.credentials); credentialAvailable = true; } catch { /* The UI may still disable service when the key is missing. */ } }
-    const tests = this.db.prepare<[], TestRow>('SELECT id, revision, sample, status, createdAt, finishedAt, durationMs, attempts, message, lines FROM ocrTests ORDER BY createdAt DESC, rowid DESC LIMIT 20').all().map(row => ({ ...row, lines: JSON.parse(row.lines) }));
+    const tests = this.db.prepare<[], TestRow>(`SELECT ${testFields} FROM ocrTests ORDER BY createdAt DESC, rowid DESC LIMIT 20`).all().map(testResult);
     const audit = this.db.prepare<[], OcrSettings['audit'][number]>('SELECT actor, at, action FROM serviceAudit WHERE capability = \'ocr\' ORDER BY id DESC LIMIT 30').all();
     return { revision: row.revision, config: JSON.parse(row.config), credentialsConfigured: !!row.credentials, credentialAvailable, usage: this.usage(), tests, audit };
   }
@@ -87,8 +89,7 @@ export class OcrService {
         catch { /* A failed disk must not cause an unhandled rejection; startup reconciles unfinished calls. */ }
       }).finally(() => { this.work = undefined; });
     })();
-    const test = this.db.prepare<[string], TestRow>('SELECT id, revision, sample, status, createdAt, finishedAt, durationMs, attempts, message, lines FROM ocrTests WHERE id = ?').get(id)!;
-    return { ...test, lines: JSON.parse(test.lines) };
+    return testResult(this.db.prepare<[string], TestRow>(`SELECT ${testFields} FROM ocrTests WHERE id = ?`).get(id)!);
   }
   private checkQuota(config: OcrConfig) {
     const usage = this.usage();

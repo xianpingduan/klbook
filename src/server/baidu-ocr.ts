@@ -23,7 +23,7 @@ async function readResponse(response: Response): Promise<Record<string, unknown>
 }
 function linesOf(data: Record<string, unknown>, secrets: string[]): OcrLine[] {
   const candidates = Array.isArray(data.words_result) ? data.words_result : Array.isArray(data.results) ? data.results.flatMap(result => {
-    const words = object(result).words; return Array.isArray(words) ? words : [];
+    const words = object(result).words; return Array.isArray(words) ? words : [object(words)];
   }) : [];
   const lines: OcrLine[] = [];
   for (const item of candidates.slice(0, 500)) {
