@@ -27,7 +27,7 @@
 
 旧库自动迁移至 schema 11：原百度配置补全供应商、原密文搬至供应商凭据表，不重新输入密钥；旧调用金额保持等值。API 响应新增供应商状态及记录归属，只返回各供应商是否已配置／可读取，不回传 APPID 或密钥。已有旧网页需刷新后使用新版配置字段。
 
-依据：[讯飞通用文字识别产品与免费包](https://www.xfyun.cn/services/textRecg1)、[官方接口及签名文档](https://www.xfyun.cn/doc/words/universal_character_recognition/API.html)，核对日期 2026-09-25。真实服务调用仍需本机凭据联调，自动化不代替此项。
+依据：[讯飞通用文字识别产品与免费包](https://www.xfyun.cn/services/textRecg1)、[官方接口及签名文档](https://www.xfyun.cn/doc/words/universal_character_recognition/API.html)，核对日期 2026-09-25。当天用户已通过本机真实凭据样例测试，返回 5 行文字与位置；详情见[验收记录](verification/issue-13.md)。百度真实调用、供应商账单及四科实际纸质材料的效果尚未验证。
 
 ## 家长操作
 
