@@ -1,26 +1,6 @@
 import type { OcrConfig, OcrCredentials, OcrLine } from '../shared/ocr.ts';
 import { digest } from './secrets.ts';
-
-export type VendorHttp = (url: URL, init: RequestInit) => Promise<Response>;
-export class OcrFailure extends Error {
-  retryable: boolean; chargeable: boolean;
-  constructor(message: string, retryable = false, chargeable = false) { super(message); this.retryable = retryable; this.chargeable = chargeable; }
-}
-const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-async function readResponse(response: Response): Promise<Record<string, unknown>> {
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('empty response');
-  const chunks: Uint8Array[] = []; let size = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read(); if (done) break;
-      size += value.byteLength;
-      if (size > 2 * 1024 * 1024) throw new Error('response too large');
-      chunks.push(value);
-    }
-    return object(JSON.parse(Buffer.concat(chunks).toString('utf8')));
-  } finally { await reader.cancel().catch(() => undefined); }
-}
+import { OcrFailure, object, readOcrResponse, type VendorHttp } from './ocr-provider.ts';
 function linesOf(data: Record<string, unknown>, secrets: string[]): OcrLine[] {
   const candidates = Array.isArray(data.words_result) ? data.words_result : Array.isArray(data.results) ? data.results.flatMap(result => {
     const words = object(result).words; return Array.isArray(words) ? words : [object(words)];
@@ -53,7 +33,7 @@ export class BaiduOcr {
         url.search = new URLSearchParams({ grant_type: 'client_credentials', client_id: credentials.apiKey, client_secret: credentials.secretKey }).toString();
         const response = await this.http(url, { method: 'POST', redirect: 'error', signal: timed });
         if (!response.ok) { await response.body?.cancel(); throw new OcrFailure('识别服务认证失败，请检查凭据、网络及服务开通状态', response.status >= 500); }
-        const data = await readResponse(response);
+        const data = await readOcrResponse(response);
         if (typeof data.access_token !== 'string' || !data.access_token || data.access_token.length > 4096 || typeof data.expires_in !== 'number' || data.expires_in <= 0) throw new OcrFailure('识别服务认证失败，请检查 API Key 和 Secret Key');
         this.cached = { key, token: data.access_token, until: Date.now() + Math.min(data.expires_in, 2592000) * 1000 - 60000 };
       }
@@ -64,7 +44,7 @@ export class BaiduOcr {
       dispatched = true;
       const response = await this.http(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form.toString(), redirect: 'error', signal: timed });
       if (!response.ok) { await response.body?.cancel(); throw new OcrFailure('识别服务暂时无法响应，请稍后测试', response.status >= 500 || response.status === 429, true); }
-      const data = await readResponse(response);
+      const data = await readOcrResponse(response);
       if (data.error_code !== undefined) {
         const code = Number(data.error_code);
         if ([110, 111].includes(code)) this.cached = undefined;

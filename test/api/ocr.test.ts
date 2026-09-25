@@ -8,7 +8,7 @@ import { auth, familyFixture, password } from './fixture.ts';
 
 const path = '/api/v1/admin/ocr';
 const credentials = { apiKey: 'test-baidu-api-key', secretKey: 'test-baidu-secret-key' };
-const config = { name: '家庭试卷识别', enabled: false, language: 'CHN_ENG', handwriting: true, formulas: true, timeoutSeconds: 10, retries: 1, monthlyLimit: 300, monthlyBudgetCents: 5000, priceCents: 16 };
+const config = { provider: 'baidu', name: '家庭试卷识别', enabled: false, language: 'CHN_ENG', handwriting: true, formulas: true, timeoutSeconds: 10, retries: 1, monthlyLimit: 300, monthlyBudgetCents: 5000, priceCents: 16 };
 async function finish(f: Awaited<ReturnType<typeof familyFixture>>, headers: ReturnType<typeof auth>) {
   for (let i = 0; i < 200; i++) {
     const data = (await f.app.inject({ url: path, headers })).json();

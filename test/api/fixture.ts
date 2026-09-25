@@ -19,6 +19,7 @@ export async function familyFixture(options: Pick<Parameters<typeof createApp>[0
   return {
     app, dataDir, first,
     advance: (milliseconds: number) => { now += milliseconds; },
+    setTime: (timestamp: number) => { now = timestamp; },
     login: (deviceName: string, loginPassword = password) => app.inject({ method: 'POST', url: '/api/v1/sessions', payload: { username: 'parent', password: loginPassword, deviceName } }),
     async close() { await app.close(); await rm(dataDir, { recursive: true, force: true }); }
   };

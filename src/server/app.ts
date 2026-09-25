@@ -13,7 +13,7 @@ import { Study } from './study.ts';
 import { studyRoutes } from './study-routes.ts';
 import { OcrService } from './ocr-service.ts';
 import { ocrRoutes } from './ocr-routes.ts';
-import type { VendorHttp } from './baidu-ocr.ts';
+import type { VendorHttp } from './ocr-provider.ts';
 
 export function createApp(options: { dataDir: string; now?: () => number; allowedOrigins?: string[]; staticDir?: string; ocrHttp?: VendorHttp }) {
   const db = openDatabase(options.dataDir);

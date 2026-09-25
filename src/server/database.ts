@@ -114,7 +114,13 @@ const migrations = [
     createdAt INTEGER NOT NULL, finishedAt INTEGER, durationMs INTEGER, attempts INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT '', lines TEXT NOT NULL DEFAULT '[]');
   CREATE TABLE serviceAttempts (id INTEGER PRIMARY KEY, capability TEXT NOT NULL, testId TEXT NOT NULL REFERENCES ocrTests(id), month TEXT NOT NULL,
     startedAt INTEGER NOT NULL, finishedAt INTEGER, status TEXT NOT NULL, estimatedCents INTEGER NOT NULL, message TEXT NOT NULL DEFAULT '');
-  CREATE INDEX attemptsByMonth ON serviceAttempts(capability, month);`
+  CREATE INDEX attemptsByMonth ON serviceAttempts(capability, month);`,
+  `CREATE TABLE ocrProviderCredentials (provider TEXT PRIMARY KEY CHECK(provider IN ('baidu', 'xfyun')), credentials TEXT NOT NULL);
+  INSERT INTO ocrProviderCredentials SELECT 'baidu', credentials FROM ocrSettings WHERE credentials IS NOT NULL;
+  UPDATE ocrSettings SET config = json_set(config, '$.provider', 'baidu'), credentials = NULL;
+  ALTER TABLE ocrTests ADD COLUMN provider TEXT NOT NULL DEFAULT 'baidu';
+  ALTER TABLE serviceAttempts RENAME COLUMN estimatedCents TO estimatedMills;
+  UPDATE serviceAttempts SET estimatedMills = estimatedMills * 10;`
 ];
 
 export function openDatabase(dataDir: string) {
