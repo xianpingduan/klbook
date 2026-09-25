@@ -112,7 +112,7 @@ export function OcrManager({ api, grant, active, onAccessError }: { api: FamilyA
     setNotice('切换后请保存配置。未保存的凭据已清空；已保存的凭据分别保留，本月次数和费用继续合计。');
   }
   const provider = ocrProviders[config.provider];
-  const latest = data?.tests.find(test => test.sample === 'school-v1');
+  const latest = data?.latestSample;
   const state = !data?.credentialsConfigured ? '未配置' : !data.credentialAvailable ? '本机凭据无法读取' : !data.config.enabled ? '已停用' : latest?.revision !== data.revision ? '已启用，当前配置尚未测试' : latest.status === 'succeeded' ? '已启用，测试成功' : latest.status === 'running' ? '已启用，测试中' : '已启用，请检查测试结果';
   return <section className="card ocr-manager"><p className="eyebrow">外部能力管理</p><h1>图片识别服务</h1>
     <p>{provider.label}</p>
@@ -146,8 +146,8 @@ export function OcrManager({ api, grant, active, onAccessError }: { api: FamilyA
     {sample ? <img className="ocr-sample" src={sample} alt="将发送的合成测试材料" /> : <p>测试材料尚未加载，请重新读取配置。</p>}
     <button disabled={!sample || dirty || busy || loading || !grant || !active || !data.credentialAvailable || data.tests.some(test => test.status === 'running')} onClick={() => void test()}>{pendingTest.current ? '重试提交测试请求' : '发送样例并测试'}</button>
     {dirty && <p className="hint">请先保存配置再测试。</p>}
-    <h2>用量与测试记录</h2><p>{data.usage.month}：尝试 {data.usage.attempts} 次 / {data.config.monthlyLimit} 次，估算费用 {money(data.usage.estimatedCents)} / {money(data.config.monthlyBudgetCents)}。这不是供应商账单。</p>
-    {data.tests.length === 0 ? <p>还没有测试记录。</p> : <div className="table-scroll"><table className="management-table" aria-label="图片识别测试记录"><thead><tr><th>时间</th><th>供应商</th><th>结果</th><th>耗时</th><th>尝试次数</th></tr></thead><tbody>{data.tests.map(test => <tr key={test.id}><td>{date(test.createdAt)}</td><td>{ocrProviders[test.provider].label}</td><td>{test.status === 'running' ? '正在测试…' : test.message}</td><td>{test.durationMs === null ? '—' : `${test.durationMs} ms`}</td><td>{test.attempts}</td></tr>)}</tbody></table></div>}
+    <h2>用量与调用记录</h2><p>{data.usage.month}：尝试 {data.usage.attempts} 次 / {data.config.monthlyLimit} 次，估算费用 {money(data.usage.estimatedCents)} / {money(data.config.monthlyBudgetCents)}。这不是供应商账单。</p>
+    {data.tests.length === 0 ? <p>还没有调用记录。</p> : <div className="table-scroll"><table className="management-table" aria-label="图片识别调用记录"><thead><tr><th>时间</th><th>用途</th><th>供应商</th><th>结果</th><th>耗时</th><th>尝试次数</th></tr></thead><tbody>{data.tests.map(run => <tr key={run.id}><td>{date(run.createdAt)}</td><td>{run.sample === 'school-v1' ? '样例测试' : '收集材料'}</td><td>{ocrProviders[run.provider].label}</td><td>{run.status === 'running' ? '正在识别…' : run.message}</td><td>{run.durationMs === null ? '—' : `${run.durationMs} ms`}</td><td>{run.attempts}</td></tr>)}</tbody></table></div>}
     {latest?.lines.length ? <details open><summary>最近一次识别文字（需人工核对）</summary><pre className="ocr-text">{latest.lines.map(line => line.text).join('\n')}</pre></details> : null}
     <details><summary>最近配置操作</summary><ul>{data.audit.map((event, index) => <li key={index}>{date(event.at)} · {event.actor} · {event.action}</li>)}</ul></details>
     </>}

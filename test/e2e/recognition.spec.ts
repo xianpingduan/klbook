@@ -28,6 +28,7 @@ test('上传后点选候选题，更正文字并保存，另一题仍需选择�
     await page.getByLabel('家长账号').fill('parent'); await page.getByLabel('家长密码', { exact: true }).fill(password);
     await page.getByRole('button', { name: '登录此设备', exact: true }).click();
     const bytes = await sharp(await readFile(new URL('../fixtures/paper.svg', import.meta.url))).png().toBuffer();
+    await expect(page.getByLabel('选择题目图片')).toBeEnabled();
     await page.getByLabel('选择题目图片').setInputFiles({ name: '数学.png', mimeType: 'image/png', buffer: bytes });
     await expect(page.getByRole('button', { name: '选用候选题 1', exact: true })).toBeVisible();
     await page.setViewportSize({ width: 390, height: 844 });

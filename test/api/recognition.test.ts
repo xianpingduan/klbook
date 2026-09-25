@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import sharp from 'sharp';
 import { auth, familyFixture } from './fixture.ts';
-import { ocrParent } from './ocr-fixture.ts';
+import { ocrParent, finishedOcr } from './ocr-fixture.ts';
 
 const config = { provider: 'xfyun', name: '收集识别', enabled: true, language: 'CHN_ENG', handwriting: true, formulas: false, timeoutSeconds: 5, retries: 0, monthlyLimit: 20, monthlyBudgetCents: 100, priceCents: 3.5 };
 const credentials = { appId: 'collect-app', apiKey: 'apikeyXXXXXXXXXXXXXXXXXXXXXXXXXX', secretKey: 'apisecretXXXXXXXXXXXXXXXXXXXXXXX' };
@@ -12,6 +12,32 @@ const vendorResult = () => Response.json({ header: { code: 0 }, payload: { resul
   { exception: 0, coord: [{ x: 40, y: 100 }, { x: 400, y: 100 }, { x: 400, y: 140 }, { x: 40, y: 140 }], words: [{ content: '1. 计算 12 × 3 =' }] },
   { exception: 0, coord: [{ x: 40, y: 300 }, { x: 450, y: 300 }, { x: 450, y: 340 }, { x: 40, y: 340 }], words: [{ content: '2. 计算 25 + 16 =' }] }
 ] }] })).toString('base64') } } });
+
+test('收集调用超过最近记录上限后，后台仍保留当前配置的样例测试结果', async () => {
+  const f = await familyFixture({ ocrHttp: async () => vendorResult() });
+  try {
+    const parent = await ocrParent(f), headers = auth(f.first.token);
+    await f.app.inject({ method: 'PUT', url: '/api/v1/admin/ocr', headers: parent, payload: { operationId: randomUUID(), expectedRevision: 0, config: { ...config, monthlyLimit: 100, monthlyBudgetCents: 1000 }, credentials } });
+    const sampleId = randomUUID();
+    const sample = await f.app.inject({ method: 'PUT', url: `/api/v1/admin/ocr/tests/${sampleId}`, headers: parent, payload: { expectedRevision: 1, sample: 'school-v1' } });
+    assert.equal(sample.statusCode, 202, sample.body);
+    await finishedOcr(f, parent);
+    const bytes = await sharp(await readFile(new URL('../fixtures/paper.svg', import.meta.url))).png().toBuffer();
+    const draft = (await f.app.inject({ method: 'POST', url: '/api/v1/collection/drafts', headers: { ...headers, 'content-type': 'image/png', 'idempotency-key': randomUUID() }, payload: bytes })).json();
+    const pageId = draft.originalPage.id;
+    await completed(f, pageId);
+    for (let i = 0; i < 20; i++) {
+      assert.equal((await f.app.inject({ method: 'PUT', url: `/api/v1/collection/pages/${pageId}/recognitions/${randomUUID()}`, headers })).statusCode, 202);
+      await completed(f, pageId);
+    }
+    const data = (await f.app.inject({ url: '/api/v1/admin/ocr', headers: parent })).json();
+    assert.equal(data.tests.length, 20);
+    assert.ok(data.tests.every((run: { sample: string }) => run.sample === 'original-page'));
+    assert.equal(data.latestSample?.id, sampleId);
+    assert.equal(data.latestSample.status, 'succeeded');
+    assert.equal(data.usage.attempts, 22);
+  } finally { await f.close(); }
+});
 async function completed(f: Awaited<ReturnType<typeof familyFixture>>, pageId: string) {
   for (let i = 0; i < 250; i++) {
     const response = await f.app.inject({ url: `/api/v1/collection/pages/${pageId}/recognitions`, headers: auth(f.first.token) });

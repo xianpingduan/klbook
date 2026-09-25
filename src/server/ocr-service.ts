@@ -15,9 +15,9 @@ import type { CollectionStore } from './collection-store.ts';
 import { recognitionCandidates } from './recognition-candidates.ts';
 
 type SettingsRow = { revision: number; config: string };
-type TestRow = Omit<PageRecognition, 'lines' | 'candidates'> & { lines: string; candidates: string };
-const testFields = 'id, revision, provider, sample, status, createdAt, finishedAt, durationMs, attempts, message, lines, pageId, inputWidth, inputHeight, candidates';
-const testResult = (row: TestRow): PageRecognition => ({ ...row, lines: JSON.parse(row.lines), candidates: JSON.parse(row.candidates) });
+type RecognitionRow = Omit<PageRecognition, 'lines' | 'candidates'> & { lines: string; candidates: string };
+const recognitionFields = 'id, revision, provider, sample, status, createdAt, finishedAt, durationMs, attempts, message, lines, pageId, inputWidth, inputHeight, candidates';
+const recognitionResult = (row: RecognitionRow): PageRecognition => ({ ...row, lines: JSON.parse(row.lines), candidates: JSON.parse(row.candidates) });
 export class OcrService {
   private db: Database.Database;
   private vault: CredentialVault;
@@ -40,7 +40,7 @@ export class OcrService {
     const { config, credentialAvailable } = this.settings();
     return { initialMessage: this.db.prepare<[string], { message: string }>('SELECT message FROM initialPageRecognition WHERE pageId = ?').get(pageId)?.message ?? '',
       service: { provider: config.provider, enabled: config.enabled, available: credentialAvailable, formulas: config.provider === 'baidu' && config.formulas },
-      runs: this.db.prepare<[string, string], TestRow>(`SELECT ${testFields} FROM ocrTests WHERE libraryId = ? AND pageId = ? ORDER BY createdAt DESC, rowid DESC LIMIT 20`).all(home.library.id, pageId).map(testResult) };
+      runs: this.db.prepare<[string, string], RecognitionRow>(`SELECT ${recognitionFields} FROM ocrTests WHERE libraryId = ? AND pageId = ? ORDER BY createdAt DESC, rowid DESC LIMIT 20`).all(home.library.id, pageId).map(recognitionResult) };
   }
   uploadedPage(authorize: () => Home, pageId: string) {
     try {
@@ -55,9 +55,9 @@ export class OcrService {
   }
   pageRun(authorize: () => Home, pageId: string, id: string) {
     const home = authorize(); this.collection.publicPage(home.library.id, pageId);
-    const row = this.db.prepare<[string, string, string], TestRow>(`SELECT ${testFields} FROM ocrTests WHERE libraryId = ? AND pageId = ? AND id = ?`).get(home.library.id, pageId, id);
+    const row = this.db.prepare<[string, string, string], RecognitionRow>(`SELECT ${recognitionFields} FROM ocrTests WHERE libraryId = ? AND pageId = ? AND id = ?`).get(home.library.id, pageId, id);
     if (!row) throw new AccessError(404, '找不到这次图片识别记录');
-    return testResult(row);
+    return recognitionResult(row);
   }
   startPage(authorize: () => Home, pageId: string, id: string) {
     this.db.transaction(() => {
@@ -75,7 +75,7 @@ export class OcrService {
       this.vault.open(sealed); this.checkQuota(config);
       this.db.prepare("INSERT INTO ocrTests (id, accountId, revision, provider, sample, status, createdAt, libraryId, pageId) VALUES (?, ?, ?, ?, 'original-page', 'running', ?, ?, ?)").run(id, home.account.id, row.revision, config.provider, this.now(), home.library.id, pageId);
       this.db.prepare("INSERT INTO serviceAudit (capability, actor, at, action) VALUES ('ocr', ?, ?, '识别收集材料')").run(home.account.username, this.now());
-      this.schedule(id, () => this.runTest(id, row, sealed, { authorize, libraryId: home.library.id, pageId }));
+      this.schedule(id, () => this.runRecognition(id, row, sealed, { authorize, libraryId: home.library.id, pageId }));
     })();
     return this.pageRun(authorize, pageId, id);
   }
@@ -102,9 +102,10 @@ export class OcrService {
       return { configured: !!sealed, available };
     };
     const credentialStatus = { baidu: status('baidu'), xfyun: status('xfyun') };
-    const tests = this.db.prepare<[], TestRow>(`SELECT ${testFields} FROM ocrTests ORDER BY createdAt DESC, rowid DESC LIMIT 20`).all().map(testResult);
+    const tests = this.db.prepare<[], RecognitionRow>(`SELECT ${recognitionFields} FROM ocrTests ORDER BY createdAt DESC, rowid DESC LIMIT 20`).all().map(recognitionResult);
+    const sample = this.db.prepare<[], RecognitionRow>(`SELECT ${recognitionFields} FROM ocrTests WHERE sample = 'school-v1' ORDER BY createdAt DESC, rowid DESC LIMIT 1`).get();
     const audit = this.db.prepare<[], OcrSettings['audit'][number]>('SELECT actor, at, action FROM serviceAudit WHERE capability = \'ocr\' ORDER BY id DESC LIMIT 30').all();
-    return { revision: row.revision, config, credentialsConfigured: credentialStatus[config.provider].configured, credentialAvailable: credentialStatus[config.provider].available, credentialStatus, usage: this.usage(), tests, audit };
+    return { revision: row.revision, config, credentialsConfigured: credentialStatus[config.provider].configured, credentialAvailable: credentialStatus[config.provider].available, credentialStatus, usage: this.usage(), tests, latestSample: sample ? recognitionResult(sample) : null, audit };
   }
   save(authorize: () => Home, input: OcrEdit) {
     const priceMills = Math.round(input.config.priceCents * 10);
@@ -158,9 +159,9 @@ export class OcrService {
       this.db.prepare('INSERT INTO ocrTests (id, accountId, revision, provider, sample, status, createdAt) VALUES (?, ?, ?, ?, \'school-v1\', \'running\', ?)').run(id, home.account.id, revision, config.provider, this.now());
       this.db.prepare('INSERT INTO serviceAudit (capability, actor, at, action) VALUES (\'ocr\', ?, ?, \'主动测试合成材料\')').run(home.account.username, this.now());
       // Defer work until after the transaction commits. The operation ID survives a lost HTTP response.
-      this.schedule(id, () => this.runTest(id, row, sealed));
+      this.schedule(id, () => this.runRecognition(id, row, sealed));
     })();
-    return testResult(this.db.prepare<[string], TestRow>(`SELECT ${testFields} FROM ocrTests WHERE id = ?`).get(id)!);
+    return recognitionResult(this.db.prepare<[string], RecognitionRow>(`SELECT ${recognitionFields} FROM ocrTests WHERE id = ?`).get(id)!);
   }
   private checkQuota(config: OcrConfig) {
     const usage = this.usage();
@@ -174,7 +175,7 @@ export class OcrService {
       if (!JSON.parse(this.row().config).enabled) throw new OcrFailure('图片识别已停用，可以继续手动框题');
     }
   }
-  private async runTest(id: string, row: SettingsRow, sealed: string, page?: { authorize: () => Home; libraryId: string; pageId: string }) {
+  private async runRecognition(id: string, row: SettingsRow, sealed: string, page?: { authorize: () => Home; libraryId: string; pageId: string }) {
     const started = performance.now(); const config: OcrConfig = JSON.parse(row.config);
     const credentials: OcrCredentials = JSON.parse(this.vault.open(sealed));
     let image: Buffer, width = 1000, height = 600;

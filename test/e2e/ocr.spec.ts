@@ -57,7 +57,7 @@ test('家长配置图片识别、预览合成材料并测试，刷新保留结�
     expect(calls).toBe(2);
     await page.getByRole('button', { name: '发送样例并测试', exact: true }).click();
     await expect(page.getByText('I read a book.', { exact: true })).toBeVisible(); expect(calls).toBe(3);
-    await expect(page.getByRole('table', { name: '图片识别测试记录' }).getByText('讯飞 · 通用文字识别', { exact: true })).toBeVisible();
+    await expect(page.getByRole('table', { name: '图片识别调用记录' }).getByText('讯飞 · 通用文字识别', { exact: true })).toBeVisible();
     await page.getByRole('combobox', { name: '识别供应商', exact: true }).selectOption('baidu');
     await expect(page.getByText('所选供应商的凭据已保存。留空保留，填写全部凭据以替换。', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: '保存配置', exact: true }).click();

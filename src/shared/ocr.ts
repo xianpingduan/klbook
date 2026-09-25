@@ -30,6 +30,6 @@ export interface OcrSettings {
   revision: number; config: OcrConfig; credentialsConfigured: boolean; credentialAvailable: boolean;
   credentialStatus: Record<OcrProvider, { configured: boolean; available: boolean }>;
   usage: { month: string; attempts: number; estimatedCents: number };
-  tests: OcrTest[]; audit: { actor: string; at: number; action: string }[];
+  tests: OcrTest[]; latestSample: OcrTest | null; audit: { actor: string; at: number; action: string }[];
 }
 export const defaultOcrConfig: OcrConfig = { provider: 'baidu', name: '百度试卷识别', enabled: false, language: 'CHN_ENG', handwriting: true, formulas: true, timeoutSeconds: 15, retries: 1, monthlyLimit: 300, monthlyBudgetCents: 5000, priceCents: 16 };
