@@ -11,8 +11,11 @@ import { sourceRoutes } from './source-routes.ts';
 import { pages } from '../shared/app-routes.ts';
 import { Study } from './study.ts';
 import { studyRoutes } from './study-routes.ts';
+import { OcrService } from './ocr-service.ts';
+import { ocrRoutes } from './ocr-routes.ts';
+import type { VendorHttp } from './baidu-ocr.ts';
 
-export function createApp(options: { dataDir: string; now?: () => number; allowedOrigins?: string[]; staticDir?: string }) {
+export function createApp(options: { dataDir: string; now?: () => number; allowedOrigins?: string[]; staticDir?: string; ocrHttp?: VendorHttp }) {
   const db = openDatabase(options.dataDir);
   const access = new FamilyAccess(db, options.dataDir, options.now);
   const collection = new CollectionStore(db, options.dataDir, options.now);
@@ -31,7 +34,8 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
       access.limitAttempt(request.routeOptions.url!, request.ip);
     }
   });
-  app.addHook('onClose', async () => db.close());
+  const ocr = new OcrService(db, options.dataDir, options.now, options.ocrHttp);
+  app.addHook('onClose', async () => { await ocr.close(); db.close(); });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof AccessError) return reply.code(error.statusCode).send({ message: error.message, ...(error.conflict ? { conflict: error.conflict } : {}) });
     if (error instanceof Error && 'validation' in error) return reply.code(400).send({ message: '请检查填写内容' });
@@ -74,6 +78,7 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
   collectionRoutes(app, access, collection);
   sourceRoutes(app, access, new Sources(db));
   studyRoutes(app, access, new Study(db));
+  ocrRoutes(app, access, ocr);
   if (options.staticDir) {
     app.register(staticFiles, { root: options.staticDir, index: 'index.html' });
     for (const path of Object.keys(pages)) app.get(path, async (_request, reply) => reply.sendFile('index.html'));

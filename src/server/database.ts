@@ -106,7 +106,15 @@ const migrations = [
   CREATE INDEX questionsByCollectionDate ON questions(libraryId, state, collectedAt);
   CREATE TABLE studySettings (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), revision INTEGER NOT NULL, schoolYear TEXT, grade TEXT, term TEXT);
   INSERT INTO studySettings VALUES (1, 0, NULL, NULL, NULL);
-  CREATE TABLE studyOperations (libraryId TEXT NOT NULL, accountId TEXT NOT NULL, operationId TEXT NOT NULL, requestHash TEXT NOT NULL, PRIMARY KEY(libraryId, accountId, operationId));`
+  CREATE TABLE studyOperations (libraryId TEXT NOT NULL, accountId TEXT NOT NULL, operationId TEXT NOT NULL, requestHash TEXT NOT NULL, PRIMARY KEY(libraryId, accountId, operationId));`,
+  `CREATE TABLE ocrSettings (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), revision INTEGER NOT NULL, config TEXT NOT NULL, credentials TEXT);
+  CREATE TABLE serviceAudit (id INTEGER PRIMARY KEY, capability TEXT NOT NULL, actor TEXT NOT NULL, at INTEGER NOT NULL, action TEXT NOT NULL);
+  CREATE TABLE serviceOperations (capability TEXT NOT NULL, accountId TEXT NOT NULL, operationId TEXT NOT NULL, requestHash TEXT NOT NULL, PRIMARY KEY(capability, accountId, operationId));
+  CREATE TABLE ocrTests (id TEXT PRIMARY KEY, accountId TEXT NOT NULL, revision INTEGER NOT NULL, sample TEXT NOT NULL, status TEXT NOT NULL,
+    createdAt INTEGER NOT NULL, finishedAt INTEGER, durationMs INTEGER, attempts INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT '', lines TEXT NOT NULL DEFAULT '[]');
+  CREATE TABLE serviceAttempts (id INTEGER PRIMARY KEY, capability TEXT NOT NULL, testId TEXT NOT NULL REFERENCES ocrTests(id), month TEXT NOT NULL,
+    startedAt INTEGER NOT NULL, finishedAt INTEGER, status TEXT NOT NULL, estimatedCents INTEGER NOT NULL, message TEXT NOT NULL DEFAULT '');
+  CREATE INDEX attemptsByMonth ON serviceAttempts(capability, month);`
 ];
 
 export function openDatabase(dataDir: string) {

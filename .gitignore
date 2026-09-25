@@ -7,3 +7,4 @@ playwright-report/
 *.sqlite*
 *.db*
 setup-code.txt
+service-credentials.key

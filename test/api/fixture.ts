@@ -6,12 +6,12 @@ import type { SessionResult } from '../../src/shared/contracts.ts';
 
 export const password = 'family password 123';
 export const auth = (token: string, grant?: string) => ({ authorization: `Bearer ${token}`, ...(grant ? { 'x-parent-authorization': grant } : {}) });
-export async function familyFixture() {
+export async function familyFixture(options: Pick<Parameters<typeof createApp>[0], 'ocrHttp'> = {}) {
   const parent = process.env.KLBOOK_TEST_DATA_PARENT ?? tmpdir();
   if (!isAbsolute(parent)) throw new Error('KLBOOK_TEST_DATA_PARENT must be absolute');
   const dataDir = await mkdtemp(join(parent, 'klbook-api-'));
   let now = Date.now();
-  const app = createApp({ dataDir, now: () => now });
+  const app = createApp({ dataDir, now: () => now, ...options });
   const setupCode = (await readFile(join(dataDir, 'setup-code.txt'), 'utf8')).trim();
   const response = await app.inject({ method: 'POST', url: '/api/v1/setup', payload: { setupCode, username: 'parent', password, learnerName: '小明', deviceName: '电脑' } });
   if (response.statusCode !== 201) throw new Error(response.body);

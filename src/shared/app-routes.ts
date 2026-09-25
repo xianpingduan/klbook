@@ -6,6 +6,7 @@ export const pages = {
   '/admin/materials': { surface: 'admin', label: '错题资料' },
   '/admin/sources': { surface: 'admin', label: '来源管理' },
   '/admin/study': { surface: 'admin', label: '学科与学习阶段' },
+  '/admin/services/ocr': { surface: 'admin', label: '图片识别服务' },
   '/admin/devices': { surface: 'admin', label: '设备与账号' }
 } as const;
 export type PagePath = keyof typeof pages;

@@ -7,6 +7,7 @@ import type { ReadingMaterial, ReadingMaterialEdit, ReadingMaterialList } from '
 import type { StudySettings, StudySettingsEdit, StudyStage } from '../shared/study.ts';
 import type { FilterOptions, QuestionFilters } from '../shared/collection.ts';
 import type { ConflictTarget } from '../shared/conflicts.ts';
+import type { OcrEdit, OcrSettings, OcrTest } from '../shared/ocr.ts';
 
 export class ApiError extends Error {
   status: number;
@@ -67,6 +68,10 @@ export class FamilyApi {
     return response.status === 204 ? undefined as T : response.json();
   }
   subjects() { return this.request<Subject[]>('/collection/subjects'); }
+  ocrSettings(grant: string) { return this.request<OcrSettings>('/admin/ocr', 'GET', undefined, grant); }
+  saveOcr(grant: string, input: OcrEdit) { return this.request<OcrSettings>('/admin/ocr', 'PUT', input, grant); }
+  testOcr(grant: string, id: string, expectedRevision: number) { return this.request<OcrTest>(`/admin/ocr/tests/${encodeURIComponent(id)}`, 'PUT', { expectedRevision, sample: 'school-v1' }, grant); }
+  async ocrSample(grant: string) { return (await this.send('/admin/ocr/sample', { headers: { 'X-Parent-Authorization': grant } })).blob(); }
   addSubject(grant: string, id: string, name: string) { return this.request<Subject>(`/admin/subjects/${encodeURIComponent(id)}`, 'PUT', { name }, grant); }
   studySettings(grant?: string) { return this.request<StudySettings>(grant ? '/admin/study-settings' : '/collection/study-settings', 'GET', undefined, grant); }
   saveStudySettings(grant: string, input: StudySettingsEdit) { return this.request<StudySettings>('/admin/study-settings', 'PUT', input, grant); }

@@ -266,3 +266,10 @@ select:focus-visible, textarea:focus-visible { outline: 3px solid #ceac53; outli
 .conflict-versions details { margin: 12px 0; }
 .conflict-versions summary { cursor: pointer; padding: 8px 0; }
 @media (max-width: 600px) { .conflict-versions { grid-template-columns: 1fr; } .save-conflict { padding: 12px; } }
+/* Parent-only external service configuration. */
+.ocr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 1rem; }
+.ocr-manager .ocr-check { display: flex; align-items: center; gap: .6rem; }
+.ocr-check input { width: 1.2rem; height: 1.2rem; }
+.ocr-sample { display: block; width: 100%; max-width: 650px; height: auto; border: 1px solid #dce3e8; border-radius: 8px; margin-bottom: 1rem; }
+.ocr-text { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1rem; background: #f6f8fa; border-radius: 8px; }
+.ocr-manager h2 { margin-top: 1.6rem; }
