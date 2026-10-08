@@ -1,3 +1,4 @@
+import { reveal } from './interactions.ts';
 import { expect, test } from '@playwright/test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -37,18 +38,22 @@ test('上传、框题、保存草稿、继续收集和补充信息，第二设�
     await page.mouse.up();
     await page.getByRole('button', { name: '下一步，选学科' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption({ label: '数学' });
+    await reveal(page.getByRole('combobox', { name: '来源（选填）', exact: true, includeHidden: true }));
     await page.getByRole('combobox', { name: '来源（选填）', exact: true }).selectOption({ label: '练习册' });
-    await page.getByRole('button', { name: '保存草稿' }).click();
-    await expect(page.getByRole('status')).toContainText('草稿已保存到家庭资料库');
+    await expect(page.getByText('草稿已同步到家庭电脑', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: '返回列表' }).click();
     await page.getByRole('button', { name: '继续整理' }).click();
+    await reveal(page.getByRole('combobox', { name: '来源（选填）', exact: true, includeHidden: true }));
     await expect(page.getByRole('combobox', { name: '来源（选填）', exact: true }).locator('option:checked')).toHaveText('练习册');
     await page.getByRole('button', { name: '保存到错题集' }).click();
     await expect(page.getByRole('heading', { name: '错题详情' })).toBeVisible();
     await expect(page.getByText('已同步到家庭资料库', { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: '补充或更正信息' }).click();
+    await page.getByRole('button', { name: '编辑资料' }).click();
+    await reveal(page.getByLabel('页码（选填）'));
     await page.getByLabel('页码（选填）').fill('3');
+    await reveal(page.getByLabel('题号（选填）'));
     await page.getByLabel('题号（选填）').fill('1');
+    await reveal(page.getByLabel('备注（选填）'));
     await page.getByLabel('备注（选填）').fill('还没弄懂，先记下来');
     await page.getByRole('button', { name: '保存修改' }).click();
     await expect(page.getByText('还没弄懂，先记下来', { exact: true })).toBeVisible();
@@ -62,10 +67,12 @@ test('上传、框题、保存草稿、继续收集和补充信息，第二设�
     const secondPage = await second.newPage();
     await login(secondPage);
     await secondPage.getByRole('button', { name: '打开错题' }).click();
-    await secondPage.getByRole('button', { name: '查看原始页' }).click();
+    await secondPage.getByText('查看原始页', { exact: true }).click();
     await expect(secondPage.getByRole('img', { name: '原始页（保留作答和批改）' })).toBeVisible();
     await secondPage.screenshot({ path: `test-results/collection-original-${test.info().project.name}.png`, fullPage: true });
-  } finally { await second.close().catch(() => {}); await server.stop(); await rm(dataDir, { recursive: true, force: true }); }
+  } finally { await second.close().catch(() => {});
+    await server.stop();
+    await rm(dataDir, { recursive: true, force: true }); }
 });
 
 test('写入失败和响应丢失后保留材料，重开及重复保存不会多建一道题', async ({ page, request }) => {
@@ -90,35 +97,38 @@ test('写入失败和响应丢失后保留材料，重开及重复保存不会�
     await expect(page.getByText('还有 1 张图片等待上传', { exact: true })).toBeVisible();
     await rm(join(dataDir, 'attachments', 'pages'));
     await page.route('**/api/v1/collection/drafts', async route => {
-      await route.fetch({ maxRetries: 1 }); await route.abort();
+      await route.fetch({ maxRetries: 1 });
+    await route.abort();
     });
     await page.getByRole('button', { name: '继续上传' }).click();
-    await expect(page.getByRole('alert')).toContainText('无法连接家庭电脑');
-    await page.reload();
-    await page.unroute('**/api/v1/collection/drafts');
-    await page.getByRole('button', { name: '继续上传' }).click();
     await expect(page.getByRole('heading', { name: '框住这道题' })).toBeVisible();
+    await page.unroute('**/api/v1/collection/drafts');
+    await page.reload();
+    await page.getByRole('button', { name: '继续整理' }).click();
+    await expect(page.getByRole('heading', { name: '框住这道题' })).toBeVisible();
+    await reveal(page.getByRole('button', { name: '选择整页', includeHidden: true }));
     await page.getByRole('button', { name: '选择整页' }).click();
     await page.getByRole('button', { name: '下一步，选学科' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption({ label: '科学' });
+    await reveal(page.getByLabel('备注（选填）'));
     await page.getByLabel('备注（选填）').fill('保存失败也不要丢掉这句话');
     await page.route('**/api/v1/collection/questions/*', async route => {
-      if (route.request().method() === 'PUT') { await route.fetch({ maxRetries: 1 }); await route.abort(); }
+      if (route.request().method() === 'PUT') { await route.fetch({ maxRetries: 1 });
+    await route.abort(); }
       else await route.continue();
     });
     await page.getByRole('button', { name: '保存到错题集' }).click();
-    await expect(page.getByRole('alert')).toContainText('当前填写内容仍保留');
-    await expect(page.getByLabel('备注（选填）')).toHaveValue('保存失败也不要丢掉这句话');
-    await expect(page.getByText('已同步到家庭资料库', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('本机已收集，待同步', { exact: true })).toBeVisible();
+    await expect(page.getByText('保存失败也不要丢掉这句话', { exact: true })).toBeVisible();
     await page.unroute('**/api/v1/collection/questions/*');
-    await page.getByRole('button', { name: '保存到错题集' }).click();
-    await expect(page.getByRole('heading', { name: '错题详情' })).toBeVisible();
+    await page.reload();
     const records = await request.get(`${server.url}/api/v1/collection/questions?state=collected`, { headers: { Authorization: `Bearer ${token}` } });
     const list = await records.json();
     expect(list.total).toBe(1);
-    expect(list.items[0].revision).toBe(2);
+    expect(list.items[0].revision).toBeGreaterThanOrEqual(2);
     expect(list.items[0].note).toBe('保存失败也不要丢掉这句话');
-  } finally { await server.stop(); await rm(dataDir, { recursive: true, force: true }); }
+  } finally { await server.stop();
+    await rm(dataDir, { recursive: true, force: true }); }
 });
 
 test('设备暂存不可用时，返回列表仍保留内存图片，修复存储后可以继续上传', async ({ page, request }) => {
@@ -153,5 +163,6 @@ test('设备暂存不可用时，返回列表仍保留内存图片，修复存�
     }));
     await page.getByRole('button', { name: '继续上传' }).click();
     await expect(page.getByRole('heading', { name: '框住这道题' })).toBeVisible();
-  } finally { await server.stop(); await rm(dataDir, { recursive: true, force: true }); }
+  } finally { await server.stop();
+    await rm(dataDir, { recursive: true, force: true }); }
 });

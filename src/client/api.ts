@@ -50,6 +50,21 @@ export class FamilyApi {
     if (!this.credential) throw new Error('请先登录资料库');
     return new QuestionJournal(this.platform, this.credential, id);
   }
+  adoptQuestionProgress(current: Question, readingMaterialId = current.readingMaterial?.id ?? null) {
+    this.questionJournal(current.id).write({ version: 1, fields: { ...questionFields(current), readingMaterialId }, step: current.region ? 'confirm' : 'crop', checkpoint: { current, pending: null }, updatedAt: Date.now() });
+  }
+  advanceQuestionProgress(previous: Question, current: Question, readingChanged = false) {
+    if (!this.credential) return;
+    for (const [key, raw] of this.platform.journal.entries(this.credential)) {
+      if (!key.startsWith(`question:${previous.id}:`)) continue;
+      const progress = JSON.parse(raw) as QuestionProgress;
+      // Only this editor's acknowledged base can advance; divergent tabs still conflict.
+      if (progress.checkpoint.pending || progress.checkpoint.current.revision !== previous.revision) continue;
+      this.platform.journal.write(this.credential, key, JSON.stringify({ ...progress,
+        fields: { ...progress.fields, ...(readingChanged ? { readingMaterialId: current.readingMaterial?.id ?? null } : {}) },
+        checkpoint: { current, pending: null } }));
+    }
+  }
   static async probe(platform: ClientPlatform, address: string) {
     const target = serverOrigin(address);
     const api = new FamilyApi(platform, target, null);
@@ -171,12 +186,13 @@ export class FamilyApi {
     this.local?.remember('/collection/cancelled-drafts', [...items.filter(item => item.id !== id && item.id !== result.id), ...(result.cancelledAt ? [{ ...result, id }] : [])]);
     return { ...result, id };
   }
-  async saveQuestion(id: string, input: QuestionEdit, grant?: string) {
+  async saveQuestion(id: string, input: QuestionEdit, grant?: string, allowDeferred = false) {
     try {
+      await this.verifiedHome();
       await this.syncCaptures();
       return this.rememberQuestion(await this.request<Question>(`/collection/questions/${encodeURIComponent(this.remoteId(id))}`, 'PUT', this.remoteEdit(input), grant));
     } catch (failure) {
-      if (!(failure instanceof ConnectionError) || grant) throw failure;
+      if (!(failure instanceof ConnectionError) || grant || !allowDeferred) throw failure;
       return this.deferQuestion(id, input);
     }
   }
@@ -196,6 +212,13 @@ export class FamilyApi {
       return pending;
   }
   async createQuestion(pageId: string, input: QuestionCreate, grant?: string) { await this.syncCaptures(); return this.rememberQuestion(await this.request<Question>(`/collection/pages/${encodeURIComponent(this.remoteId(pageId))}/questions`, 'POST', { ...input, parts: input.parts?.map(part => ({ ...part, pageId: this.remoteId(part.pageId), id: this.remoteId(part.id) })) }, grant)); }
+  async prepareQuestion(question: Question) {
+    if (!this.captures || !this.local?.home()) throw new Error('请先连接家庭资料库');
+    this.captures.remember({ operationId: question.id, kind: 'questions', page: question.originalPage, question, stage: question.studyStage });
+    this.local.question(question);
+    try { await this.syncCaptures(); return await this.question(question.id); }
+    catch (failure) { if (failure instanceof ConnectionError) return question; throw failure; }
+  }
   uploadImage(file: Blob, operationId: string, grant?: string, stage?: StudyStage) { return this.upload<Question>('drafts', file, operationId, grant, stage); }
   uploadPage(file: Blob, operationId: string, grant?: string) { return this.upload<OriginalPage>('pages', file, operationId, grant); }
   private async upload<T>(target: 'drafts' | 'pages', file: Blob, operationId: string, grant?: string, stage?: StudyStage): Promise<T> {
@@ -217,6 +240,10 @@ export class FamilyApi {
     return result;
   }
   async pageImage(pageId: string, variant: 'original' | 'preview') {
+    if (this.captures?.records().some(record => record.page.id === pageId && !record.remote)) {
+      const saved = await this.local?.image(pageId, variant);
+      if (saved) return saved;
+    }
     try {
       const image = await (await this.send(`/collection/pages/${encodeURIComponent(this.remoteId(pageId))}/${variant}`)).blob();
       try { await this.local?.putImage(pageId, variant, image); } catch { /* Display online; offline retrieval only succeeds for stored bytes. */ }
@@ -261,6 +288,13 @@ export class FamilyApi {
     if (!records.length) return;
     await this.verifiedHome();
     for (const record of records) {
+      if (record.kind === 'questions') {
+        const content = questionContent(questionFields(record.question!), 'draft');
+        const { expectedRevision: _revision, ...input } = this.remoteEdit({ ...content, expectedRevision: 0, operationId: record.operationId });
+        record.remote = await this.request<Question>(`/collection/pages/${encodeURIComponent(this.remoteId(record.page.id))}/questions`, 'POST', input);
+        this.captures!.remember(record);
+        continue;
+      }
       const file = await this.local!.image(record.page.id, 'original');
       if (!file) throw new Error('本机原始图片未能读取，请保留材料后重试');
       const response = await this.send(`/collection/${record.kind}`, { method: 'POST', body: file, headers: { 'Content-Type': file.type, 'Idempotency-Key': record.operationId, ...(record.kind === 'drafts' ? { 'X-Learning-Stage': encodeURIComponent(JSON.stringify(record.stage)) } : {}) } });
@@ -286,7 +320,7 @@ export class FamilyApi {
         if (this.platform.journal.read(scope, key) !== raw) continue;
         let current: Question;
         if (progress.checkpoint.pending) {
-          current = await this.saveQuestion(base.id, progress.checkpoint.pending);
+          current = await this.saveQuestion(base.id, progress.checkpoint.pending, undefined, true);
           if (current.syncState === 'synced' && current.revision !== progress.checkpoint.pending.expectedRevision + 1) throw new ApiError(409, '这道题已在其他页面更新，请打开本机草稿核对后再同步', { entity: 'question', id: base.id });
         } else {
           current = await this.question(base.id);
@@ -300,7 +334,7 @@ export class FamilyApi {
           if (this.platform.journal.read(scope, key) !== writtenRaw) continue;
           writtenRaw = JSON.stringify({ ...progress, checkpoint: { current, pending, intent: desired } });
           this.platform.journal.write(scope, key, writtenRaw);
-          current = await this.saveQuestion(base.id, pending);
+          current = await this.saveQuestion(base.id, pending, undefined, true);
           if (current.syncState === 'synced' && current.revision !== pending.expectedRevision + 1) throw new ApiError(409, '这道题已在其他页面更新，请打开本机草稿核对后再同步', { entity: 'question', id: base.id });
         }
         if (current.syncState !== 'synced') continue;

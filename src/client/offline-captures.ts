@@ -6,7 +6,7 @@ import { emptyStage } from '../shared/study.ts';
 import { LocalLibrary } from './local-library.ts';
 
 export interface OfflineCapture {
-  operationId: string; kind: 'drafts' | 'pages'; page: OriginalPage;
+  operationId: string; kind: 'drafts' | 'pages' | 'questions'; page: OriginalPage;
   question?: Question; remote?: OriginalPage | Question; stage: StudyStage;
 }
 
@@ -18,11 +18,14 @@ export class OfflineCaptures {
   constructor(platform: ClientPlatform, scope: DraftScope) { this.platform = platform; this.scope = scope; }
   records(): OfflineCapture[] { return this.platform.journal.entries(this.scope).filter(([key]) => key.startsWith('upload:')).map(([, raw]) => JSON.parse(raw) as OfflineCapture); }
   find(operationId: string) { return this.records().find(record => record.operationId === operationId); }
-  remember(record: OfflineCapture) { this.platform.journal.write(this.scope, `upload:${record.operationId}`, JSON.stringify(record)); }
+  remember(record: OfflineCapture) {
+    this.platform.journal.write(this.scope, `upload:${record.operationId}`, JSON.stringify(record));
+    if (record.question && record.remote && record.question.id !== record.remote.id) new LocalLibrary(this.platform, this.scope).removeQuestion(record.remote.id);
+  }
   remoteId(id: string) {
     for (const item of this.records()) {
       if (!item.remote) continue;
-      const page = item.kind === 'drafts' ? (item.remote as Question).originalPage : item.remote as OriginalPage;
+      const page = item.kind !== 'pages' ? (item.remote as Question).originalPage : item.remote as OriginalPage;
       if (item.page.id === id) return page.id;
       if (item.question?.id === id) return (item.remote as Question).id;
       if (item.question?.parts[0]?.id === id) return (item.remote as Question).parts[0]!.id;
@@ -32,7 +35,7 @@ export class OfflineCaptures {
   localId(id: string) {
     for (const item of this.records()) {
       if (!item.remote) continue;
-      const page = item.kind === 'drafts' ? (item.remote as Question).originalPage : item.remote as OriginalPage;
+      const page = item.kind !== 'pages' ? (item.remote as Question).originalPage : item.remote as OriginalPage;
       if (page.id === id) return item.page.id;
       if (item.question && (item.remote as Question).id === id) return item.question.id;
       if (item.question && (item.remote as Question).parts[0]?.id === id) return item.question.parts[0]!.id;
@@ -43,7 +46,7 @@ export class OfflineCaptures {
     const part = (entry: Question['parts'][number]) => ({ ...entry, id: this.localId(entry.id), originalPage: { ...entry.originalPage, id: this.localId(entry.originalPage.id) } });
     return { ...value, id: this.localId(value.id), originalPage: { ...value.originalPage, id: this.localId(value.originalPage.id) }, parts: value.parts.map(part), answerParts: value.answerParts.map(part), readingMaterial: value.readingMaterial ? { ...value.readingMaterial, parts: value.readingMaterial.parts.map(part) } : null };
   }
-  async create(file: Blob, operationId: string, kind: OfflineCapture['kind'], home: Home, stage = emptyStage) {
+  async create(file: Blob, operationId: string, kind: 'drafts' | 'pages', home: Home, stage = emptyStage) {
     const existing = this.find(operationId);
     if (existing) return existing;
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('离线时请使用 JPEG、PNG 或 WebP 图片');

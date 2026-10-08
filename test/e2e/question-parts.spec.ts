@@ -1,3 +1,4 @@
+import { reveal } from './interactions.ts';
 import { expect, test } from '@playwright/test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -12,7 +13,8 @@ async function fixture(request: APIRequestContext) {
   const setupCode = (await readFile(join(dir, 'setup-code.txt'), 'utf8')).trim();
   const first = await (await request.post(`${server.url}/api/v1/setup`, { data: { setupCode, username: 'parent', password: 'family password 123', learnerName: '小明', deviceName: '设置电脑' } })).json();
   const bytes = await sharp(await readFile('test/fixtures/paper.svg')).png().toBuffer();
-  return { ...server, bytes, headers: { Authorization: `Bearer ${first.token}` }, async close() { await server.stop(); await rm(dir, { recursive: true, force: true }); } };
+  return { ...server, bytes, headers: { Authorization: `Bearer ${first.token}` }, async close() { await server.stop();
+    await rm(dir, { recursive: true, force: true }); } };
 }
 async function login(page: Page, url: string) {
   await page.goto(url);
@@ -27,37 +29,48 @@ for (const editAfterFailure of [false, true]) test(`同一原始页继续选题�
     await login(page, `${f.url}/learn/collect`);
     await expect(page.getByLabel('选择题目图片')).toBeEnabled();
     await page.getByLabel('选择题目图片').setInputFiles({ name: '同页.png', mimeType: 'image/png', buffer: f.bytes });
+    await reveal(page.getByRole('button', { name: '选择整页', exact: true, includeHidden: true }));
     await page.getByRole('button', { name: '选择整页', exact: true }).click();
     await page.getByRole('button', { name: '下一步，选学科' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('math');
+    await reveal(page.getByLabel('备注（选填）'));
     await page.getByLabel('备注（选填）').fill('第一道题');
     await page.getByRole('button', { name: '保存到错题集', exact: true }).click();
     await expect(page.getByRole('heading', { name: '错题详情' })).toBeVisible();
     const before = await (await request.get(`${f.url}/api/v1/collection/questions?state=collected`, { headers: f.headers })).json();
+    await page.route('**/api/v1/collection/pages/*/questions', async route => { await route.fetch(); await route.abort(); }, { times: 1 });
+    await reveal(page.getByRole('button', { name: '从此原始页再收集一道', exact: true, includeHidden: true }));
     await page.getByRole('button', { name: '从此原始页再收集一道', exact: true }).click();
     expect((await (await request.get(`${f.url}/api/v1/collection/questions?state=collected`, { headers: f.headers })).json()).total).toBe(1);
+    await reveal(page.getByRole('button', { name: '选择整页', exact: true, includeHidden: true }));
     await page.getByRole('button', { name: '选择整页', exact: true }).click();
     await page.getByRole('button', { name: '清除当前框选', exact: true }).click();
     await expect(page.getByRole('button', { name: '下一步，选学科' })).toBeDisabled();
+    await reveal(page.getByRole('button', { name: '选择整页', exact: true, includeHidden: true }));
     await page.getByRole('button', { name: '选择整页', exact: true }).click();
     await page.getByText('精确调整范围（百分比）', { exact: true }).click();
     await page.getByLabel('范围高度', { exact: true }).fill('40');
     await page.getByRole('button', { name: '下一步，选学科' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('science');
+    await reveal(page.getByLabel('备注（选填）'));
     await page.getByLabel('备注（选填）').fill('第二道题');
-    await page.route('**/api/v1/collection/pages/*/questions', async route => { await route.fetch(); await route.abort(); }, { times: 1 });
+    await page.route('**/api/v1/collection/questions/*', async route => {
+      if (route.request().method() === 'PUT' && route.request().postDataJSON().state === 'collected') { await route.fetch(); await route.abort(); }
+      else await route.continue();
+    });
     await page.getByRole('button', { name: '保存到错题集', exact: true }).click();
-    await expect(page.getByRole('alert')).toContainText('仍保留');
+    await expect(page.getByText('本机已收集，待同步', { exact: true })).toBeVisible();
+    await page.unroute('**/api/v1/collection/questions/*');
+    await page.reload();
+    await page.getByRole('button', { name: '首页', exact: true }).click();
     if (editAfterFailure) {
+      await page.getByRole('button', { name: '打开错题', exact: true }).first().click();
+      await page.getByRole('button', { name: '编辑资料', exact: true }).click();
+      await reveal(page.getByLabel('备注（选填）'));
       await page.getByLabel('备注（选填）').fill('第二道题，重试时补充');
-      // The creation and its following edit can both succeed while their responses are lost.
-      await page.route('**/api/v1/collection/questions/*', async route => { await route.fetch(); await route.abort(); }, { times: 1 });
-      await page.getByRole('button', { name: '保存到错题集', exact: true }).click();
-      await expect(page.getByRole('alert')).toContainText('仍保留');
-      expect((await (await request.get(`${f.url}/api/v1/collection/questions?state=collected`, { headers: f.headers })).json()).total).toBe(2);
+      await page.getByRole('button', { name: '保存修改', exact: true }).click();
+      await expect(page.getByRole('heading', { name: '错题详情' })).toBeVisible();
     }
-    await page.getByRole('button', { name: '保存到错题集', exact: true }).click();
-    await expect(page.getByRole('heading', { name: '错题详情' })).toBeVisible();
     const after = await (await request.get(`${f.url}/api/v1/collection/questions?state=collected`, { headers: f.headers })).json();
     expect(after.total).toBe(2);
     expect(after.items.find((item: { id: string }) => item.id === before.items[0].id)).toEqual(before.items[0]);
@@ -104,19 +117,24 @@ test('手机尺寸学习端追加图片，未确认的新范围阻止保存离�
     await storageTab.evaluate(() => Reflect.get(window, 'releaseDraftRead')());
     await storageTab.close();
     await page.getByRole('button', { name: '打开错题', exact: true }).click();
-    await page.getByRole('button', { name: '补充或更正信息' }).click();
+    await page.getByRole('button', { name: '编辑资料' }).click();
+    await reveal(page.getByLabel('追加跨页图片'));
     await expect(page.getByLabel('追加跨页图片')).toBeEnabled();
+    await reveal(page.getByLabel('追加跨页图片'));
     await page.getByLabel('追加跨页图片').setInputFiles({ name: '续页.png', mimeType: 'image/png', buffer: f.bytes });
     await expect(page.getByRole('button', { name: '题目区 2', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByRole('button', { name: '下一步，选学科' })).toBeDisabled();
     await page.getByRole('button', { name: '返回列表', exact: true }).click();
-    await page.getByRole('button', { name: '保存后离开' }).click();
-    await expect(page.getByRole('dialog').getByRole('alert')).toContainText('确认所有题目范围');
-    await page.getByRole('button', { name: '继续编辑' }).click();
+    await expect(page.getByRole('dialog')).not.toBeVisible();
+    await page.getByRole('button', { name: '打开错题', exact: true }).click();
+    await page.getByRole('button', { name: '编辑资料', exact: true }).click();
+    await expect(page.getByRole('button', { name: '下一步，选学科' })).toBeDisabled();
+    await reveal(page.getByRole('button', { name: '选择整页', exact: true, includeHidden: true }));
     await page.getByRole('button', { name: '选择整页', exact: true }).click();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: `test-results/question-parts-editor-${test.info().project.name}.png`, fullPage: true });
     await page.getByRole('button', { name: '下一步，选学科' }).click();
+    await reveal(page.getByLabel('备注（选填）'));
     await page.getByLabel('备注（选填）').fill('补全跨页题');
     await page.getByRole('button', { name: '保存修改', exact: true }).click();
     await expect(page.getByRole('heading', { name: '错题详情' })).toBeVisible();
@@ -139,8 +157,11 @@ test('追加跨页图片响应丢失后刷新续接，重排和移除题目区�
     await page.getByRole('button', { name: '验证并进入管理', exact: true }).click();
     await page.getByRole('table', { name: '已收集资料' }).getByRole('button', { name: '打开', exact: true }).click();
     const secondBytes = await sharp(f.bytes).flop().png().toBuffer();
-    await page.route('**/api/v1/collection/pages', async route => { await route.fetch({ postData: secondBytes }); await route.abort(); }, { times: 1 });
+    await page.route('**/api/v1/collection/pages', async route => { await route.fetch({ postData: secondBytes });
+    await route.abort(); }, { times: 1 });
+    await reveal(page.getByLabel('追加跨页图片'));
     await expect(page.getByLabel('追加跨页图片')).toBeEnabled();
+    await reveal(page.getByLabel('追加跨页图片'));
     await page.getByLabel('追加跨页图片').setInputFiles({ name: '第二页.png', mimeType: 'image/png', buffer: secondBytes });
     await expect(page.getByRole('alert')).toContainText('仍保留');
     await page.reload();
@@ -149,12 +170,17 @@ test('追加跨页图片响应丢失后刷新续接，重排和移除题目区�
     await page.getByRole('table', { name: '已收集资料' }).getByRole('button', { name: '打开', exact: true }).click();
     await page.getByRole('button', { name: '继续追加 第二页.png', exact: true }).click();
     await expect(page.getByRole('button', { name: '题目区 2', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await reveal(page.getByRole('button', { name: '选择整页', exact: true, includeHidden: true }));
     await page.getByRole('button', { name: '选择整页', exact: true }).click();
+    await reveal(page.getByRole('button', { name: '在本页补充题目区', exact: true, includeHidden: true }));
     await page.getByRole('button', { name: '在本页补充题目区', exact: true }).click();
+    await reveal(page.getByRole('button', { name: '选择整页', exact: true, includeHidden: true }));
     await page.getByRole('button', { name: '选择整页', exact: true }).click();
+    await reveal(page.getByRole('button', { name: '移除此题目区', exact: true, includeHidden: true }));
     await page.getByRole('button', { name: '移除此题目区', exact: true }).click();
     await expect(page.getByRole('button', { name: '题目区 3', exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: '题目区 2', exact: true }).click();
+    await reveal(page.getByRole('button', { name: '向前移动', exact: true, includeHidden: true }));
     await page.getByRole('button', { name: '向前移动', exact: true }).click();
     await page.getByRole('button', { name: '确认题目范围', exact: true }).click();
     await page.getByRole('button', { name: '保存修改', exact: true }).click();
@@ -167,7 +193,7 @@ test('追加跨页图片响应丢失后刷新续接，重排和移除题目区�
     await page.getByRole('button', { name: '结束管理', exact: true }).click();
     await page.getByRole('button', { name: '打开错题', exact: true }).first().click();
     await expect(page.getByRole('img', { name: '已收集的题目区', exact: true })).toHaveCount(2);
-    await page.getByRole('button', { name: '查看原始页', exact: true }).click();
+    await page.getByText('查看原始页', { exact: true }).click();
     await expect(page.getByRole('img', { name: '原始页（保留作答和批改）', exact: true })).toHaveCount(2);
     for (const width of [390, 820, 1440]) {
       await page.setViewportSize({ width, height: 844 });

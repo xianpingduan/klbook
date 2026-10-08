@@ -27,6 +27,7 @@ import { emptyStage, stageLabel } from '../shared/study.ts';
 import { QuestionFilters } from './QuestionFilters.tsx';
 import type { FilterOptions, QuestionFilters as Filters } from '../shared/collection.ts';
 import { ReadingLinkConflict } from './ReadingLinkConflict.tsx';
+import { CollectionFooter } from './CollectionFooter.tsx';
 
 export function CollectionWorkspace({ api, home, platform, path, grant, navigate, onAccessError, onEditing, active = true, mode = 'workspace' }: {
   api: FamilyApi; home: Home; platform: ClientPlatform; path: PagePath; grant?: string; onAccessError(error: ApiError): Promise<void>; onEditing(active: boolean): void; active?: boolean; mode?: 'home' | 'collect' | 'workspace';
@@ -157,10 +158,11 @@ export function CollectionWorkspace({ api, home, platform, path, grant, navigate
     void run(async () => {
     const settings = await api.studySettings();
     if (!mounted.current) return;
-    setSelected({ ...selected, studyStage: settings.stage, id: crypto.randomUUID(), revision: 1, state: 'draft', subjectId: null, region: null, questionNumber: '', note: '', collectedAt: null,
+    const question: Question = { ...selected, studyStage: settings.stage, id: crypto.randomUUID(), revision: 1, state: 'draft', syncState: 'pending', subjectId: null, region: null, questionNumber: '', note: '', collectedAt: null, createdAt: Date.now(), updatedAt: Date.now(),
       originalPage: page, parts: [{ id: crypto.randomUUID(), originalPage: page, region: null, transcription: '', recognition: null }], answerParts: [],
-      sourceId: sources.some(source => source.id === selected.sourceId && source.active) ? selected.sourceId : null });
-    setCreating(true); setOriginalOpen(false); setScreen('edit');
+      sourceId: sources.some(source => source.id === selected.sourceId && source.active) ? selected.sourceId : null };
+    setSelected(admin ? question : await api.prepareQuestion(question));
+    setCreating(admin); setOriginalOpen(false); setScreen('edit');
     });
   }
   function open(question: Question) {
@@ -173,7 +175,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, navigate
     void run(async () => {
       const latest = await api.question(selected.id, managementGrant);
       if (!mounted.current) return;
-      answerReturn.current = screen === 'edit' ? 'edit' : 'detail'; setSelected(latest); setScreen('answers');
+      answerReturn.current = !admin && latest.state === 'collected' ? 'detail' : 'edit'; setSelected(latest); setScreen('answers');
     });
   }
   function openReading(id: string | null) {
@@ -203,6 +205,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, navigate
     if (latest.readingMaterial?.id !== material.id || (!alreadyLinked && latest.revision !== selected.revision + 1)) {
       throw new ApiError(409, '题目已在其他页面更新，请核对双方内容', { entity: 'question', id: selected.id });
     }
+    if (!admin) api.advanceQuestionProgress(selected, latest, true);
     setSelected(latest); setReading(undefined); setScreen('edit'); setRefresh(value => value + 1);
     return true;
     } catch (failure) {
@@ -216,7 +219,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, navigate
     setState(next);
     setFilters(({ collectedFrom: _from, collectedBefore: _before, ...remaining }) => remaining);
   }
-  const continuation = pending && <div className="batch-next"><p>还有 {batch!.items.length} 张图片待处理 · 下一张：{pending.name}</p><button disabled={busy} onClick={() => requestLeave(() => { back(); void run(() => upload(pending)); })}>继续下一张</button><button className="quiet" disabled={busy} aria-label={`取消 ${pending.name}`} onClick={() => void run(() => cancel(pending))}>取消这张</button><button className="quiet" disabled={busy} onClick={() => requestLeave(back)}>稍后继续</button><p className="hint">已上传 {batch!.uploaded} / {batch!.total} 张，已取消 {batch!.cancelled} 张</p></div>;
+  const continuation = pending && <div className="batch-next"><p>还有 {batch!.items.length} 张图片待处理 · 下一张：{pending.name}</p><button disabled={busy} onClick={() => requestLeave(() => { back(); void run(() => upload(pending)); })}>继续下一张</button><button className="quiet" disabled={busy} aria-label={`取消 ${pending.name}`} onClick={() => void run(() => cancel(pending))}>取消这张</button><button className="quiet" disabled={busy} onClick={() => requestLeave(back)}>稍后继续</button><p className="hint">已处理 {batch!.uploaded} / {batch!.total} 张，已取消 {batch!.cancelled} 张</p></div>;
   return <div className="collection-workspace">
     {error && <p role="alert" className="message error">{error}</p>}
     {notice && <p role="status" className="message">{notice}</p>}
@@ -224,14 +227,14 @@ export function CollectionWorkspace({ api, home, platform, path, grant, navigate
     {screen === 'list' && mode !== 'home' && batch && <CaptureQueue batch={batch} busy={busy} onUpload={item => void run(() => upload(item))} onCancel={item => void run(() => cancel(item))} />}
     {screen === 'list' && mode !== 'home' && cancelled.length > 0 && <details className="card cancelled-collections" open={notice === '已取消本次收集，材料仍保留。'}><summary>已取消的收集</summary>{cancelled.map(item => <div className="material-actions" key={item.id}><span>{date(item.cancelledAt!)}</span><button className="quiet" disabled={busy || !active} onClick={() => void run(() => undo(item))}>撤销取消</button></div>)}</details>}
     {screen === 'list' && <section className="card collection-card" aria-label={listState === 'draft' ? '已保存的草稿' : '已收集错题'}>
-      <div className="section-heading"><div>{admin ? <h1>错题资料</h1> : <h2>{listState === 'draft' ? '已保存的草稿' : '已收集'}</h2>}{mode === 'collect' && <p className="hint">已保存在家庭电脑，可以换设备继续整理。</p>}</div>{admin && <div className="admin-upload"><CaptureInput label="上传材料" busy={busy || cacheLoading || !!pending} onChoose={choose} onCancel={() => setNotice('已取消选择，已有材料保留。')} /></div>}</div>
+      <div className="section-heading"><div>{admin ? <h1>错题资料</h1> : <h2>{listState === 'draft' ? '已保存的草稿' : '已收集'}</h2>}{mode === 'collect' && <p className="hint">整理进度自动保留；已同步的资料可换设备继续。</p>}</div>{admin && <div className="admin-upload"><CaptureInput label="上传材料" busy={busy || cacheLoading || !!pending} onChoose={choose} onCancel={() => setNotice('已取消选择，已有材料保留。')} /></div>}</div>
       {admin && <p className="hint">支持 JPEG、PNG、静态 WebP；每张最多 15 MB、4000 万像素，每批最多 10 张、合计 75 MB。{pending ? '请先继续或取消本机待上传材料。' : '选择图片后可框题、确认学科并保存。'}</p>}
       <div className="collection-tabs">{mode === 'workspace' && <><button className="quiet" aria-pressed={state === 'collected'} disabled={busy} onClick={() => changeListState('collected')}>已收集</button><button className="quiet" aria-pressed={state === 'draft'} disabled={busy} onClick={() => changeListState('draft')}>草稿</button></>}<button className="quiet" disabled={busy || loading} onClick={() => setRefresh(value => value + 1)}>{readError ? '重试读取' : '刷新列表'}</button></div>
       {mode !== 'collect' && <QuestionFilters key={`${path}:${listState}`} value={filters} subjects={subjects} options={filterOptions} disabled={busy || loading} dates={listState === 'collected'} onChange={setFilters} />}
       {readError && <p role="alert" className="message error">{readError}。服务器材料暂时无法读取，本机待上传图片仍保留。</p>}
       {loading && <p role="status">正在读取材料…</p>}
       {cacheLoading && <p role="status">正在读取本机暂存，请稍候…</p>}
-      {!loading && !readError && list.total === 0 && <div className="empty-state"><h3>{mode !== 'collect' && Object.values(filters).some(Boolean) ? '没有符合筛选条件的题目' : listState === 'draft' ? '还没有草稿' : '开始收集第一道错题吧'}</h3><p>{mode !== 'collect' && Object.values(filters).some(Boolean) ? '调整条件或清空筛选后再看看。' : mode === 'home' ? '从底部“收集”开始，把材料留下来。' : listState === 'draft' ? '上传图片后，可以先保存草稿，稍后继续整理。' : '选择图片、框住题目、选好学科，就能保存。'}</p></div>}
+      {!loading && !readError && list.total === 0 && <div className="empty-state"><h3>{mode !== 'collect' && Object.values(filters).some(Boolean) ? '没有符合筛选条件的题目' : listState === 'draft' ? '还没有草稿' : '开始收集第一道错题吧'}</h3><p>{mode !== 'collect' && Object.values(filters).some(Boolean) ? '调整条件或清空筛选后再看看。' : mode === 'home' ? '从底部“收集”开始，把材料留下来。' : listState === 'draft' ? '选图后自动保留进度，稍后可以继续整理。' : '选择图片、框住题目、选好学科，就能保存。'}</p></div>}
       {admin ? !loading && !readError && <AdminMaterialsTable api={api} list={list} state={listState} subjects={subjects} busy={busy || cacheLoading} onOpen={open} /> : <div className="question-list">{list.items.map(question => <article key={question.id}>
         <div className="question-thumbnail"><QuestionImage api={api} page={question.originalPage} region={question.region} /></div>
         <div><p className="eyebrow">{listState === 'draft' ? '草稿' : '已收集'} · {subjectName(question.subjectId)}</p><h3>{question.source || '未填写来源'}{question.questionNumber ? ` · 第 ${question.questionNumber} 题` : ''}</h3><p className="hint">{listState === 'collected' ? '收集于' : '暂存于'} {date(question.collectedAt ?? question.createdAt)}</p><button className="quiet" disabled={busy || cacheLoading} onClick={() => open(question)}>{listState === 'draft' ? '继续整理' : '打开错题'}</button></div>
@@ -239,10 +242,10 @@ export function CollectionWorkspace({ api, home, platform, path, grant, navigate
       {list.items.length < list.total && <button className="quiet" disabled={busy || cacheLoading || loading} onClick={() => void run(async () => { const more = await api.questions(listState, list.items.length, managementGrant, mode === 'collect' ? {} : filters); setList(current => ({ ...more, items: [...current.items, ...more.items] })); })}>加载更多</button>}
     </section>}
     {screen === 'edit' && selected && <QuestionEditor key={selected.id} api={api} question={selected} proposedReading={proposedReading} subjects={subjects} sources={sources} active={active} externalBusy={busy} admin={admin} creating={creating} grant={managementGrant} pageCache={pageCache} onBack={back} onCancelled={() => { back(); setNotice('已取消本次收集，材料仍保留。'); if (!admin) navigate('/learn/collect'); }} onNewFromPage={newFromPage} onReading={openReading} onAnswers={openAnswers} onAccessError={onAccessError} onCurrent={setSelected} onSaved={question => { setSelected(question); setProposedReading(undefined); setCreating(false); setRefresh(value => value + 1); if (!admin && question.state === 'collected') setScreen('detail'); }} />}
-    {screen === 'answers' && selected && <AnswerEditor key={selected.id} api={api} question={selected} subjects={subjects} sources={sources} cache={answerCache} grant={managementGrant} active={active} onBack={() => setScreen(answerReturn.current)} onCurrent={setSelected} onSaved={question => { setSelected(question); setScreen(answerReturn.current); setRefresh(value => value + 1); }} onAccessError={onAccessError} />}
+    {screen === 'answers' && selected && <AnswerEditor key={selected.id} api={api} question={selected} subjects={subjects} sources={sources} cache={answerCache} grant={managementGrant} active={active} onBack={() => setScreen(answerReturn.current)} onCurrent={setSelected} onSaved={question => { if (!admin) api.advanceQuestionProgress(selected, question); setSelected(question); setScreen(answerReturn.current); setRefresh(value => value + 1); }} onAccessError={onAccessError} />}
     {screen === 'reading' && reading && <ReadingMaterialEditor key={reading.id} api={api} material={reading} cache={readingCache} grant={managementGrant} active={active} onBack={() => { setReading(undefined); setScreen('edit'); }} onSaved={readingSaved} onAccessError={onAccessError} />}
     {screen === 'reading-conflict' && reading && selected && <ReadingLinkConflict api={api} question={selected} material={reading} subjects={subjects} sources={sources} grant={managementGrant} active={active} onAccessError={onAccessError}
-      onResolve={(current, keep) => { setSelected(current); setProposedReading(keep ? reading : undefined); setReading(undefined); setScreen('edit'); }}
+      onResolve={(current, keep) => { if (!admin) api.adoptQuestionProgress(current, keep ? reading.id : current.readingMaterial?.id ?? null); setSelected(current); setProposedReading(keep ? reading : undefined); setReading(undefined); setScreen('edit'); }}
       onBack={() => { setReading(undefined); setScreen('edit'); }} />}
     {admin && screen === 'edit' && continuation}
     {screen === 'detail' && selected && <section className="card collection-card">
@@ -251,12 +254,12 @@ export function CollectionWorkspace({ api, home, platform, path, grant, navigate
       {selected.readingMaterial && <ReadingMaterialView api={api} material={selected.readingMaterial} />}
       <AnswerView api={api} parts={selected.answerParts} />
       <p className="study-stage">{stageLabel(selected.studyStage)}</p>
-      <button className="quiet" disabled={busy} onClick={openAnswers}>{selected.answerParts.length ? '整理纸质答案' : '补充纸质答案'}</button>
-      {continuation}
       <dl><div><dt>收集时间</dt><dd>{date(selected.collectedAt!)}</dd></div><div><dt>来源</dt><dd>{selected.source || '未填写'}</dd></div><div><dt>页码 / 题号</dt><dd>{selected.pageNumber || '未填写'} / {selected.questionNumber || '未填写'}</dd></div><div><dt>备注</dt><dd className="note-text">{selected.note || '未填写'}</dd></div></dl>
-      <button disabled={busy} onClick={() => setScreen('edit')}>补充或更正信息</button><button className="quiet" onClick={() => setOriginalOpen(value => !value)}>{originalOpen ? '收起原始页' : '查看原始页'}</button>
-      <NewQuestionFromPage parts={selected.parts} disabled={busy} onChoose={newFromPage} />
-      {originalOpen && <div className="original-material"><h2>原始页</h2><p className="hint">这是上传时保留的完整原图，包含题目、作答和批改。</p><QuestionParts api={api} parts={[...selected.parts, ...selected.answerParts, ...(selected.readingMaterial?.parts ?? [])]} original /></div>}
+      <button className="quiet" disabled={busy} onClick={() => setScreen('edit')}>编辑资料</button>
+      <details className="optional-info" onToggle={event => setOriginalOpen(event.currentTarget.open)}><summary>查看原始页</summary>
+        {originalOpen && <div className="original-material"><p className="hint">这是上传时保留的完整原图，包含题目、作答和批改。</p><QuestionParts api={api} parts={[...selected.parts, ...selected.answerParts, ...(selected.readingMaterial?.parts ?? [])]} original /></div>}<NewQuestionFromPage parts={selected.parts} disabled={busy} onChoose={newFromPage} />
+      </details>
+      <CollectionFooter>{pending ? <><p>还有 {batch!.items.length} 张材料待整理</p><button disabled={busy} onClick={() => requestLeave(() => { back(); void run(() => upload(pending)); })}>继续下一张</button></> : <button disabled={busy} onClick={() => requestLeave(() => { back(); navigate('/learn'); })}>完成，回到首页</button>}</CollectionFooter>
     </section>}
   </div>;
 }

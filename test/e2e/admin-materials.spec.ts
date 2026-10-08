@@ -1,3 +1,4 @@
+import { reveal } from './interactions.ts';
 import { expect, test } from '@playwright/test';
 import type { APIRequestContext, Page } from '@playwright/test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -13,7 +14,8 @@ async function fixture(request: APIRequestContext) {
   const initial = await (await request.post(`${server.url}/api/v1/setup`, { data: { setupCode, username: 'parent', password: 'family password 123', learnerName: '小明', deviceName: '电脑' } })).json();
   const image = await sharp(await readFile(new URL('../fixtures/paper.svg', import.meta.url))).png().toBuffer();
   const headers = { Authorization: `Bearer ${initial.token}` };
-  return { ...server, headers, image, initial, async close() { await server.stop(); await rm(dir, { recursive: true, force: true }); } };
+  return { ...server, headers, image, initial, async close() { await server.stop();
+    await rm(dir, { recursive: true, force: true }); } };
 }
 async function login(page: Page, url: string) {
   await page.goto(url);
@@ -29,13 +31,16 @@ async function unlock(page: Page) {
 test('后台批量处理保护当前修改，取消一张并刷新后继续，材料不重复', async ({ page, request }) => {
   const f = await fixture(request);
   try {
-    await login(page, `${f.url}/admin/materials`); await unlock(page);
+    await login(page, `${f.url}/admin/materials`);
+    await unlock(page);
     await expect(page.getByLabel('上传材料', { exact: true })).toBeEnabled();
     await page.getByLabel('上传材料', { exact: true }).setInputFiles(['第一张', '第二张', '第三张'].map(name => ({ name: `${name}.png`, mimeType: 'image/png', buffer: f.image })));
+    await reveal(page.getByRole('button', { name: '选择整页', includeHidden: true }));
     await page.getByRole('button', { name: '选择整页' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('math');
     await page.getByRole('button', { name: '保存到错题集' }).click();
     await expect(page.getByRole('status')).toHaveText('已同步到家庭资料库');
+    await reveal(page.getByLabel('备注（选填）'));
     await page.getByLabel('备注（选填）').fill('批次切换前保留');
     await page.getByRole('button', { name: '继续下一张', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: '还有未保存的修改' });
@@ -45,8 +50,10 @@ test('后台批量处理保护当前修改，取消一张并刷新后继续，�
     await page.getByRole('button', { name: '稍后继续', exact: true }).click();
     await dialog.getByRole('button', { name: '保存后离开' }).click();
     await expect(page.getByRole('button', { name: '继续上传 第三张.png', exact: true })).toBeVisible();
-    await page.reload(); await unlock(page);
+    await page.reload();
+    await unlock(page);
     await page.getByRole('button', { name: '继续上传 第三张.png', exact: true }).click();
+    await reveal(page.getByRole('button', { name: '选择整页', includeHidden: true }));
     await page.getByRole('button', { name: '选择整页' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('science');
     await page.getByRole('button', { name: '保存到错题集' }).click();
@@ -61,26 +68,32 @@ test('后台批量处理保护当前修改，取消一张并刷新后继续，�
 test('服务端撤销管理授权后上传与保存被拒绝，重新验证保留材料和表单', async ({ page, request }) => {
   const f = await fixture(request);
   try {
-    await login(page, `${f.url}/admin/materials`); await unlock(page);
+    await login(page, `${f.url}/admin/materials`);
+    await unlock(page);
     async function revoke(headers: Record<string, string>) {
       expect(headers['x-parent-authorization']).toBeTruthy();
       expect((await request.delete(`${f.url}/api/v1/admin/grants`, { headers: { authorization: headers.authorization!, 'x-parent-authorization': headers['x-parent-authorization']! } })).status()).toBe(204);
     }
-    await page.route('**/api/v1/collection/drafts', async route => { await revoke(route.request().headers()); await route.continue(); }, { times: 1 });
+    await page.route('**/api/v1/collection/drafts', async route => { await revoke(route.request().headers());
+    await route.continue(); }, { times: 1 });
     await expect(page.getByLabel('上传材料', { exact: true })).toBeEnabled();
     await page.getByLabel('上传材料', { exact: true }).setInputFiles({ name: '授权撤销.png', mimeType: 'image/png', buffer: f.image });
     await expect(page.getByRole('heading', { name: '验证家长身份' })).toBeVisible();
     expect((await (await request.get(`${f.url}/api/v1/collection/questions?state=draft`, { headers: f.headers })).json()).total).toBe(0);
     await unlock(page);
     await page.getByRole('button', { name: '继续上传 授权撤销.png', exact: true }).click();
+    await reveal(page.getByRole('button', { name: '选择整页', includeHidden: true }));
     await page.getByRole('button', { name: '选择整页' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('math');
+    await reveal(page.getByLabel('备注（选填）'));
     await page.getByLabel('备注（选填）').fill('重新验证也要保留');
-    await page.route('**/api/v1/collection/questions/*', async route => { await revoke(route.request().headers()); await route.continue(); }, { times: 1 });
+    await page.route('**/api/v1/collection/questions/*', async route => { await revoke(route.request().headers());
+    await route.continue(); }, { times: 1 });
     await page.getByRole('button', { name: '保存到错题集' }).click();
     await expect(page.getByRole('heading', { name: '验证家长身份' })).toBeVisible();
     expect((await (await request.get(`${f.url}/api/v1/collection/questions?state=collected`, { headers: f.headers })).json()).total).toBe(0);
     await unlock(page);
+    await reveal(page.getByLabel('备注（选填）'));
     await expect(page.getByLabel('备注（选填）')).toHaveValue('重新验证也要保留');
     await page.getByRole('button', { name: '保存到错题集' }).click();
     await expect(page.getByRole('status')).toHaveText('已同步到家庭资料库');
@@ -115,7 +128,8 @@ test('后台资料按状态显示真实总数和分页，每行单一打开入�
       await page.setViewportSize({ width, height: 844 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       const scroll = page.getByRole('region', { name: '资料表格，可横向滚动' });
-      await scroll.focus(); await page.keyboard.press('End');
+      await scroll.focus();
+    await page.keyboard.press('End');
       if (width === 390) expect(await scroll.evaluate(node => node.scrollWidth > node.clientWidth)).toBe(true);
       await page.evaluate(() => scrollTo(0, 0));
       await page.screenshot({ path: `test-results/admin-materials-${width}-${test.info().project.name}.png` });
@@ -137,7 +151,8 @@ test('来源独立表格保护未提交表单，保存失败留在原页，刷�
   const f = await fixture(request);
   try {
     await page.clock.install();
-    await login(page, `${f.url}/admin/sources`); await unlock(page);
+    await login(page, `${f.url}/admin/sources`);
+    await unlock(page);
     const table = page.getByRole('table', { name: '来源列表' });
     await expect(table.getByRole('row')).toHaveCount(5);
     await page.getByLabel('来源名称', { exact: true }).fill('每周小测');
@@ -187,7 +202,8 @@ test('来源重名与并发冲突不覆盖输入，保存离开时被撤权可�
   try {
     const grant = await (await request.post(`${f.url}/api/v1/admin/grants`, { headers: f.headers, data: { password: 'family password 123' } })).json();
     const parentHeaders = { ...f.headers, 'X-Parent-Authorization': grant.token };
-    await login(page, `${f.url}/admin/sources`); await unlock(page);
+    await login(page, `${f.url}/admin/sources`);
+    await unlock(page);
     await page.getByLabel('来源名称', { exact: true }).fill('练习册');
     await page.getByRole('button', { name: '添加来源', exact: true }).click();
     await expect(page.getByRole('alert')).toContainText('已有同名来源');
@@ -236,16 +252,22 @@ test('后台上传后同页看图与编辑，草稿续接和更正保留身份�
   const learner = await browser.newContext();
   try {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await login(page, `${f.url}/admin/materials`); await unlock(page);
+    await login(page, `${f.url}/admin/materials`);
+    await unlock(page);
     await expect(page.getByLabel('上传材料', { exact: true })).toBeEnabled();
     await page.getByLabel('上传材料', { exact: true }).setInputFiles({ name: '家长协助.png', mimeType: 'image/png', buffer: f.image });
     await expect(page.getByRole('heading', { name: '错题资料详情', exact: true })).toBeVisible();
     await expect(page.getByRole('combobox', { name: '学科', exact: true })).toBeVisible();
+    await reveal(page.getByRole('button', { name: '选择整页', includeHidden: true }));
     await page.getByRole('button', { name: '选择整页' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('math');
+    await reveal(page.getByRole('combobox', { name: '来源（选填）', exact: true, includeHidden: true }));
     await page.getByRole('combobox', { name: '来源（选填）', exact: true }).selectOption({ label: '练习册' });
+    await reveal(page.getByLabel('页码（选填）'));
     await page.getByLabel('页码（选填）').fill('15');
+    await reveal(page.getByLabel('题号（选填）'));
     await page.getByLabel('题号（选填）').fill('3');
+    await reveal(page.getByLabel('备注（选填）'));
     await page.getByLabel('备注（选填）').fill('家长协助留下的草稿');
     const material = (await page.getByRole('region', { name: '题目与原始页' }).boundingBox())!;
     const subject = (await page.getByRole('combobox', { name: '学科', exact: true }).boundingBox())!;
@@ -255,26 +277,30 @@ test('后台上传后同页看图与编辑，草稿续接和更正保留身份�
     await page.getByRole('button', { name: '返回列表' }).click();
     await page.getByRole('button', { name: '草稿', exact: true }).click();
     await page.getByRole('table', { name: '草稿资料' }).getByRole('button', { name: '打开', exact: true }).click();
+    await reveal(page.getByLabel('备注（选填）'));
     await expect(page.getByLabel('备注（选填）')).toHaveValue('家长协助留下的草稿');
     await page.getByRole('button', { name: '保存到错题集' }).click();
     await expect(page.getByRole('status')).toHaveText('已同步到家庭资料库');
-    await expect(page.getByRole('button', { name: '补充或更正信息' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '编辑资料' })).toHaveCount(0);
     const before = await (await request.get(`${f.url}/api/v1/collection/questions?state=collected`, { headers: f.headers })).json();
+    await reveal(page.getByLabel('备注（选填）'));
     await page.getByLabel('备注（选填）').fill('更正后仍是同一道题');
     await expect(page.getByRole('status')).toHaveCount(0);
     await page.route('**/api/v1/collection/questions/*', async route => {
-      if (route.request().method() === 'PUT') { await route.fetch(); await route.abort(); } else await route.continue();
+      if (route.request().method() === 'PUT') { await route.fetch();
+    await route.abort(); } else await route.continue();
     });
     await page.getByRole('button', { name: '保存修改' }).click();
     await expect(page.getByRole('alert')).toContainText('当前填写内容仍保留');
     await page.unroute('**/api/v1/collection/questions/*');
     await page.getByRole('button', { name: '保存修改' }).click();
     await expect(page.getByRole('status')).toHaveText('已同步到家庭资料库');
-    await page.getByRole('button', { name: '查看原始页' }).click();
+    await page.getByText('查看原始页', { exact: true }).click();
     await expect(page.getByRole('img', { name: '原始页（保留作答和批改）' })).toBeVisible();
     await page.screenshot({ path: `test-results/admin-detail-${test.info().project.name}.png`, fullPage: true });
     await page.setViewportSize({ width: 390, height: 650 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await reveal(page.getByLabel('备注（选填）'));
     await page.getByLabel('备注（选填）').focus();
     await page.getByRole('button', { name: '保存修改' }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: `test-results/admin-detail-phone-${test.info().project.name}.png`, fullPage: true });
@@ -282,11 +308,12 @@ test('后台上传后同页看图与编辑，草稿续接和更正保留身份�
     await login(second, f.url);
     await second.getByRole('button', { name: '打开错题' }).click();
     await expect(second.getByText('更正后仍是同一道题', { exact: true })).toBeVisible();
-    await second.getByRole('button', { name: '查看原始页' }).click();
+    await second.getByText('查看原始页', { exact: true }).click();
     await expect(second.getByRole('img', { name: '原始页（保留作答和批改）' })).toBeVisible();
     const after = await (await request.get(`${f.url}/api/v1/collection/questions?state=collected`, { headers: f.headers })).json();
     expect(after.total).toBe(1);
     expect(after.items[0]).toMatchObject({ id: before.items[0].id, collectedAt: before.items[0].collectedAt, revision: before.items[0].revision + 1, pageNumber: '15', questionNumber: '3', source: '练习册', note: '更正后仍是同一道题' });
     expect(await (await request.get(`${f.url}/api/v1/collection/pages/${after.items[0].originalPage.id}/original`, { headers: f.headers })).body()).toEqual(f.image);
-  } finally { await learner.close(); await f.close(); }
+  } finally { await learner.close();
+    await f.close(); }
 });

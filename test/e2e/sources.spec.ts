@@ -1,3 +1,4 @@
+import { reveal } from './interactions.ts';
 import { expect, test } from '@playwright/test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -25,7 +26,8 @@ test('家长独立管理来源并安全重试，孩子下拉选择，来源停�
     await manage();
     await page.getByLabel('来源名称', { exact: true }).fill('课堂小测');
     await expect(page.getByLabel('来源名称', { exact: true })).toHaveValue('课堂小测');
-    await page.route('**/api/v1/admin/sources/*', async route => { await route.fetch({ maxRetries: 1 }); await route.abort(); });
+    await page.route('**/api/v1/admin/sources/*', async route => { await route.fetch({ maxRetries: 1 });
+    await route.abort(); });
     await page.getByRole('button', { name: '添加来源', exact: true }).click();
     await expect(page.getByRole('alert')).toContainText('无法连接家庭电脑');
     await expect(page.getByLabel('来源名称', { exact: true })).toHaveValue('课堂小测');
@@ -41,9 +43,11 @@ test('家长独立管理来源并安全重试，孩子下拉选择，来源停�
       await expect(page.getByRole('heading', { name: '框住这道题' })).toBeVisible();
     };
     await upload();
+    await reveal(page.getByRole('button', { name: '选择整页', includeHidden: true }));
     await page.getByRole('button', { name: '选择整页' }).click();
     await page.getByRole('button', { name: '下一步，选学科' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption({ label: '数学' });
+    await reveal(page.getByRole('combobox', { name: '来源（选填）', exact: true, includeHidden: true }));
     await page.getByRole('combobox', { name: '来源（选填）', exact: true }).selectOption({ label: '课堂小测' });
     await page.getByRole('button', { name: '保存到错题集' }).click();
     await expect(page.getByRole('definition').filter({ hasText: /^课堂小测$/ })).toBeVisible();
@@ -58,6 +62,7 @@ test('家长独立管理来源并安全重试，孩子下拉选择，来源停�
     await page.getByRole('button', { name: '错题资料', exact: true }).click();
     await page.getByRole('table', { name: '已收集资料' }).getByRole('button', { name: '打开', exact: true }).click();
     await expect(page.getByRole('option', { name: '每周课堂小测（已停用）', exact: true })).toHaveAttribute('disabled', '');
+    await reveal(page.getByLabel('备注（选填）'));
     await page.getByLabel('备注（选填）').fill('家长保留原来源继续补充');
     await page.getByRole('button', { name: '保存修改' }).click();
     await expect(page.getByRole('status')).toHaveText('已同步到家庭资料库');
@@ -65,16 +70,20 @@ test('家长独立管理来源并安全重试，孩子下拉选择，来源停�
     await page.getByRole('button', { name: '打开错题' }).click();
     await expect(page.getByRole('definition').filter({ hasText: /^每周课堂小测$/ })).toBeVisible();
     await expect(page.getByText('家长保留原来源继续补充', { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: '补充或更正信息' }).click();
+    await page.getByRole('button', { name: '编辑资料' }).click();
     await expect(page.getByRole('option', { name: '每周课堂小测（已停用）', exact: true })).toHaveAttribute('disabled', '');
+    await reveal(page.getByLabel('备注（选填）'));
     await page.getByLabel('备注（选填）').fill('来源停用也可以补充');
     await page.getByRole('button', { name: '保存修改' }).click();
     await expect(page.getByText('来源停用也可以补充', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: '返回列表' }).click();
     await upload();
+    await reveal(page.getByRole('button', { name: '选择整页', includeHidden: true }));
     await page.getByRole('button', { name: '选择整页' }).click();
     await page.getByRole('button', { name: '下一步，选学科' }).click();
+    await reveal(page.getByRole('combobox', { name: '来源（选填）', exact: true, includeHidden: true }));
     await expect(page.getByRole('combobox', { name: '来源（选填）', exact: true })).toHaveValue('');
     await expect(page.getByRole('option', { name: /每周课堂小测/ })).toHaveCount(0);
-  } finally { await server.stop(); await rm(dataDir, { recursive: true, force: true }); }
+  } finally { await server.stop();
+    await rm(dataDir, { recursive: true, force: true }); }
 });

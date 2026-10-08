@@ -1,3 +1,4 @@
+import { reveal, editAnswers } from './interactions.ts';
 import { expect, test } from '@playwright/test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -20,19 +21,26 @@ test('新建小题期间原文并发更新可保留输入后重试，不读取�
     const readingId = crypto.randomUUID(), readingUrl = `${server.url}/api/v1/collection/reading-materials/${readingId}`;
     const reading = { operationId: crypto.randomUUID(), expectedRevision: 0, title: '可共享的原文', parts: [{ id: crypto.randomUUID(), pageId: paper.id, region }] };
     expect((await request.put(readingUrl, { headers, data: reading })).ok()).toBeTruthy();
-    await page.goto(`${server.url}/learn`);
-    await page.getByLabel('家长账号').fill('parent'); await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
+    await page.goto(`${server.url}/admin/materials`);
+    await page.getByLabel('家长账号').fill('parent');
+    await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
     await page.getByRole('button', { name: '登录此设备', exact: true }).click();
-    await page.getByRole('button', { name: '打开错题', exact: true }).click();
+    await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
+    await page.getByRole('button', { name: '验证并进入管理', exact: true }).click();
+    await page.getByRole('table', { name: '已收集资料' }).getByRole('button', { name: '打开', exact: true }).click();
     let conflicted = false, accepted = 1, note = '';
     // A non-overlapping schedule may legitimately create the question. Start another real edit, at most five times.
     for (let attempt = 0; attempt < 5 && !conflicted; attempt++) {
+      await reveal(page.getByRole('button', { name: '从此原始页再收集一道', exact: true, includeHidden: true }));
       await page.getByRole('button', { name: '从此原始页再收集一道', exact: true }).click();
+      await reveal(page.getByRole('button', { name: '选择整页', exact: true, includeHidden: true }));
       await page.getByRole('button', { name: '选择整页', exact: true }).click();
-      await page.getByRole('button', { name: '下一步，选学科', exact: true }).click();
+      await page.getByRole('button', { name: '确认题目范围', exact: true }).click();
       await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('chinese');
       note = `本次新建小题 ${attempt + 1}`;
+      await reveal(page.getByLabel('备注（选填）'));
       await page.getByLabel('备注（选填）').fill(note);
+      await reveal(page.getByRole('combobox', { name: '阅读材料（选填）', exact: true, includeHidden: true }));
       await page.getByRole('combobox', { name: '阅读材料（选填）', exact: true }).selectOption(readingId);
       // Forward the real service response; no fabricated conflict or internal store replacement.
       await page.route(createUrl, async route => {
@@ -47,19 +55,22 @@ test('新建小题期间原文并发更新可保留输入后重试，不读取�
       const response = page.waitForResponse(createUrl);
       await page.getByRole('button', { name: '保存到错题集', exact: true }).click();
       await response;
-      if (!conflicted) { accepted++; await expect(page.getByRole('heading', { name: '错题详情', exact: true })).toBeVisible(); }
+      if (!conflicted) { accepted++;
+    await expect(page.getByRole('heading', { name: '错题资料详情', exact: true })).toBeVisible(); }
     }
     expect(conflicted, '需要实际触发创建前的原文并发更新，才能验证冲突后重试').toBe(true);
     await expect(page.getByRole('alert').filter({ hasText: '阅读材料已更新' })).toBeVisible();
+    await reveal(page.getByLabel('备注（选填）'));
     await expect(page.getByLabel('备注（选填）')).toHaveValue(note);
     await expect(page.getByRole('region', { name: '处理保存冲突', exact: true })).not.toBeVisible();
     await page.getByRole('button', { name: '保存到错题集', exact: true }).click();
-    await expect(page.getByRole('heading', { name: '错题详情', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '错题资料详情', exact: true })).toBeVisible();
     const questions = await (await request.get(`${server.url}/api/v1/collection/questions?state=collected`, { headers })).json();
     expect(questions.total).toBe(accepted + 1);
     const created = questions.items.find((question: { note: string }) => question.note === note);
     expect(created.readingMaterial.title).toBe('另一设备更新后的原文'); expect(created.revision).toBe(1);
-  } finally { await server.stop(); await rm(dir, { recursive: true, force: true }); }
+  } finally { await server.stop();
+    await rm(dir, { recursive: true, force: true }); }
 });
 
 test('两个独立登录页面核对双方修改，保留本次编辑后再次冲突仍保护输入，最终保存重开不重复', async ({ page, browser, request }) => {
@@ -78,12 +89,15 @@ test('两个独立登录页面核对双方修改，保留本次编辑后再次�
     const phone = await other.newPage();
     for (const device of [page, phone]) {
       await device.goto(`${server.url}/learn`);
-      await device.getByLabel('家长账号').fill('parent'); await device.getByLabel('家长密码', { exact: true }).fill('family password 123');
+      await device.getByLabel('家长账号').fill('parent');
+    await device.getByLabel('家长密码', { exact: true }).fill('family password 123');
       await device.getByRole('button', { name: '登录此设备', exact: true }).click();
       await device.getByRole('button', { name: '打开错题', exact: true }).click();
-      await device.getByRole('button', { name: '补充或更正信息', exact: true }).click();
+      await device.getByRole('button', { name: '编辑资料', exact: true }).click();
     }
+    await reveal(page.getByLabel('备注（选填）'));
     await page.getByLabel('备注（选填）').fill('电脑补充的解题观察');
+    await reveal(phone.getByLabel('备注（选填）'));
     await phone.getByLabel('备注（选填）').fill('手机上还没保存的想法');
     await page.getByRole('button', { name: '保存修改', exact: true }).click();
     await expect(page.getByRole('heading', { name: '错题详情', exact: true })).toBeVisible();
@@ -92,24 +106,30 @@ test('两个独立登录页面核对双方修改，保留本次编辑后再次�
     await expect(conflict).toBeVisible();
     await expect(conflict.getByRole('region', { name: '当前版本', exact: true })).toContainText('电脑补充的解题观察');
     await expect(conflict.getByRole('region', { name: '本次编辑', exact: true })).toContainText('手机上还没保存的想法');
+    await reveal(phone.getByLabel('备注（选填）'));
     await expect(phone.getByLabel('备注（选填）')).toHaveValue('手机上还没保存的想法');
     await phone.screenshot({ path: 'test-results/question-conflict-390.png', fullPage: true });
     expect(await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await conflict.getByRole('button', { name: '保留本次编辑，继续核对', exact: true }).click();
+    await reveal(phone.getByLabel('备注（选填）'));
     await phone.getByLabel('备注（选填）').fill('电脑和手机核对后的完整记录');
     expect((await request.put(url, { headers, data: { ...input, operationId: crypto.randomUUID(), expectedRevision: 3, note: '核对期间电脑又有更新' } })).ok()).toBeTruthy();
     await phone.getByRole('button', { name: '保存修改', exact: true }).click();
     await expect(conflict.getByRole('region', { name: '当前版本', exact: true })).toContainText('核对期间电脑又有更新');
+    await reveal(phone.getByLabel('备注（选填）'));
     await expect(phone.getByLabel('备注（选填）')).toHaveValue('电脑和手机核对后的完整记录');
     await conflict.getByRole('button', { name: '保留本次编辑，继续核对', exact: true }).click();
     await phone.getByRole('button', { name: '保存修改', exact: true }).click();
     await expect(phone.getByRole('heading', { name: '错题详情', exact: true })).toBeVisible();
-    await page.reload(); await page.getByRole('button', { name: '打开错题', exact: true }).click();
+    await page.reload();
+    await page.getByRole('button', { name: '打开错题', exact: true }).click();
     await expect(page.getByText('电脑和手机核对后的完整记录', { exact: true })).toBeVisible();
     const saved = await (await request.get(url, { headers })).json();
     expect(saved.revision).toBe(5);
     expect((await (await request.get(`${server.url}/api/v1/collection/questions?state=collected`, { headers })).json()).total).toBe(1);
-  } finally { await other.close(); await server.stop(); await rm(dir, { recursive: true, force: true }); }
+  } finally { await other.close();
+    await server.stop();
+    await rm(dir, { recursive: true, force: true }); }
 });
 
 test('后台保存回执丢失后遇到更新不虚报成功，核对读取失败和家长验证失效均保留编辑与跨页材料', async ({ page, request }) => {
@@ -125,19 +145,28 @@ test('后台保存回执丢失后遇到更新不虚报成功，核对读取失�
     const fields = { state: 'collected', subjectId: 'math', region: { x: 0, y: 0, width: 1, height: 1 }, sourceId: null, pageNumber: '', questionNumber: '1', note: '' };
     expect((await request.put(url, { headers, data: { ...fields, operationId: crypto.randomUUID(), expectedRevision: 1 } })).ok()).toBeTruthy();
     await page.goto(`${server.url}/admin/materials`);
-    await page.getByLabel('家长账号').fill('parent'); await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
+    await page.getByLabel('家长账号').fill('parent');
+    await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
     await page.getByRole('button', { name: '登录此设备', exact: true }).click();
-    await page.getByLabel('家长密码', { exact: true }).fill('family password 123'); await page.getByRole('button', { name: '验证并进入管理', exact: true }).click();
+    await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
+    await page.getByRole('button', { name: '验证并进入管理', exact: true }).click();
     await page.getByRole('table', { name: '已收集资料' }).getByRole('button', { name: '打开', exact: true }).click();
+    await reveal(page.getByLabel('备注（选填）'));
     await page.getByLabel('备注（选填）').fill('已发送但丢失回执的编辑');
     let sent: Record<string, string> = {};
-    await page.route(url, async route => { sent = route.request().headers(); await route.fetch(); await route.abort(); }, { times: 1 });
+    await page.route(url, async route => { sent = route.request().headers();
+    await route.fetch();
+    await route.abort(); }, { times: 1 });
     await page.getByRole('button', { name: '保存修改', exact: true }).click();
     await expect(page.getByRole('alert')).toContainText('仍保留');
     expect((await request.put(url, { headers, data: { ...fields, operationId: crypto.randomUUID(), expectedRevision: 3, note: '回执丢失后另一设备的更新' } })).ok()).toBeTruthy();
+    await reveal(page.getByLabel('备注（选填）'));
     await page.getByLabel('备注（选填）').fill('本机继续编辑的内容');
+    await reveal(page.getByLabel('追加跨页图片', { exact: true }));
     await expect(page.getByLabel('追加跨页图片', { exact: true })).toBeEnabled();
+    await reveal(page.getByLabel('追加跨页图片', { exact: true }));
     await page.getByLabel('追加跨页图片', { exact: true }).setInputFiles({ name: '冲突中的追加页.png', mimeType: 'image/png', buffer: await sharp(bytes).flop().png().toBuffer() });
+    await reveal(page.getByRole('button', { name: '选择整页', exact: true, includeHidden: true }));
     await page.getByRole('button', { name: '选择整页', exact: true }).click();
     await page.getByRole('button', { name: '确认题目范围', exact: true }).click();
     await page.route(url, async route => { if (route.request().method() === 'GET') await route.abort(); else await route.continue(); });
@@ -145,20 +174,25 @@ test('后台保存回执丢失后遇到更新不虚报成功，核对读取失�
     const conflict = page.getByRole('region', { name: '处理保存冲突', exact: true });
     await expect(conflict.getByRole('alert')).toContainText('暂时无法读取当前版本');
     await expect(conflict.getByRole('button', { name: '保留本次编辑，继续核对', exact: true })).toBeDisabled();
+    await reveal(page.getByLabel('备注（选填）'));
     await expect(page.getByLabel('备注（选填）')).toHaveValue('本机继续编辑的内容');
     expect((await (await request.get(url, { headers })).json()).revision).toBe(4);
     await page.unroute(url);
     await request.delete(`${server.url}/api/v1/admin/grants`, { headers: { Authorization: sent.authorization!, 'X-Parent-Authorization': sent['x-parent-authorization']! } });
     await conflict.getByRole('button', { name: '重新读取当前版本', exact: true }).click();
     await expect(page.getByRole('heading', { name: '验证家长身份', exact: true })).toBeVisible();
-    await page.getByLabel('家长密码', { exact: true }).fill('family password 123'); await page.getByRole('button', { name: '验证并进入管理', exact: true }).click();
+    await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
+    await page.getByRole('button', { name: '验证并进入管理', exact: true }).click();
+    await reveal(page.getByLabel('备注（选填）'));
     await expect(page.getByLabel('备注（选填）')).toHaveValue('本机继续编辑的内容');
     await conflict.getByRole('button', { name: '重新读取当前版本', exact: true }).click();
     await expect(conflict.getByRole('region', { name: '当前版本', exact: true })).toContainText('回执丢失后另一设备的更新');
     await expect(conflict.getByRole('region', { name: '本次编辑', exact: true })).toContainText('题目材料（2 个题目区）');
     await page.getByRole('button', { name: '返回列表', exact: true }).click();
-    await expect(page.getByRole('dialog')).toBeVisible(); await page.getByRole('button', { name: '继续编辑', exact: true }).click();
-    await page.setViewportSize({ width: 1440, height: 960 }); await page.screenshot({ path: 'test-results/admin-conflict-1440.png', fullPage: true });
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.getByRole('button', { name: '继续编辑', exact: true }).click();
+    await page.setViewportSize({ width: 1440, height: 960 });
+    await page.screenshot({ path: 'test-results/admin-conflict-1440.png', fullPage: true });
     await conflict.getByRole('button', { name: '保留本次编辑，继续核对', exact: true }).click();
     await page.getByRole('button', { name: '保存修改', exact: true }).click();
     await expect(page.getByRole('status')).toContainText('已同步到家庭资料库');
@@ -166,9 +200,11 @@ test('后台保存回执丢失后遇到更新不虚报成功，核对读取失�
     expect(saved.revision).toBe(5); expect(saved.parts).toHaveLength(2); expect(saved.note).toBe('本机继续编辑的内容');
     await page.getByRole('button', { name: '返回列表', exact: true }).click();
     await page.getByRole('table', { name: '已收集资料' }).getByRole('button', { name: '打开', exact: true }).click();
+    await reveal(page.getByLabel('备注（选填）'));
     await expect(page.getByLabel('备注（选填）')).toHaveValue('本机继续编辑的内容');
     expect((await (await request.get(`${server.url}/api/v1/collection/questions?state=collected`, { headers })).json()).total).toBe(1);
-  } finally { await server.stop(); await rm(dir, { recursive: true, force: true }); }
+  } finally { await server.stop();
+    await rm(dir, { recursive: true, force: true }); }
 });
 
 test('共享原文和答案冲突可核对材料并选择版本，处理后的保存响应丢失可重试且关联正确', async ({ page, request }) => {
@@ -187,10 +223,12 @@ test('共享原文和答案冲突可核对材料并选择版本，处理后的�
     const url = `${server.url}/api/v1/collection/questions/${draft.id}`;
     expect((await request.put(url, { headers, data: { operationId: crypto.randomUUID(), expectedRevision: 1, state: 'collected', subjectId: 'chinese', region, sourceId: null, pageNumber: '', questionNumber: '1', note: '', readingMaterialId: readingId } })).ok()).toBeTruthy();
     await page.goto(`${server.url}/learn`);
-    await page.getByLabel('家长账号').fill('parent'); await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
+    await page.getByLabel('家长账号').fill('parent');
+    await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
     await page.getByRole('button', { name: '登录此设备', exact: true }).click();
     await page.getByRole('button', { name: '打开错题', exact: true }).click();
-    await page.getByRole('button', { name: '补充或更正信息', exact: true }).click();
+    await page.getByRole('button', { name: '编辑资料', exact: true }).click();
+    await reveal(page.getByRole('button', { name: '编辑已关联原文', exact: true, includeHidden: true }));
     await page.getByRole('button', { name: '编辑已关联原文', exact: true }).click();
     await page.getByLabel('阅读材料名称').fill('本次修改的原文');
     expect((await request.put(readingUrl, { headers, data: { ...reading, operationId: crypto.randomUUID(), expectedRevision: 1, title: '其他设备更正的原文' } })).ok()).toBeTruthy();
@@ -202,8 +240,9 @@ test('共享原文和答案冲突可核对材料并选择版本，处理后的�
     await expect(page.getByLabel('阅读材料名称')).toHaveValue('其他设备更正的原文');
     await page.getByLabel('阅读材料名称').fill('双方核对后的原文');
     await page.getByRole('button', { name: '保存并返回题目', exact: true }).click();
-    await page.getByRole('button', { name: '补充纸质答案', exact: true }).click();
+    await editAnswers(page, '补充纸质答案');
     await page.getByRole('button', { name: '从本题原始页 1 框选', exact: true }).click();
+    await reveal(page.getByRole('button', { name: '选择整页', exact: true, includeHidden: true }));
     await page.getByRole('button', { name: '选择整页', exact: true }).click();
     const remoteParts = [{ id: crypto.randomUUID(), pageId: draft.originalPage.id, region: { x: .2, y: .2, width: .5, height: .5 } }];
     expect((await request.put(`${url}/answers`, { headers, data: { operationId: crypto.randomUUID(), expectedRevision: 2, parts: remoteParts } })).ok()).toBeTruthy();
@@ -214,17 +253,21 @@ test('共享原文和答案冲突可核对材料并选择版本，处理后的�
       await expect(conflict.getByRole('region', { name: version, exact: true }).getByRole('img', { name: '纸质解答区', exact: true })).toBeVisible();
     }
     await conflict.getByRole('button', { name: '保留本次编辑，继续核对', exact: true }).click();
-    await page.route('**/api/v1/collection/questions/*/answers', async route => { if (route.request().method() === 'PUT') { await route.fetch(); await route.abort(); } else await route.continue(); }, { times: 1 });
+    await page.route('**/api/v1/collection/questions/*/answers', async route => { if (route.request().method() === 'PUT') { await route.fetch();
+    await route.abort(); } else await route.continue(); }, { times: 1 });
     await page.getByRole('button', { name: '保存答案并返回', exact: true }).click();
     await expect(page.getByRole('alert')).toContainText('仍保留');
     await page.getByRole('button', { name: '保存答案并返回', exact: true }).click();
-    await expect(page.getByRole('heading', { name: '补充或更正信息', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '错题详情', exact: true })).toBeVisible();
     const saved = await (await request.get(url, { headers })).json();
     expect(saved.revision).toBe(4); expect(saved.answerParts).toHaveLength(1); expect(saved.answerParts[0].region).toEqual(region);
     expect(saved.readingMaterial.title).toBe('双方核对后的原文'); expect(saved.readingMaterial.revision).toBe(3);
     expect(saved.parts).toHaveLength(1);
+    await page.getByRole('button', { name: '编辑资料', exact: true }).click();
+    await reveal(page.getByRole('button', { name: '从原始页新建阅读材料', exact: true, includeHidden: true }));
     await page.getByRole('button', { name: '从原始页新建阅读材料', exact: true }).click();
     await page.getByLabel('阅读材料名称').fill('新建但还没关联的原文');
+    await reveal(page.getByRole('button', { name: '选择整页', exact: true, includeHidden: true }));
     await page.getByRole('button', { name: '选择整页', exact: true }).click();
     expect((await request.put(url, { headers, data: { operationId: crypto.randomUUID(), expectedRevision: 4, state: 'collected', subjectId: 'chinese', region, sourceId: null, pageNumber: '', questionNumber: '1', note: '关联原文期间另一设备补的备注' } })).ok()).toBeTruthy();
     await page.getByRole('button', { name: '返回题目', exact: true }).click();
@@ -234,11 +277,15 @@ test('共享原文和答案冲突可核对材料并选择版本，处理后的�
     await expect(page.getByRole('dialog')).not.toBeVisible();
     await expect(conflict.getByRole('region', { name: '当前版本', exact: true })).toContainText('关联原文期间另一设备补的备注');
     await conflict.getByRole('button', { name: '保留本次编辑，继续核对', exact: true }).click();
+    await reveal(page.getByLabel('备注（选填）'));
     await expect(page.getByLabel('备注（选填）')).toHaveValue('关联原文期间另一设备补的备注');
-    await page.getByRole('button', { name: '整理纸质答案', exact: true }).click();
-    await page.getByRole('button', { name: '放弃本次修改并离开', exact: true }).click();
+    const proposed = await page.getByRole('combobox', { name: '阅读材料（选填）', exact: true, includeHidden: true }).inputValue();
+    await editAnswers(page, '整理纸质答案');
     await page.getByRole('button', { name: '返回题目', exact: true }).click();
-    await expect(page.getByRole('combobox', { name: '阅读材料（选填）', exact: true })).toHaveValue(readingId);
+    await page.getByRole('button', { name: '编辑资料', exact: true }).click();
+    await reveal(page.getByRole('combobox', { name: '阅读材料（选填）', exact: true, includeHidden: true }));
+    await expect(page.getByRole('combobox', { name: '阅读材料（选填）', exact: true })).toHaveValue(proposed);
+    await reveal(page.getByRole('combobox', { name: '阅读材料（选填）', exact: true, includeHidden: true }));
     await page.getByRole('combobox', { name: '阅读材料（选填）', exact: true }).selectOption({ label: '新建但还没关联的原文 · 1 个原文区' });
     await page.getByRole('button', { name: '保存修改', exact: true }).click();
     await expect(page.getByRole('heading', { name: '错题详情', exact: true })).toBeVisible();
@@ -246,5 +293,6 @@ test('共享原文和答案冲突可核对材料并选择版本，处理后的�
     expect(linked.revision).toBe(6); expect(linked.note).toBe('关联原文期间另一设备补的备注');
     expect(linked.readingMaterial.title).toBe('新建但还没关联的原文'); expect(linked.answerParts).toEqual(saved.answerParts);
     expect((await (await request.get(`${server.url}/api/v1/collection/reading-materials`, { headers })).json()).total).toBe(2);
-  } finally { await server.stop(); await rm(dir, { recursive: true, force: true }); }
+  } finally { await server.stop();
+    await rm(dir, { recursive: true, force: true }); }
 });

@@ -1,3 +1,4 @@
+import { reveal } from './interactions.ts';
 import { expect, test } from '@playwright/test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -27,6 +28,7 @@ test('相册多选逐张整理，取消单张后重开保留进度，另一设�
     await expect(page.getByLabel('从相册选择（可多选）')).toBeEnabled();
     await page.getByLabel('从相册选择（可多选）').setInputFiles(['第一张.png', '取消这张.png', '第三张.png'].map(name => ({ name, mimeType: 'image/png', buffer: image })));
     await expect(page.getByRole('heading', { name: '框住这道题' })).toBeVisible();
+    await reveal(page.getByRole('button', { name: '选择整页', includeHidden: true }));
     await page.getByRole('button', { name: '选择整页' }).click();
     await page.getByRole('button', { name: '下一步，选学科' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('math');
@@ -37,6 +39,7 @@ test('相册多选逐张整理，取消单张后重开保留进度，另一设�
     await expect(page.getByText('还有 1 张图片等待上传', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: '继续上传 第三张.png', exact: true }).click();
     await expect(page.getByRole('heading', { name: '框住这道题' })).toBeVisible();
+    await reveal(page.getByRole('button', { name: '选择整页', includeHidden: true }));
     await page.getByRole('button', { name: '选择整页' }).click();
     await page.getByRole('button', { name: '下一步，选学科' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('english');
@@ -45,7 +48,9 @@ test('相册多选逐张整理，取消单张后重开保留进度，另一设�
     await login(second);
     await expect(second.getByRole('button', { name: '打开错题' })).toHaveCount(2);
     await page.screenshot({ path: `test-results/batch-${test.info().project.name}.png`, fullPage: true });
-  } finally { await other.close(); await server.stop(); await rm(dataDir, { recursive: true, force: true }); }
+  } finally { await other.close();
+    await server.stop();
+    await rm(dataDir, { recursive: true, force: true }); }
 });
 
 test('拍照取消有退路，批量坏图可跳过，触控框题与电脑停止后的重试保留材料', async ({ page, request }) => {
@@ -95,5 +100,6 @@ test('拍照取消有退路，批量坏图可跳过，触控框题与电脑停�
     expect(records.items[0].originalPage.height).toBe(160);
     expect(records.items[0].region.width).toBeCloseTo(.7, 2);
     expect(records.items[0].region.height).toBeCloseTo(.5, 2);
-  } finally { await server.stop(); await rm(dataDir, { recursive: true, force: true }); }
+  } finally { await server.stop();
+    await rm(dataDir, { recursive: true, force: true }); }
 });

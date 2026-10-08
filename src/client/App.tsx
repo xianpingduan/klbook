@@ -64,6 +64,10 @@ export function App({ platform }: { platform: ClientPlatform }) {
   }
   async function signedIn(result: SessionResult) {
     setNotice(await api!.remember(result) ? '' : '此浏览器无法保存登录状态；本次可以使用，关闭后需重新登录。');
+    if (!result.recoveryCode) {
+      try { await api!.syncProgress(); }
+      catch (failure) { if (failure instanceof ApiError && failure.status === 401) throw failure; setNotice(`本机资料仍保留：${failure instanceof Error ? failure.message : '同步未完成，请核对后重试'}`); }
+    }
     setHome({ account: result.account, library: result.library, session: result.session });
     if (result.recoveryCode) { setRecoveryCode(result.recoveryCode); setScreen('save-code'); }
     else setScreen('home');

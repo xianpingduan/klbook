@@ -22,6 +22,7 @@ import type { ReadingMaterial } from '../shared/reading-materials.ts';
 import { RecognitionPanel } from './RecognitionPanel.tsx';
 import { recognitionScope, useCropRecognition } from './useCropRecognition.ts';
 import type { QuestionCheckpoint } from './question-journal.ts';
+import { CollectionFooter } from './CollectionFooter.tsx';
 
 export function QuestionEditor({ api, question: initialQuestion, proposedReading, subjects, sources, active, admin = false, creating = false, externalBusy = false, grant, pageCache, onSaved, onCurrent, onBack, onCancelled, onAccessError, onNewFromPage, onReading, onAnswers }: {
   api: FamilyApi; question: Question; subjects: Subject[]; sources: Source[]; active: boolean; admin?: boolean; creating?: boolean; grant?: string; pageCache: CaptureCache; onSaved(question: Question): void; onBack(): void; onNewFromPage(page: OriginalPage): void; onAccessError(error: ApiError): Promise<void>;
@@ -32,12 +33,12 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
   onCurrent(question: Question): void;
   proposedReading?: ReadingMaterial;
 }) {
-  const [local] = useState(() => {
+  const [local, setLocal] = useState(() => {
     try { return { journal: !admin && !creating ? api.questionJournal(initialQuestion.id) : undefined, error: '' }; }
     catch (failure) { return { journal: undefined, error: failure instanceof Error ? failure.message : '本机整理进度无法读取' }; }
   });
   const restored = useRef(local.journal?.read()).current;
-  const [question, setQuestion] = useState(restored?.checkpoint.current ?? initialQuestion);
+  const [question, setQuestion] = useState(() => restored ? { ...restored.checkpoint.current, state: initialQuestion.state === 'collected' ? 'collected' as const : restored.checkpoint.current.state } : initialQuestion);
   const recordId = useRef(initialQuestion.id);
   const [fields, setFields] = useState(() => ({ ...(restored?.fields ?? editable(question)), ...(proposedReading ? { readingMaterialId: proposedReading.id } : {}) }));
   const [busy, setBusy] = useState(false);
@@ -58,7 +59,7 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
     local.journal.write({ version: 1, ...currentEdit.current, checkpoint: value, updatedAt: Date.now() });
   }
   const [originalOpen, setOriginalOpen] = useState(false);
-  const [selectedPart, setSelectedPart] = useState(question.parts[0]!.id);
+  const [selectedPart, setSelectedPart] = useState(() => (fields.parts.find(part => !validQuestionRegion(part.region)) ?? fields.parts[0]!).id);
   const automaticRecognition = useCropRecognition(api, grant);
   function nextStep() { setStep('confirm'); automaticRecognition.start(fields.parts); }
   const cancelOperation = useRef<{ operationId: string; expectedRevision: number; cancelled: true } | undefined>(undefined);
@@ -75,7 +76,7 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
       const { expectedRevision, ...creation } = input;
       const result = expectedRevision === 0 && creating
         ? await api.createQuestion(input.parts[0]!.pageId, creation, grant)
-        : await api.saveQuestion(recordId.current, input, grant);
+        : await api.saveQuestion(recordId.current, input, grant, !admin);
       recordId.current = result.id;
       return result;
     }, checkpoint: local.journal ? { initial: restored?.checkpoint, write: checkpoint } : undefined,
@@ -153,12 +154,14 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
         const saved = await saver.save(questionContent(fields, 'draft'), true);
         setQuestion(saved); onCurrent(saved); baseline.current = JSON.stringify(editable(saved));
         await append.committed(saved);
+        if (saved.syncState === 'pending') throw new Error('本机进度已保留，恢复家庭电脑连接后再取消，以便保留可撤销的完整内容');
         cancelOperation.current = { operationId: crypto.randomUUID(), expectedRevision: saved.revision, cancelled: true };
       }
       await api.cancelDraft(recordId.current, cancelOperation.current, grant);
       local.journal?.complete(); completed.current = true;
       leave.complete(onCancelled);
     } catch (failure) {
+      if (!cancelOperation.current) paused.current = false;
       setError(`${failure instanceof Error ? failure.message : '取消未完成'}。材料仍保留，请重试取消或返回列表核对。`);
       if (failure instanceof ApiError && [401, 403].includes(failure.status)) await onAccessError(failure);
       if (failure instanceof ApiError && failure.status === 409) { cancelOperation.current = undefined; paused.current = false; await conflict.show(); }
@@ -168,9 +171,18 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
     const latest = conflict.current;
     if (!latest || editingLocked || !active) return;
     saver.adopt(latest); setQuestion(latest); baseline.current = JSON.stringify(editable(latest));
+    try { checkpoint(saver.snapshot()); } catch (failure) { setLocalError(failure instanceof Error ? failure.message : '本机进度未能保存'); }
     if (!creating) onCurrent(latest);
     if (!keep) { setFields(editable(latest)); setSelectedPart(latest.parts[0]!.id); setStep(latest.region ? 'confirm' : 'crop'); }
     conflict.clear(); setError(''); setNotice(keep ? '本次编辑已保留。请合并需要的信息，再保存。' : '已采用资料库当前版本。');
+  }
+  function editRelated(proceed: () => void) {
+    if (admin || question.state === 'collected') { leave.requestLeave(proceed); return; }
+    void save('draft').then(saved => {
+      if (!saved) return;
+      if (api.offline) { setError('本机进度已保留；恢复家庭电脑连接后可整理阅读材料和纸质答案。'); return; }
+      local.journal?.complete(); completed.current = true; leave.complete(proceed);
+    });
   }
   const validRegion = fields.parts.every(part => validQuestionRegion(part.region));
   const recognitionPart = fields.parts.find(part => part.id === selectedPart) ?? fields.parts[0]!;
@@ -180,28 +192,55 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
     onText={text => setFields(current => ({ ...current, parts: current.parts.map(part => part.id === recognitionPart.id ? { ...part, transcription: text } : part) }))}
     onAdopt={(run, candidate) => setFields(current => ({ ...current, subjectId: candidate.subjectId ?? current.subjectId, questionNumber: candidate.questionNumber || current.questionNumber,
       parts: current.parts.map(part => part.id === recognitionPart.id ? { ...part, region: candidate.region, transcription: candidate.text, recognition: { runId: run.id, candidateId: candidate.id } } : part) }))} />;
-  const crop = <QuestionPartsEditor api={api} parts={fields.parts} selectedId={selectedPart} onSelect={setSelectedPart} onChange={parts => setFields(current => ({ ...current, parts }))} disabled={editingLocked || !active} />;
   const addition = <div className="page-addition">
     {append.error && <p className="message error" role="alert">{append.error}</p>}
-    {append.capture ? <><p className="hint">{append.capture.name} · {append.appended ? '图片已上传，保存题目后完成关联。' : '图片已在本机保留，可重试继续。'}</p>{!append.appended && <><button className="quiet" disabled={editingLocked || !active} onClick={append.retry}>{append.capture.replacePartId ? '重试换图' : `继续追加 ${append.capture.name}`}</button><button className="quiet" disabled={editingLocked || !active} onClick={append.cancel}>{append.capture.replacePartId ? '放弃换图' : '取消追加'}</button></>}</> : <CaptureInput label="追加跨页图片" multiple={false} busy={editingLocked || !active || creating || fields.parts.length >= 50} onChoose={append.choose} onCancel={() => {}} />}
+    {append.capture ? <><p className="hint">{append.capture.name} · {append.appended ? '图片已准备，整理进度会保留关联。' : '图片已在本机保留，可重试继续。'}</p>{!append.appended && <><button className="quiet" disabled={editingLocked || !active} onClick={append.retry}>{append.capture.replacePartId ? '重试换图' : `继续追加 ${append.capture.name}`}</button><button className="quiet" disabled={editingLocked || !active} onClick={append.cancel}>{append.capture.replacePartId ? '放弃换图' : '取消追加'}</button></>}</> : <CaptureInput label="追加跨页图片" multiple={false} busy={editingLocked || !active || creating || fields.parts.length >= 50} onChoose={append.choose} onCancel={() => {}} />}
     <p className="hint">{creating ? '先保存本题，再追加跨页图片。' : '一次追加一页，保存后可继续追加。每道题最多 50 个题目区；图片限制与收集入口相同。'}</p>
   </div>;
+  const crop = <QuestionPartsEditor api={api} parts={fields.parts} selectedId={selectedPart} onSelect={setSelectedPart} onChange={parts => setFields(current => ({ ...current, parts }))} disabled={editingLocked || !active} compact={!admin} extraTools={!admin ? <>{addition}{recognition}</> : undefined} />;
+  const metadata = <>
+    <label>来源（选填）<select value={fields.sourceId ?? ''} onChange={event => setFields(current => ({ ...current, sourceId: event.target.value || null }))}>
+      <option value="">暂不填写</option>
+      {question.sourceId && !sources.some(source => source.id === question.sourceId) && <option value={question.sourceId} disabled>{question.source}（已停用）</option>}
+      {sources.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}
+    </select></label>
+    <label>备注（选填）<textarea value={fields.note} maxLength={2000} rows={3} onChange={event => setFields(current => ({ ...current, note: event.target.value }))} placeholder="想说什么都可以，也可以先留空" /></label>
+    <StudyStageFields value={fields.studyStage} onChange={studyStage => setFields(current => ({ ...current, studyStage }))} />
+    <div className="two-fields"><label>页码（选填）<input value={fields.pageNumber} maxLength={32} onChange={event => setFields(current => ({ ...current, pageNumber: event.target.value }))} /></label><label>题号（选填）<input value={fields.questionNumber} maxLength={32} onChange={event => setFields(current => ({ ...current, questionNumber: event.target.value }))} /></label></div>
+  </>;
+  const more = <>
+    {!admin && addition}
+    <ReadingMaterialPicker api={api} grant={grant} active={active} current={question.readingMaterial} value={fields.readingMaterialId} onChange={readingMaterialId => setFields(current => ({ ...current, readingMaterialId }))} onAccessError={onAccessError} />
+    <div className="reading-actions"><button className="quiet" disabled={creating} onClick={() => editRelated(() => onReading(null))}>从原始页新建阅读材料</button>{question.readingMaterial && <button className="quiet" disabled={creating || fields.readingMaterialId !== question.readingMaterial.id} onClick={() => editRelated(() => onReading(question.readingMaterial!.id))}>编辑已关联原文</button>}</div>
+    <button className="quiet" disabled={creating} onClick={() => editRelated(onAnswers)}>{question.answerParts.length ? '整理纸质答案' : '补充纸质答案'}</button>
+    <p className="hint">{creating ? '先保存本题，再补充阅读材料或答案。' : '答案可以以后补充，不影响先收集题目。'}</p>
+  </>;
+  const primary = step === 'crop'
+    ? <button disabled={editingLocked || !active || !validRegion} onClick={nextStep}>下一步，选学科</button>
+    : <button disabled={editingLocked || !active || !fields.subjectId || !validRegion} onClick={() => void save('collected')}>{busy ? '正在保存…' : question.state === 'draft' ? '保存到错题集' : '保存修改'}</button>;
+  const backButton = <button className="quiet" disabled={working} onClick={() => leave.requestLeave(onBack)}>返回列表</button>;
+  const cancelMenu = question.state === 'draft' && <details className="editor-more" open={admin ? true : undefined}><summary hidden={admin}>更多操作</summary><div><button className="quiet" disabled={working || !active || conflict.open} onClick={() => void cancelCurrent()}>取消本次</button><p className="hint">取消后可在“已取消的收集”中撤销。</p></div></details>;
   return <section className="card collection-card question-editor">
-    <div className="section-heading"><div><p className="eyebrow">{admin ? '资料整理' : step === 'crop' ? '第 1 步 · 确认题目范围' : '第 2 步 · 确认信息'} · {question.state === 'draft' ? '草稿' : '已收集'}</p><h1>{admin ? '错题资料详情' : step === 'crop' ? '框住这道题' : question.state === 'draft' ? '确认并保存' : '补充或更正信息'}</h1>{admin && <p className="hint">{question.collectedAt ? '收集于' : '暂存于'} {new Date(question.collectedAt ?? question.createdAt).toLocaleString('zh-CN')}</p>}</div><button className="quiet" disabled={working} onClick={() => leave.requestLeave(onBack)}>返回列表</button></div>
+    {!admin && <div className="editor-navigation">{backButton}{cancelMenu}</div>}
+    <div className="section-heading"><div><p className="eyebrow">{admin ? '资料整理' : step === 'crop' ? '第 1 步 · 确认题目范围' : '第 2 步 · 确认信息'} · {question.state === 'draft' ? '草稿' : '已收集'}</p><h1>{admin ? '错题资料详情' : step === 'crop' ? '框住这道题' : question.state === 'draft' ? '确认并保存' : '补充或更正信息'}</h1>{admin && <p className="hint">{question.collectedAt ? '收集于' : '暂存于'} {new Date(question.collectedAt ?? question.createdAt).toLocaleString('zh-CN')}</p>}</div>{admin && backButton}</div>
     {error && !leave.leaving && <p role="alert" className="message error">{error}</p>}
-    {localError && <p role="alert" className="message error">{localError}<button className="quiet" onClick={() => { try { checkpoint(saver.snapshot()); setLocalError(''); setProgress('已在本机保留'); } catch (failure) { setLocalError((failure as Error).message); } }}>重试本机保存</button></p>}
+    {localError && <p role="alert" className="message error">{localError}<button className="quiet" onClick={() => {
+      try {
+        const journal = local.journal ?? api.questionJournal(recordId.current);
+        journal.write({ version: 1, ...currentEdit.current, checkpoint: saver.snapshot(), updatedAt: Date.now() });
+        setLocal({ journal, error: '' }); setLocalError(''); setProgress('已在本机保留');
+      } catch (failure) { setLocalError(failure instanceof Error ? failure.message : '本机进度未能保存，请保留页面后重试'); }
+    }}>重试本机保存</button></p>}
     {local.journal && progress && !localError && <p role="status" className="draft-progress">{progress}</p>}
     {notice && !dirty && <p role="status" className="message">{notice}</p>}
-    <div className="material-actions">
-      {step === 'crop' && <CaptureInput label="换图" multiple={false} busy={editingLocked || !active || creating || (!!append.capture && !append.appended)} onChoose={files => append.choose(files, selectedPart)} onCancel={() => {}} />}
-      {question.state === 'draft' && <button className="quiet" disabled={working || !active || conflict.open} onClick={() => void cancelCurrent()}>取消本次</button>}
-    </div>
+    {admin && cancelMenu}
     {leave.dialog}
     {conflict.open && <SaveConflict current={conflict.current && <ConflictQuestionView api={api} question={conflict.current} subjects={subjects} sources={sources} />}
       local={<ConflictQuestionView api={api} question={question} fields={fields} subjects={subjects} sources={sources} />}
       loading={conflict.loading} error={conflict.error} disabled={editingLocked || !active} onRefresh={() => void conflict.refresh()} onKeep={() => resolveConflict(true)} onAdopt={() => resolveConflict(false)} />}
     {admin && !creating && question.state === 'collected' && <NewQuestionFromPage parts={question.parts} disabled={editingLocked || !active} onChoose={page => leave.requestLeave(() => onNewFromPage(page))} />}
-    {!admin && step === 'crop' ? <div className="crop-step">{crop}{recognition}{addition}<div className="save-actions"><button disabled={editingLocked || !validRegion} onClick={nextStep}>下一步，选学科</button>{question.state === 'draft' && <button className="quiet" disabled={editingLocked} onClick={() => void save('draft')}>保存草稿</button>}</div></div> : <div className="editor-grid">
+    {step === 'crop' && <div className="change-picture"><CaptureInput label="换图" multiple={false} busy={editingLocked || !active || creating || (!!append.capture && !append.appended)} onChoose={files => append.choose(files, selectedPart)} onCancel={() => {}} /></div>}
+    {!admin && step === 'crop' ? <div className="crop-step">{crop}{append.error && <p className="message error" role="alert">{append.error}</p>}</div> : <div className="editor-grid">
       <section className="confirmation-material" aria-label="题目与原始页">
         {admin && step === 'crop' ? <>{crop}<button className="quiet" disabled={editingLocked || !validRegion} onClick={nextStep}>确认题目范围</button></> : <>
           <QuestionParts api={api} parts={originalOpen ? [...fields.parts, ...question.answerParts, ...(question.readingMaterial?.parts ?? [])] : fields.parts} original={originalOpen} />
@@ -209,28 +248,18 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
           {!originalOpen && <AnswerView api={api} parts={question.answerParts} />}
           <div className="material-actions"><button className="quiet" disabled={editingLocked} onClick={() => { setOriginalOpen(false); setStep('crop'); }}>调整题目范围</button>{admin && <button className="quiet" onClick={() => setOriginalOpen(value => !value)}>{originalOpen ? '查看题目区' : '查看原始页'}</button>}</div>
         </>}
-        {recognition}{addition}
+        {admin && <>{recognition}{addition}</>}
       </section>
       <div><fieldset disabled={editingLocked || !active}>
         <label>学科<select value={fields.subjectId ?? ''} onChange={event => setFields(current => ({ ...current, subjectId: event.target.value || null }))}><option value="">请选择</option>{subjects.map(subject => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></label>
         <p className="hint">确认范围和学科就可以收集，答案和总结可以以后再补。</p>
-        <h2>顺手记一点（选填）</h2>
-        <StudyStageFields value={fields.studyStage} onChange={studyStage => setFields(current => ({ ...current, studyStage }))} />
-        <p className="hint">填写材料实际所属的学习阶段；更正不会改变收集日期。</p>
-        <label>来源（选填）<select value={fields.sourceId ?? ''} onChange={event => setFields(current => ({ ...current, sourceId: event.target.value || null }))}>
-          <option value="">暂不填写</option>
-          {question.sourceId && !sources.some(source => source.id === question.sourceId) && <option value={question.sourceId} disabled>{question.source}（已停用）</option>}
-          {sources.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}
-        </select></label>
-        <div className="two-fields"><label>页码（选填）<input value={fields.pageNumber} maxLength={32} onChange={event => setFields(current => ({ ...current, pageNumber: event.target.value }))} /></label><label>题号（选填）<input value={fields.questionNumber} maxLength={32} onChange={event => setFields(current => ({ ...current, questionNumber: event.target.value }))} /></label></div>
-        <label>备注（选填）<textarea value={fields.note} maxLength={2000} rows={3} onChange={event => setFields(current => ({ ...current, note: event.target.value }))} placeholder="想说什么都可以，也可以先留空" /></label>
-        <ReadingMaterialPicker api={api} grant={grant} active={active} current={question.readingMaterial} value={fields.readingMaterialId} onChange={readingMaterialId => setFields(current => ({ ...current, readingMaterialId }))} onAccessError={onAccessError} />
-        <div className="reading-actions"><button className="quiet" disabled={creating} onClick={() => leave.requestLeave(() => onReading(null))}>从原始页新建阅读材料</button>{question.readingMaterial && <button className="quiet" disabled={creating || fields.readingMaterialId !== question.readingMaterial.id} onClick={() => leave.requestLeave(() => onReading(question.readingMaterial!.id))}>编辑已关联原文</button>}</div>
-        {creating && <p className="hint">可先选已有原文；新建阅读材料需先保存本题。</p>}
-        <button className="quiet" disabled={creating} onClick={() => leave.requestLeave(onAnswers)}>{question.answerParts.length ? '整理纸质答案' : '补充纸质答案'}</button>
-        <p className="hint">{creating ? '先保存本题，再补充纸质答案。' : '答案可以以后补充，不影响先收集题目。'}</p>
-        <div className="save-actions">{question.state === 'draft' && <button className="quiet" onClick={() => void save('draft')}>保存草稿</button>}<button disabled={!fields.subjectId || !validRegion} onClick={() => void save('collected')}>{busy ? '正在保存…' : question.state === 'draft' ? '保存到错题集' : '保存修改'}</button></div>
+        {admin ? <>{metadata}{more}<div className="save-actions">{question.state === 'draft' && <button className="quiet" onClick={() => void save('draft')}>保存草稿</button>}<button disabled={!fields.subjectId || !validRegion} onClick={() => void save('collected')}>{busy ? '正在保存…' : question.state === 'draft' ? '保存到错题集' : '保存修改'}</button></div></> : <>
+          <details className="optional-info"><summary>补充信息<span>来源、备注、学习阶段</span></summary>{metadata}</details>
+          <details className="optional-info"><summary>更多整理<span>跨页、阅读材料、纸质答案</span></summary>{more}</details>
+          {recognition}
+        </>}
       </fieldset></div>
     </div>}
+    {!admin && <CollectionFooter>{primary}</CollectionFooter>}
   </section>;
 }
