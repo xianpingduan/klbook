@@ -89,7 +89,7 @@ test('收集调用超过最近记录上限后，后台仍保留当前配置的�
     await f.app.inject({ method: 'PUT', url: `/api/v1/collection/pages/${pageId}/recognitions/${randomUUID()}`, headers });
     await completed(f, pageId);
     for (let i = 0; i < 20; i++) {
-      assert.equal((await f.app.inject({ method: 'PUT', url: `/api/v1/collection/pages/${pageId}/recognitions/${randomUUID()}`, headers })).statusCode, 202);
+      assert.equal((await f.app.inject({ method: 'PUT', url: `/api/v1/collection/pages/${pageId}/recognitions/${randomUUID()}`, headers, payload: { region: { x: 0, y: 0, width: 1, height: 1 - i * .01 } } })).statusCode, 202);
       await completed(f, pageId);
     }
     const data = (await f.app.inject({ url: '/api/v1/admin/ocr', headers: parent })).json();
@@ -98,6 +98,10 @@ test('收集调用超过最近记录上限后，后台仍保留当前配置的�
     assert.equal(data.latestSample?.id, sampleId);
     assert.equal(data.latestSample.status, 'succeeded');
     assert.equal(data.usage.attempts, 22);
+    const earlier = await f.app.inject({ url: `/api/v1/collection/pages/${pageId}/recognitions?region=null`, headers });
+    assert.equal(earlier.statusCode, 200);
+    assert.equal(earlier.json().runs.length, 1, '按当前范围筛选之后再截取最近记录，较早的范围仍能找回');
+    assert.equal(earlier.json().runs[0].inputRegion, null);
   } finally { await f.close(); }
 });
 async function completed(f: Awaited<ReturnType<typeof familyFixture>>, pageId: string) {

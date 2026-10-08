@@ -22,7 +22,7 @@ export function RecognitionPanel({ api, part, subjects, grant, disabled, refresh
     if (disabled) return;
     async function read() {
       try {
-        const next = await api.pageRecognitions(part.originalPage.id, grant);
+        const next = await api.pageRecognitions(part.originalPage.id, grant, part.region);
         if (!current) return;
         setData({ ...next, runs: next.runs.filter(run => recognitionScope(part.originalPage.id, run.inputRegion) === recognitionScope(part.originalPage.id, part.region)) }); setError('');
         if (next.runs.some(run => run.status === 'running')) timer = setTimeout(() => void read(), 700);

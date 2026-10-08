@@ -28,7 +28,7 @@ async function recognitionFixture(request: APIRequestContext, wait = async () =>
     return { url, headers, password, calls: () => calls, close: async () => { await app.close(); await rm(dataDir, { recursive: true, force: true }); } };
 }
 
-test('框题后后台识别，折叠建议按需采用；更正可追溯且重新识别不覆盖', async ({ page, request }) => {
+for (const manualFirst of [false, true]) test(`${manualFirst ? '框题时先主动识别' : '框题后后台识别'}，折叠建议按需采用；更正可追溯且重新识别不覆盖`, async ({ page, request }) => {
   const f = await recognitionFixture(request), { url, headers, password } = f;
   try {
     await page.goto(`${url}/learn/collect`);
@@ -41,6 +41,11 @@ test('框题后后台识别，折叠建议按需采用；更正可追溯且重�
     expect(f.calls()).toBe(0);
     await expect(page.getByLabel('题干文字（选填，可更正）')).not.toBeVisible();
     await page.getByRole('button', { name: '选择整页', exact: true }).click();
+    if (manualFirst) {
+      await page.getByText('识别文字（选看）', { exact: false }).click();
+      await page.getByRole('button', { name: '识别当前范围', exact: true }).click();
+      await expect(page.getByRole('button', { name: '选用候选题 1', exact: true })).toBeVisible();
+    }
     await page.getByRole('button', { name: '下一步，选学科' }).click();
     await page.getByText('识别文字（选看）', { exact: false }).click();
     await expect(page.getByRole('button', { name: '选用候选题 1', exact: true })).toBeVisible();

@@ -19,6 +19,11 @@ type SettingsRow = { revision: number; config: string };
 type RecognitionRow = Omit<PageRecognition, 'lines' | 'candidates' | 'inputRegion'> & { lines: string; candidates: string; inputRegion: string | null };
 const recognitionFields = 'id, revision, provider, sample, status, createdAt, finishedAt, durationMs, attempts, message, lines, pageId, inputWidth, inputHeight, candidates, inputRegion';
 const recognitionResult = (row: RecognitionRow): PageRecognition => ({ ...row, lines: JSON.parse(row.lines), candidates: JSON.parse(row.candidates), inputRegion: row.inputRegion ? JSON.parse(row.inputRegion) : null });
+function normalizeRegion(region: Region | null) {
+  if (region === null) return null;
+  if (!validQuestionRegion(region)) throw new AccessError(422, '请先确认图片内的题目范围');
+  return { x: region.x, y: region.y, width: region.width, height: region.height };
+}
 export class OcrService {
   private db: Database.Database;
   private vault: CredentialVault;
@@ -36,12 +41,14 @@ export class OcrService {
     db.prepare('UPDATE ocrTests SET status = \'interrupted\', finishedAt = ?, message = ? WHERE status = \'running\'').run(now(), '电脑服务曾中断，结果不确定；不会自动重新发送');
     db.prepare('UPDATE serviceAttempts SET status = \'unknown\', finishedAt = ?, message = ? WHERE capability = \'ocr\' AND status = \'running\'').run(now(), '服务中断，保留估算费用');
   }
-  pageRuns(authorize: () => Home, pageId: string): PageRecognitions {
+  pageRuns(authorize: () => Home, pageId: string, region?: Region | null): PageRecognitions {
     const home = authorize(); this.collection.publicPage(home.library.id, pageId);
     const { config, credentialAvailable } = this.settings();
+    const filter = region === undefined ? '' : ' AND inputRegion IS ?';
+    const parameters = [home.library.id, pageId, ...(region === undefined ? [] : [region === null ? null : JSON.stringify(normalizeRegion(region))])];
     return { initialMessage: this.db.prepare<[string], { message: string }>('SELECT message FROM initialPageRecognition WHERE pageId = ?').get(pageId)?.message ?? '',
       service: { provider: config.provider, enabled: config.enabled, available: credentialAvailable, formulas: config.provider === 'baidu' && config.formulas },
-      runs: this.db.prepare<[string, string], RecognitionRow>(`SELECT ${recognitionFields} FROM ocrTests WHERE libraryId = ? AND pageId = ? ORDER BY createdAt DESC, rowid DESC LIMIT 20`).all(home.library.id, pageId).map(recognitionResult) };
+      runs: this.db.prepare<(string | null)[], RecognitionRow>(`SELECT ${recognitionFields} FROM ocrTests WHERE libraryId = ? AND pageId = ?${filter} ORDER BY createdAt DESC, rowid DESC LIMIT 20`).all(...parameters).map(recognitionResult) };
   }
   pageRun(authorize: () => Home, pageId: string, id: string) {
     const home = authorize(); this.collection.publicPage(home.library.id, pageId);
@@ -50,8 +57,8 @@ export class OcrService {
     return recognitionResult(row);
   }
   startPage(authorize: () => Home, pageId: string, id: string, input: PageRecognitionRequest = {}) {
-    if ((input.region && !validQuestionRegion(input.region)) || (input.automatic && !input.region)) throw new AccessError(422, '请先确认图片内的题目范围');
-    const region = input.region ? { x: input.region.x, y: input.region.y, width: input.region.width, height: input.region.height } : null;
+    const region = normalizeRegion(input.region ?? null);
+    if (input.automatic && !region) throw new AccessError(422, '请先确认图片内的题目范围');
     const regionKey = region ? JSON.stringify(region) : null;
     let resultId = id;
     this.db.transaction(() => {
@@ -64,6 +71,12 @@ export class OcrService {
       if (input.automatic) {
         const initial = this.db.prepare<[string, string], { runId: string }>('SELECT runId FROM automaticRegionRecognitions WHERE pageId = ? AND region = ?').get(pageId, regionKey!);
         if (initial) { resultId = initial.runId; return; }
+        // Next is not a request to pay again when this exact crop was already recognized explicitly.
+        const existing = this.db.prepare<[string, string], { id: string }>('SELECT id FROM ocrTests WHERE pageId = ? AND inputRegion = ? ORDER BY createdAt DESC, rowid DESC LIMIT 1').get(pageId, regionKey!);
+        if (existing) {
+          this.db.prepare('INSERT INTO automaticRegionRecognitions VALUES (?, ?, ?)').run(pageId, regionKey!, existing.id);
+          resultId = existing.id; return;
+        }
       }
       if (this.pendingCount >= 10 || this.stopping.signal.aborted) throw new AccessError(409, '待识别材料较多，可以先手动框题，稍后重试');
       if (this.db.prepare("SELECT 1 FROM ocrTests WHERE pageId = ? AND inputRegion IS ? AND status = 'running'").get(pageId, regionKey)) throw new AccessError(409, '这个范围正在识别，请等待读取结果');

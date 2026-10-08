@@ -10,6 +10,7 @@ import type { ConflictTarget } from '../shared/conflicts.ts';
 import type { OcrEdit, OcrSettings, OcrTest } from '../shared/ocr.ts';
 import type { PageRecognition, PageRecognitions, PageRecognitionRequest } from '../shared/ocr.ts';
 import type { DraftCancellation, DraftCancellationEdit } from '../shared/collection.ts';
+import type { Region } from '../shared/collection.ts';
 
 export class ApiError extends Error {
   status: number;
@@ -70,7 +71,7 @@ export class FamilyApi {
     return response.status === 204 ? undefined as T : response.json();
   }
   subjects() { return this.request<Subject[]>('/collection/subjects'); }
-  pageRecognitions(pageId: string, grant?: string) { return this.request<PageRecognitions>(`/collection/pages/${encodeURIComponent(pageId)}/recognitions`, 'GET', undefined, grant); }
+  pageRecognitions(pageId: string, grant?: string, region?: Region | null) { return this.request<PageRecognitions>(`/collection/pages/${encodeURIComponent(pageId)}/recognitions${region === undefined ? '' : `?region=${encodeURIComponent(JSON.stringify(region))}`}`, 'GET', undefined, grant); }
   pageRecognition(pageId: string, id: string, grant?: string) { return this.request<PageRecognition>(`/collection/pages/${encodeURIComponent(pageId)}/recognitions/${encodeURIComponent(id)}`, 'GET', undefined, grant); }
   recognizePage(pageId: string, id: string, grant?: string, input?: PageRecognitionRequest) { return this.request<PageRecognition>(`/collection/pages/${encodeURIComponent(pageId)}/recognitions/${encodeURIComponent(id)}`, 'PUT', input, grant); }
   ocrSettings(grant: string) { return this.request<OcrSettings>('/admin/ocr', 'GET', undefined, grant); }

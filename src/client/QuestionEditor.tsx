@@ -61,17 +61,18 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
       return result;
     }, conflictMessage: '这道题已在其他页面更新，请核对双方内容', conflictTarget: { entity: 'question', id: recordId.current } });
   const working = externalBusy || busy || append.busy || append.loading || conflict.loading;
+  const editingLocked = working || !!cancelOperation.current;
   const baseline = useRef(JSON.stringify(editable(question)));
   const dirty = JSON.stringify(fields) !== baseline.current;
   const leave = useEditorLeave({
-    dirty, busy: working, canSave: active, title: '还有未保存的修改', error,
+    dirty, busy: working, canSave: active && !cancelOperation.current, title: '还有未保存的修改', error,
     description: <><p>{question.state === 'draft' ? '保存后离开会保留为草稿，稍后可以继续整理。' : '保存后离开会更新这道错题，保留原来的收集时间。'}</p>{!active && <p className="message">管理验证已到期。选择继续编辑，重新验证家长身份后就能保存；也可以放弃本次修改并离开。</p>}</>,
     save: () => save(question.state),
     discard: () => { const saved = saver.discard(); setQuestion(saved); setFields(editable(saved)); baseline.current = JSON.stringify(editable(saved)); conflict.clear(); },
   });
 
   async function save(state: 'draft' | 'collected') {
-    if (!active || working || (admin && !grant)) return false;
+    if (!active || editingLocked || (admin && !grant)) return false;
     if (conflict.open) { setError('请先在冲突核对区选择处理方式，再保存。'); leave.dismiss(); return false; }
     setBusy(true); setError(''); setNotice('');
     const content = questionContent(fields, question.state === 'collected' ? 'collected' : state);
@@ -112,7 +113,7 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
   }
   function resolveConflict(keep: boolean) {
     const latest = conflict.current;
-    if (!latest || working || !active) return;
+    if (!latest || editingLocked || !active) return;
     saver.adopt(latest); setQuestion(latest); baseline.current = JSON.stringify(editable(latest));
     if (!creating) onCurrent(latest);
     if (!keep) { setFields(editable(latest)); setSelectedPart(latest.parts[0]!.id); setStep(latest.region ? 'confirm' : 'crop'); }
@@ -120,16 +121,16 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
   }
   const validRegion = fields.parts.every(part => validQuestionRegion(part.region));
   const recognitionPart = fields.parts.find(part => part.id === selectedPart) ?? fields.parts[0]!;
-  const recognition = <RecognitionPanel key={recognitionScope(recognitionPart.originalPage.id, recognitionPart.region)} api={api} part={recognitionPart} subjects={subjects} grant={grant} disabled={working || !active} onAccessError={onAccessError}
+  const recognition = <RecognitionPanel key={recognitionScope(recognitionPart.originalPage.id, recognitionPart.region)} api={api} part={recognitionPart} subjects={subjects} grant={grant} disabled={editingLocked || !active} onAccessError={onAccessError}
     refreshToken={automaticRecognition.refresh} backgroundMessage={automaticRecognition.messages[recognitionScope(recognitionPart.originalPage.id, recognitionPart.region)]}
     onRetryBackground={() => automaticRecognition.start([recognitionPart], true)}
     onText={text => setFields(current => ({ ...current, parts: current.parts.map(part => part.id === recognitionPart.id ? { ...part, transcription: text } : part) }))}
     onAdopt={(run, candidate) => setFields(current => ({ ...current, subjectId: candidate.subjectId ?? current.subjectId, questionNumber: candidate.questionNumber || current.questionNumber,
       parts: current.parts.map(part => part.id === recognitionPart.id ? { ...part, region: candidate.region, transcription: candidate.text, recognition: { runId: run.id, candidateId: candidate.id } } : part) }))} />;
-  const crop = <QuestionPartsEditor api={api} parts={fields.parts} selectedId={selectedPart} onSelect={setSelectedPart} onChange={parts => setFields(current => ({ ...current, parts }))} disabled={working || !active} />;
+  const crop = <QuestionPartsEditor api={api} parts={fields.parts} selectedId={selectedPart} onSelect={setSelectedPart} onChange={parts => setFields(current => ({ ...current, parts }))} disabled={editingLocked || !active} />;
   const addition = <div className="page-addition">
     {append.error && <p className="message error" role="alert">{append.error}</p>}
-    {append.capture ? <><p className="hint">{append.capture.name} · {append.appended ? '图片已上传，保存题目后完成关联。' : '图片已在本机保留，可重试继续。'}</p>{!append.appended && <><button className="quiet" disabled={working || !active} onClick={append.retry}>{append.capture.replacePartId ? '重试换图' : `继续追加 ${append.capture.name}`}</button><button className="quiet" disabled={working || !active} onClick={append.cancel}>{append.capture.replacePartId ? '放弃换图' : '取消追加'}</button></>}</> : <CaptureInput label="追加跨页图片" multiple={false} busy={working || !active || creating || fields.parts.length >= 50} onChoose={append.choose} onCancel={() => {}} />}
+    {append.capture ? <><p className="hint">{append.capture.name} · {append.appended ? '图片已上传，保存题目后完成关联。' : '图片已在本机保留，可重试继续。'}</p>{!append.appended && <><button className="quiet" disabled={editingLocked || !active} onClick={append.retry}>{append.capture.replacePartId ? '重试换图' : `继续追加 ${append.capture.name}`}</button><button className="quiet" disabled={editingLocked || !active} onClick={append.cancel}>{append.capture.replacePartId ? '放弃换图' : '取消追加'}</button></>}</> : <CaptureInput label="追加跨页图片" multiple={false} busy={editingLocked || !active || creating || fields.parts.length >= 50} onChoose={append.choose} onCancel={() => {}} />}
     <p className="hint">{creating ? '先保存本题，再追加跨页图片。' : '一次追加一页，保存后可继续追加。每道题最多 50 个题目区；图片限制与收集入口相同。'}</p>
   </div>;
   return <section className="card collection-card question-editor">
@@ -137,25 +138,25 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
     {error && !leave.leaving && <p role="alert" className="message error">{error}</p>}
     {notice && !dirty && <p role="status" className="message">{notice}</p>}
     <div className="material-actions">
-      {step === 'crop' && <CaptureInput label="换图" multiple={false} busy={working || !active || creating || (!!append.capture && !append.appended)} onChoose={files => append.choose(files, selectedPart)} onCancel={() => {}} />}
+      {step === 'crop' && <CaptureInput label="换图" multiple={false} busy={editingLocked || !active || creating || (!!append.capture && !append.appended)} onChoose={files => append.choose(files, selectedPart)} onCancel={() => {}} />}
       {question.state === 'draft' && <button className="quiet" disabled={working || !active || conflict.open} onClick={() => void cancelCurrent()}>取消本次</button>}
     </div>
     {leave.dialog}
     {conflict.open && <SaveConflict current={conflict.current && <ConflictQuestionView api={api} question={conflict.current} subjects={subjects} sources={sources} />}
       local={<ConflictQuestionView api={api} question={question} fields={fields} subjects={subjects} sources={sources} />}
-      loading={conflict.loading} error={conflict.error} disabled={working || !active} onRefresh={() => void conflict.refresh()} onKeep={() => resolveConflict(true)} onAdopt={() => resolveConflict(false)} />}
-    {admin && !creating && question.state === 'collected' && <NewQuestionFromPage parts={question.parts} disabled={working || !active} onChoose={page => leave.requestLeave(() => onNewFromPage(page))} />}
-    {!admin && step === 'crop' ? <div className="crop-step">{crop}{recognition}{addition}<div className="save-actions"><button disabled={working || !validRegion} onClick={nextStep}>下一步，选学科</button>{question.state === 'draft' && <button className="quiet" disabled={working} onClick={() => void save('draft')}>保存草稿</button>}</div></div> : <div className="editor-grid">
+      loading={conflict.loading} error={conflict.error} disabled={editingLocked || !active} onRefresh={() => void conflict.refresh()} onKeep={() => resolveConflict(true)} onAdopt={() => resolveConflict(false)} />}
+    {admin && !creating && question.state === 'collected' && <NewQuestionFromPage parts={question.parts} disabled={editingLocked || !active} onChoose={page => leave.requestLeave(() => onNewFromPage(page))} />}
+    {!admin && step === 'crop' ? <div className="crop-step">{crop}{recognition}{addition}<div className="save-actions"><button disabled={editingLocked || !validRegion} onClick={nextStep}>下一步，选学科</button>{question.state === 'draft' && <button className="quiet" disabled={editingLocked} onClick={() => void save('draft')}>保存草稿</button>}</div></div> : <div className="editor-grid">
       <section className="confirmation-material" aria-label="题目与原始页">
-        {admin && step === 'crop' ? <>{crop}<button className="quiet" disabled={working || !validRegion} onClick={nextStep}>确认题目范围</button></> : <>
+        {admin && step === 'crop' ? <>{crop}<button className="quiet" disabled={editingLocked || !validRegion} onClick={nextStep}>确认题目范围</button></> : <>
           <QuestionParts api={api} parts={originalOpen ? [...fields.parts, ...question.answerParts, ...(question.readingMaterial?.parts ?? [])] : fields.parts} original={originalOpen} />
           {!originalOpen && question.readingMaterial && fields.readingMaterialId === question.readingMaterial.id && <ReadingMaterialView api={api} material={question.readingMaterial} />}
           {!originalOpen && <AnswerView api={api} parts={question.answerParts} />}
-          <div className="material-actions"><button className="quiet" disabled={working} onClick={() => { setOriginalOpen(false); setStep('crop'); }}>调整题目范围</button>{admin && <button className="quiet" onClick={() => setOriginalOpen(value => !value)}>{originalOpen ? '查看题目区' : '查看原始页'}</button>}</div>
+          <div className="material-actions"><button className="quiet" disabled={editingLocked} onClick={() => { setOriginalOpen(false); setStep('crop'); }}>调整题目范围</button>{admin && <button className="quiet" onClick={() => setOriginalOpen(value => !value)}>{originalOpen ? '查看题目区' : '查看原始页'}</button>}</div>
         </>}
         {recognition}{addition}
       </section>
-      <div><fieldset disabled={working || !active}>
+      <div><fieldset disabled={editingLocked || !active}>
         <label>学科<select value={fields.subjectId ?? ''} onChange={event => setFields(current => ({ ...current, subjectId: event.target.value || null }))}><option value="">请选择</option>{subjects.map(subject => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></label>
         <p className="hint">确认范围和学科就可以收集，答案和总结可以以后再补。</p>
         <h2>顺手记一点（选填）</h2>

@@ -35,7 +35,12 @@ for (const lostReceipt of [false, true]) test(`原地换图${lostReceipt ? '丢�
     await page.getByLabel('备注（选填）').fill('保留我的填写');
     if (lostReceipt) await page.route('**/api/v1/collection/questions/*/cancellation', async route => { await route.fetch(); await route.abort(); }, { times: 1 });
     await page.getByRole('button', { name: '取消本次', exact: true }).click();
-    if (lostReceipt) { await expect(page.getByRole('alert')).toContainText('仍保留'); await page.getByRole('button', { name: '取消本次', exact: true }).click(); }
+    if (lostReceipt) {
+      await expect(page.getByRole('alert')).toContainText('仍保留');
+      await expect(page.getByLabel('备注（选填）')).toBeDisabled();
+      await expect(page.getByRole('button', { name: '保存到错题集', exact: true })).toBeDisabled();
+      await page.getByRole('button', { name: '取消本次', exact: true }).click();
+    }
     await expect(page.getByText('已取消本次收集，材料仍保留。', { exact: true })).toBeVisible();
     expect((await (await request.get(`${server.url}/api/v1/collection/questions?state=draft`, { headers })).json()).total).toBe(0);
     await page.reload();

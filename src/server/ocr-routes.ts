@@ -3,6 +3,8 @@ import type { FamilyAccess } from './family-access.ts';
 import type { OcrService } from './ocr-service.ts';
 import type { OcrEdit, PageRecognitionRequest } from '../shared/ocr.ts';
 import { ocrSample } from './ocr-sample.ts';
+import { AccessError } from './family-access.ts';
+import type { Region } from '../shared/collection.ts';
 
 export function ocrRoutes(app: FastifyInstance, access: FamilyAccess, ocr: OcrService) {
   app.register(async routes => {
@@ -12,7 +14,13 @@ export function ocrRoutes(app: FastifyInstance, access: FamilyAccess, ocr: OcrSe
     };
     const params = { type: 'object', required: ['pageId'], properties: { pageId: { type: 'string', format: 'uuid' }, id: { type: 'string', format: 'uuid' } } };
     routes.addHook('onRequest', async request => { authorize(request.headers); });
-    routes.get<{ Params: { pageId: string } }>('/:pageId/recognitions', { schema: { params } }, async request => ocr.pageRuns(() => authorize(request.headers), request.params.pageId));
+    routes.get<{ Params: { pageId: string }; Querystring: { region?: string } }>('/:pageId/recognitions', { schema: { params, querystring: { type: 'object', additionalProperties: false, properties: { region: { type: 'string', maxLength: 256 } } } } }, async request => {
+      let region: Region | null | undefined;
+      if (request.query.region !== undefined) {
+        try { region = JSON.parse(request.query.region); } catch { throw new AccessError(422, '题目范围格式不正确'); }
+      }
+      return ocr.pageRuns(() => authorize(request.headers), request.params.pageId, region);
+    });
     routes.get<{ Params: { pageId: string; id: string } }>('/:pageId/recognitions/:id', { schema: { params } }, async request => ocr.pageRun(() => authorize(request.headers), request.params.pageId, request.params.id));
     routes.put<{ Params: { pageId: string; id: string }; Body: PageRecognitionRequest | undefined }>('/:pageId/recognitions/:id', { preValidation: async request => { if (request.body === undefined) request.body = {}; }, schema: { params, body: {
       type: 'object', additionalProperties: false, properties: { automatic: { type: 'boolean' }, region: { type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], properties: { x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' } } } }
