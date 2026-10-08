@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { FormEvent } from 'react';
 import type { Home, ParentGrant } from '../shared/contracts.ts';
 import type { PagePath } from '../shared/app-routes.ts';
@@ -13,11 +13,13 @@ import { DeviceManager } from './DeviceManager.tsx';
 import { StudyManager } from './StudyManager.tsx';
 import { OcrManager } from './OcrManager.tsx';
 import { LeaveContext } from './navigation.ts';
+import { OfflinePreparation } from './OfflinePreparation.tsx';
 
 export function AuthenticatedWorkspace({ api, home, platform, path, navigate, onSignedOut, onRecoveryCode, onConnection, notice }: {
   api: FamilyApi; home: Home; platform: ClientPlatform; path: PagePath; navigate(path: PagePath): void; onSignedOut(): Promise<void>; onRecoveryCode(code: string): void; onConnection(): void; notice: string;
 }) {
   const [grant, setGrant] = useState<ParentGrant>();
+  const offline = useSyncExternalStore(api.subscribe, api.snapshot);
   const sessionActive = useRef(true);
   useEffect(() => { sessionActive.current = true; return () => { sessionActive.current = false; }; }, []);
   // Accepted device operations may finish after the management view expires.
@@ -59,7 +61,7 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
     if (path !== '/learn/mine') return;
     let active = true;
     setConnection('正在检查连接…');
-    void api.home().then(() => { if (active) setConnection('家庭资料库已连接'); }).catch(async failure => {
+    void api.home().then(() => { if (active) setConnection(api.offline ? '暂时无法连接家庭电脑' : '家庭资料库已连接'); }).catch(async failure => {
       if (!active) return;
       if (failure instanceof ApiError && failure.status === 401) await onSignedOut();
       else setConnection('暂时无法连接家庭电脑');
@@ -83,6 +85,7 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
   const lock = () => requestLeave(() => void run(async () => { if (grant) await api.lock(grant.token); setGrant(undefined); navigate('/learn'); }));
   return <SurfaceLayout path={path} navigate={navigate} authenticated managing={!!grant} editing={collectionVisible && collecting} busy={busy} onLock={lock}>
     {notice && <p className="message" role="status">{notice}</p>}
+    {offline && <p className="message offline-notice" role="status">家庭电脑暂时无法连接。当前仅显示本机已保留的资料，整理进度先存本机。<button className="quiet" disabled={busy} onClick={() => requestLeave(() => window.location.reload())}>重新连接</button></p>}
     {error && <p className="message error" role="alert">{error}</p>}
     {admin && !grant && <section className="card auth-card"><p className="eyebrow">家长管理</p><h1>验证家长身份</h1><p>管理权限在 5 分钟后自动结束。孩子的日常会话不会获得管理权限。</p><form onSubmit={unlock}><fieldset disabled={busy}><label>家长密码<input type="password" name="password" autoComplete="current-password" required minLength={12} maxLength={128} /></label><button type="submit">验证并进入管理</button></fieldset></form><button className="quiet" disabled={busy} onClick={() => { setError(''); navigate('/learn'); }}>返回错题集</button></section>}
     {path === '/admin' && grant && <AdminOverview api={api} grant={grant.token} onAccessError={accessError} />}
@@ -101,5 +104,6 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
       {ocrStarted && <OcrManager api={api} grant={grant?.token} active={path === '/admin/services/ocr'} onAccessError={accessError} />}
     </div>
     {path === '/learn/mine' && <section className="card"><h1>我的</h1><p role="status">{connection}</p><dl><div><dt>学习者</dt><dd>{home.library.learnerName}</dd></div><div><dt>家长账号</dt><dd>{home.account.username}</dd></div><div><dt>当前设备</dt><dd>{home.session.deviceName}</dd></div></dl><details open><summary>资料库身份</summary><code data-testid="library-id">{home.library.id}</code></details><button className="quiet" disabled={busy} onClick={onConnection}>连接设置</button><button onClick={() => { setError(''); navigate('/admin'); }}>家长管理</button><button className="quiet" disabled={busy} onClick={() => void run(async () => { await api.logout(); await onSignedOut(); })}>退出此设备</button></section>}
+    {path === '/learn/mine' && <OfflinePreparation />}
   </SurfaceLayout>;
 }

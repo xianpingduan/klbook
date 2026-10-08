@@ -11,6 +11,13 @@ import type { OcrEdit, OcrSettings, OcrTest } from '../shared/ocr.ts';
 import type { PageRecognition, PageRecognitions, PageRecognitionRequest } from '../shared/ocr.ts';
 import type { DraftCancellation, DraftCancellationEdit } from '../shared/collection.ts';
 import type { Region } from '../shared/collection.ts';
+import { QuestionJournal } from './question-journal.ts';
+import { LocalLibrary } from './local-library.ts';
+import { OfflineCaptures } from './offline-captures.ts';
+import { questionContent, questionFields } from './question-edit.ts';
+import type { QuestionProgress } from './question-journal.ts';
+
+export class ConnectionError extends Error {}
 
 export class ApiError extends Error {
   status: number;
@@ -22,11 +29,27 @@ export class FamilyApi {
   private platform: ClientPlatform;
   private target: string;
   private credential: SavedCredential | null;
+  private disconnected = false;
+  private listeners = new Set<() => void>();
+  get offline() { return this.disconnected; }
+  subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
+  snapshot = () => this.disconnected;
+  private connection(offline: boolean) { if (this.disconnected !== offline) { this.disconnected = offline; this.listeners.forEach(fn => fn()); } }
+  private get local() { return this.credential ? new LocalLibrary(this.platform, this.credential) : undefined; }
+  private get captures() { return this.credential ? new OfflineCaptures(this.platform, this.credential) : undefined; }
+  private syncing?: Promise<void>;
+  private remoteId(id: string) { return this.captures?.remoteId(id) ?? id; }
+  private rememberQuestion(value: Question) { const question = this.captures?.question(value) ?? value; this.local?.question(question); return question; }
+  private remoteEdit(input: QuestionEdit): QuestionEdit { return { ...input, parts: input.parts?.map(part => ({ ...part, id: this.remoteId(part.id), pageId: this.remoteId(part.pageId) })) }; }
 
   private constructor(platform: ClientPlatform, target: string, credential: SavedCredential | null) {
     this.platform = platform; this.target = target; this.credential = credential;
   }
   get address() { return this.target; }
+  questionJournal(id: string) {
+    if (!this.credential) throw new Error('请先登录资料库');
+    return new QuestionJournal(this.platform, this.credential, id);
+  }
   static async probe(platform: ClientPlatform, address: string) {
     const target = serverOrigin(address);
     const api = new FamilyApi(platform, target, null);
@@ -37,7 +60,18 @@ export class FamilyApi {
   }
   static async connect(platform: ClientPlatform) {
     // Remembered sessions are read only after the anonymous compatibility check.
-    const connection = await FamilyApi.probe(platform, await platform.target.read());
+    const target = await platform.target.read();
+    let connection;
+    try { connection = await FamilyApi.probe(platform, target); }
+    catch (failure) {
+      if (!(failure instanceof ConnectionError)) throw failure;
+      const credential = await platform.credentials.read(target);
+      if (!credential) throw failure;
+      const api = new FamilyApi(platform, target, credential);
+      if (!api.local?.home()) throw failure;
+      api.connection(true);
+      return { api, info: { app: 'klbook' as const, apiVersion: 1 as const, initialized: true } };
+    }
     connection.api.credential = await platform.credentials.read(connection.api.address);
     return connection;
   }
@@ -55,25 +89,39 @@ export class FamilyApi {
         ...options, headers: { ...options.headers, ...(this.credential ? { Authorization: `Bearer ${this.credential.token}` } : {}) },
         credentials: 'omit', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(30000)
       });
-    } catch { throw new Error('无法连接家庭电脑，请确认电脑已开机且服务运行，再重试'); }
+    } catch { this.connection(true); throw new ConnectionError('无法连接家庭电脑，请确认电脑已开机且服务运行，再重试'); }
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
       const unavailable = response.status === 502 || response.status === 504;
+      if (unavailable) { this.connection(true); throw new ConnectionError('家庭电脑上的服务暂时不可达，请确认服务运行后重试'); }
       throw new ApiError(response.status, typeof detail.message === 'string' ? detail.message : unavailable ? '家庭电脑上的服务暂时不可达，请确认服务运行后重试' : '请求失败，请重试', detail.conflict);
     }
+    this.connection(false);
     return response;
   }
   private async request<T>(path: string, method = 'GET', body?: unknown, grant?: string): Promise<T> {
-    const response = await this.send(path, {
+    try {
+      const response = await this.send(path, {
       method, body: body === undefined ? undefined : JSON.stringify(body),
       headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(grant ? { 'X-Parent-Authorization': grant } : {}) }
     });
-    return response.status === 204 ? undefined as T : response.json();
+      const value: T = response.status === 204 ? undefined as T : await response.json();
+      if (method === 'GET' && !grant && path.startsWith('/collection/') && !path.includes('/recognition') && !path.startsWith('/collection/questions')) {
+        try { this.local?.remember(path, value); } catch { /* Read remains available online; never claim this snapshot was prepared offline. */ }
+      }
+      return value;
+    } catch (failure) {
+      if (failure instanceof ConnectionError && method === 'GET' && !grant && path.startsWith('/collection/') && !path.includes('/recognition')) {
+        const saved = this.local?.read<T>(path);
+        if (saved !== undefined) return saved;
+      }
+      throw failure;
+    }
   }
   subjects() { return this.request<Subject[]>('/collection/subjects'); }
-  pageRecognitions(pageId: string, grant?: string, region?: Region | null) { return this.request<PageRecognitions>(`/collection/pages/${encodeURIComponent(pageId)}/recognitions${region === undefined ? '' : `?region=${encodeURIComponent(JSON.stringify(region))}`}`, 'GET', undefined, grant); }
-  pageRecognition(pageId: string, id: string, grant?: string) { return this.request<PageRecognition>(`/collection/pages/${encodeURIComponent(pageId)}/recognitions/${encodeURIComponent(id)}`, 'GET', undefined, grant); }
-  recognizePage(pageId: string, id: string, grant?: string, input?: PageRecognitionRequest) { return this.request<PageRecognition>(`/collection/pages/${encodeURIComponent(pageId)}/recognitions/${encodeURIComponent(id)}`, 'PUT', input, grant); }
+  pageRecognitions(pageId: string, grant?: string, region?: Region | null) { return this.request<PageRecognitions>(`/collection/pages/${encodeURIComponent(this.remoteId(pageId))}/recognitions${region === undefined ? '' : `?region=${encodeURIComponent(JSON.stringify(region))}`}`, 'GET', undefined, grant); }
+  pageRecognition(pageId: string, id: string, grant?: string) { return this.request<PageRecognition>(`/collection/pages/${encodeURIComponent(this.remoteId(pageId))}/recognitions/${encodeURIComponent(id)}`, 'GET', undefined, grant); }
+  async recognizePage(pageId: string, id: string, grant?: string, input?: PageRecognitionRequest) { await this.syncCaptures(); return this.request<PageRecognition>(`/collection/pages/${encodeURIComponent(this.remoteId(pageId))}/recognitions/${encodeURIComponent(id)}`, 'PUT', input, grant); }
   ocrSettings(grant: string) { return this.request<OcrSettings>('/admin/ocr', 'GET', undefined, grant); }
   saveOcr(grant: string, input: OcrEdit) { return this.request<OcrSettings>('/admin/ocr', 'PUT', input, grant); }
   testOcr(grant: string, id: string, expectedRevision: number) { return this.request<OcrTest>(`/admin/ocr/tests/${encodeURIComponent(id)}`, 'PUT', { expectedRevision, sample: 'school-v1' }, grant); }
@@ -83,31 +131,100 @@ export class FamilyApi {
   saveStudySettings(grant: string, input: StudySettingsEdit) { return this.request<StudySettings>('/admin/study-settings', 'PUT', input, grant); }
   filterOptions(grant?: string) { return this.request<FilterOptions>('/collection/filter-options', 'GET', undefined, grant); }
   answerPages(offset = 0, grant?: string) { return this.request<AnswerPageList>(`/collection/answer-pages?offset=${offset}`, 'GET', undefined, grant); }
-  saveAnswers(id: string, input: AnswerEdit, grant?: string) { return this.request<Question>(`/collection/questions/${encodeURIComponent(id)}/answers`, 'PUT', input, grant); }
+  async saveAnswers(id: string, input: AnswerEdit, grant?: string) { await this.syncCaptures(); return this.rememberQuestion(await this.request<Question>(`/collection/questions/${encodeURIComponent(this.remoteId(id))}/answers`, 'PUT', { ...input, parts: input.parts.map(part => ({ ...part, pageId: this.remoteId(part.pageId), id: this.remoteId(part.id) })) }, grant)); }
   readingMaterials(offset = 0, grant?: string) { return this.request<ReadingMaterialList>(`/collection/reading-materials?offset=${offset}`, 'GET', undefined, grant); }
   readingMaterial(id: string, grant?: string) { return this.request<ReadingMaterial>(`/collection/reading-materials/${encodeURIComponent(id)}`, 'GET', undefined, grant); }
-  saveReadingMaterial(id: string, input: ReadingMaterialEdit, grant?: string) { return this.request<ReadingMaterial>(`/collection/reading-materials/${encodeURIComponent(id)}`, 'PUT', input, grant); }
+  async saveReadingMaterial(id: string, input: ReadingMaterialEdit, grant?: string) { await this.syncCaptures(); return this.request<ReadingMaterial>(`/collection/reading-materials/${encodeURIComponent(id)}`, 'PUT', { ...input, parts: input.parts.map(part => ({ ...part, pageId: this.remoteId(part.pageId) })) }, grant); }
   sources() { return this.request<Source[]>('/collection/sources'); }
   managedSources(grant: string) { return this.request<Source[]>('/admin/sources', 'GET', undefined, grant); }
   saveSource(grant: string, id: string, input: SourceEdit) { return this.request<Source>(`/admin/sources/${encodeURIComponent(id)}`, 'PUT', input, grant); }
-  questions(state: 'draft' | 'collected', offset = 0, grant?: string, filters: QuestionFilters = {}) {
+  async questions(state: 'draft' | 'collected', offset = 0, grant?: string, filters: QuestionFilters = {}) {
     const query = new URLSearchParams({ state, offset: String(offset) });
     for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
-    return this.request<QuestionList>(`/collection/questions?${query}`, 'GET', undefined, grant);
+    try {
+      const result = await this.request<QuestionList>(`/collection/questions?${query}`, 'GET', undefined, grant);
+      if (this.offline && !grant) return this.local!.list(state, offset, filters);
+      return { ...result, items: result.items.map(question => this.rememberQuestion(question)) };
+    } catch (failure) { if (failure instanceof ConnectionError && !grant && this.local) return this.local.list(state, offset, filters); throw failure; }
   }
-  question(id: string, grant?: string) { return this.request<Question>(`/collection/questions/${encodeURIComponent(id)}`, 'GET', undefined, grant); }
-  cancelledDrafts(grant?: string) { return this.request<DraftCancellation[]>('/collection/cancelled-drafts', 'GET', undefined, grant); }
-  cancelDraft(id: string, input: DraftCancellationEdit, grant?: string) { return this.request<DraftCancellation>(`/collection/questions/${encodeURIComponent(id)}/cancellation`, 'PUT', input, grant); }
-  saveQuestion(id: string, input: QuestionEdit, grant?: string) { return this.request<Question>(`/collection/questions/${encodeURIComponent(id)}`, 'PUT', input, grant); }
-  createQuestion(pageId: string, input: QuestionCreate, grant?: string) { return this.request<Question>(`/collection/pages/${encodeURIComponent(pageId)}/questions`, 'POST', input, grant); }
+  async question(id: string, grant?: string) {
+    try { return this.rememberQuestion(await this.request<Question>(`/collection/questions/${encodeURIComponent(this.remoteId(id))}`, 'GET', undefined, grant)); }
+    catch (failure) { if (failure instanceof ConnectionError && !grant) { const saved = this.local?.read<Question>(`/collection/questions/${id}`); if (saved) return saved; } throw failure; }
+  }
+  async cancelledDrafts(grant?: string) {
+    const items = await this.request<DraftCancellation[]>('/collection/cancelled-drafts', 'GET', undefined, grant);
+    const result = items.map(item => ({ ...item, id: this.captures?.localId(item.id) ?? item.id }));
+    for (const item of result) this.removeCancelledProgress(item.id);
+    return result;
+  }
+  private removeCancelledProgress(id: string) {
+    this.local?.removeQuestion(id);
+    if (this.credential) for (const [key] of this.platform.journal.entries(this.credential)) {
+      if (key.startsWith(`question:${id}:`)) this.platform.journal.remove(this.credential, key);
+    }
+  }
+  async cancelDraft(id: string, input: DraftCancellationEdit, grant?: string) {
+    await this.syncCaptures();
+    const result = await this.request<DraftCancellation>(`/collection/questions/${encodeURIComponent(this.remoteId(id))}/cancellation`, 'PUT', input, grant);
+    if (result.cancelledAt) this.removeCancelledProgress(id);
+    const items = this.local?.read<DraftCancellation[]>('/collection/cancelled-drafts') ?? [];
+    this.local?.remember('/collection/cancelled-drafts', [...items.filter(item => item.id !== id && item.id !== result.id), ...(result.cancelledAt ? [{ ...result, id }] : [])]);
+    return { ...result, id };
+  }
+  async saveQuestion(id: string, input: QuestionEdit, grant?: string) {
+    try {
+      await this.syncCaptures();
+      return this.rememberQuestion(await this.request<Question>(`/collection/questions/${encodeURIComponent(this.remoteId(id))}`, 'PUT', this.remoteEdit(input), grant));
+    } catch (failure) {
+      if (!(failure instanceof ConnectionError) || grant) throw failure;
+      return this.deferQuestion(id, input);
+    }
+  }
+  deferQuestion(id: string, input: Omit<QuestionEdit, 'operationId' | 'expectedRevision'> & { expectedRevision?: number }) {
+      const current = this.local?.read<Question>(`/collection/questions/${id}`);
+      if (!current) throw new Error('本机尚未保留这道题，请恢复连接后重试');
+      // The edit journal retains the exact operation and base revision for replay.
+      // A pending result is not a server acknowledgement and must not advance its revision.
+      const pages = new Map(current.parts.map(part => [part.originalPage.id, part.originalPage]));
+      for (const capture of this.captures?.records() ?? []) pages.set(capture.page.id, capture.page);
+      const parts = input.parts?.map(part => {
+        const page = pages.get(part.pageId); if (!page) throw new Error('这张材料尚未在本机准备，请恢复连接后继续');
+        return { ...part, originalPage: page };
+      }) ?? current.parts;
+      const pending: Question = { ...current, ...input, parts, originalPage: parts[0]!.originalPage, revision: input.expectedRevision ?? current.revision, syncState: 'pending', sourceId: input.sourceId ?? null, source: current.source, studyStage: input.studyStage ?? current.studyStage, updatedAt: Date.now(), collectedAt: input.state === 'collected' ? current.collectedAt ?? Date.now() : null };
+      this.local?.question(pending);
+      return pending;
+  }
+  async createQuestion(pageId: string, input: QuestionCreate, grant?: string) { await this.syncCaptures(); return this.rememberQuestion(await this.request<Question>(`/collection/pages/${encodeURIComponent(this.remoteId(pageId))}/questions`, 'POST', { ...input, parts: input.parts?.map(part => ({ ...part, pageId: this.remoteId(part.pageId), id: this.remoteId(part.id) })) }, grant)); }
   uploadImage(file: Blob, operationId: string, grant?: string, stage?: StudyStage) { return this.upload<Question>('drafts', file, operationId, grant, stage); }
   uploadPage(file: Blob, operationId: string, grant?: string) { return this.upload<OriginalPage>('pages', file, operationId, grant); }
   private async upload<T>(target: 'drafts' | 'pages', file: Blob, operationId: string, grant?: string, stage?: StudyStage): Promise<T> {
-    const response = await this.send(`/collection/${target}`, { method: 'POST', body: file, headers: { 'Content-Type': ['image/jpeg', 'image/png', 'image/webp'].includes(file.type) ? file.type : 'image/png', 'Idempotency-Key': operationId, ...(grant ? { 'X-Parent-Authorization': grant } : {}), ...(stage ? { 'X-Learning-Stage': encodeURIComponent(JSON.stringify(stage)) } : {}) } });
-    return response.json();
+    let response: Response;
+    try { response = await this.send(`/collection/${target}`, { method: 'POST', body: file, headers: { 'Content-Type': ['image/jpeg', 'image/png', 'image/webp'].includes(file.type) ? file.type : 'image/png', 'Idempotency-Key': operationId, ...(grant ? { 'X-Parent-Authorization': grant } : {}), ...(stage ? { 'X-Learning-Stage': encodeURIComponent(JSON.stringify(stage)) } : {}) } }); }
+    catch (failure) {
+      const home = this.local?.home();
+      if (!(failure instanceof ConnectionError) || grant || !home || !this.captures) throw failure;
+      const saved = await this.captures.create(file, operationId, target, home, stage);
+      return (target === 'drafts' ? saved.question! : saved.page) as T;
+    }
+    const result: T = await response.json();
+    const page = target === 'drafts' ? (result as Question).originalPage : result as OriginalPage;
+    if (this.local) {
+      await this.local.putImage(page.id, 'original', file);
+      await this.local.putImage(page.id, 'preview', file);
+      if (target === 'drafts') return this.rememberQuestion(result as Question) as T;
+    }
+    return result;
   }
   async pageImage(pageId: string, variant: 'original' | 'preview') {
-    return (await this.send(`/collection/pages/${encodeURIComponent(pageId)}/${variant}`)).blob();
+    try {
+      const image = await (await this.send(`/collection/pages/${encodeURIComponent(this.remoteId(pageId))}/${variant}`)).blob();
+      try { await this.local?.putImage(pageId, variant, image); } catch { /* Display online; offline retrieval only succeeds for stored bytes. */ }
+      return image;
+    } catch (failure) {
+      if (failure instanceof ConnectionError) { const saved = await this.local?.image(pageId, variant); if (saved) return saved; }
+      throw failure;
+    }
   }
   info() { return this.request<ServerInfo>('/info'); }
   setup(input: SetupInput) { return this.request<SessionResult>('/setup', 'POST', input); }
@@ -120,16 +237,80 @@ export class FamilyApi {
   rotateRecoveryCode(grant: string) { return this.request<{ recoveryCode: string }>('/admin/recovery-code', 'POST', undefined, grant); }
   async remember(result: SessionResult) {
     this.credential = { target: this.target, libraryId: result.library.id, accountId: result.account.id, token: result.token };
-    try { await this.platform.credentials.write(this.credential); return true; }
+    try { await this.platform.credentials.write(this.credential); this.local?.remember('/home', { account: result.account, library: result.library, session: result.session }); return true; }
     catch { return false; }
   }
   async home() {
-    const home = await this.request<Home>('/home');
+    let home: Home;
+    try { home = await this.request<Home>('/home'); }
+    catch (failure) { const saved = failure instanceof ConnectionError ? this.local?.home() : undefined; if (saved) return saved; throw failure; }
     if (home.library.id !== this.credential?.libraryId || home.account.id !== this.credential.accountId) {
       await this.forget();
       throw new ApiError(401, '资料库身份已变化，请由家长重新登录核对');
     }
+    try { this.local?.remember('/home', home); } catch { /* Existing local preparation remains; no new success is claimed. */ }
     return home;
+  }
+  private async verifiedHome() {
+    const home = await this.request<Home>('/home');
+    if (home.library.id !== this.credential?.libraryId || home.account.id !== this.credential.accountId) { await this.forget(); throw new ApiError(401, '资料库身份已变化，请重新登录核对'); }
+    return home;
+  }
+  private async syncCaptures() {
+    const records = this.captures?.records().filter(record => !record.remote) ?? [];
+    if (!records.length) return;
+    await this.verifiedHome();
+    for (const record of records) {
+      const file = await this.local!.image(record.page.id, 'original');
+      if (!file) throw new Error('本机原始图片未能读取，请保留材料后重试');
+      const response = await this.send(`/collection/${record.kind}`, { method: 'POST', body: file, headers: { 'Content-Type': file.type, 'Idempotency-Key': record.operationId, ...(record.kind === 'drafts' ? { 'X-Learning-Stage': encodeURIComponent(JSON.stringify(record.stage)) } : {}) } });
+      record.remote = await response.json();
+      this.captures!.remember(record);
+      if (record.question && !this.local!.read<Question>(`/collection/questions/${record.question.id}`)) this.rememberQuestion(record.remote as Question);
+    }
+  }
+  syncProgress() {
+    if (this.syncing) return this.syncing;
+    const scope = this.credential;
+    if (!scope) return Promise.resolve();
+    this.syncing = (async () => {
+      await this.verifiedHome();
+      await this.syncCaptures();
+      await this.cancelledDrafts();
+      const snapshots = this.platform.journal.entries(scope).filter(([key]) => key.startsWith('question:'));
+      for (const [key, raw] of snapshots) {
+        const progress = JSON.parse(raw) as QuestionProgress;
+        const base = progress.checkpoint.current;
+        if (base.state === 'collected' && !progress.checkpoint.pending) continue;
+        let writtenRaw = raw;
+        if (this.platform.journal.read(scope, key) !== raw) continue;
+        let current: Question;
+        if (progress.checkpoint.pending) {
+          current = await this.saveQuestion(base.id, progress.checkpoint.pending);
+          if (current.syncState === 'synced' && current.revision !== progress.checkpoint.pending.expectedRevision + 1) throw new ApiError(409, '这道题已在其他页面更新，请打开本机草稿核对后再同步', { entity: 'question', id: base.id });
+        } else {
+          current = await this.question(base.id);
+          if (current.revision !== base.revision) throw new ApiError(409, '这道题已在其他页面更新，请打开本机草稿核对后再同步', { entity: 'question', id: base.id });
+        }
+        if (current.syncState !== 'synced') continue;
+        const state = progress.checkpoint.intent?.state ?? progress.checkpoint.pending?.state ?? base.state;
+        const desired = questionContent(progress.fields, state);
+        if (JSON.stringify(desired) !== JSON.stringify(questionContent(questionFields(current), current.state))) {
+          const pending = { ...desired, expectedRevision: current.revision, operationId: crypto.randomUUID() };
+          if (this.platform.journal.read(scope, key) !== writtenRaw) continue;
+          writtenRaw = JSON.stringify({ ...progress, checkpoint: { current, pending, intent: desired } });
+          this.platform.journal.write(scope, key, writtenRaw);
+          current = await this.saveQuestion(base.id, pending);
+          if (current.syncState === 'synced' && current.revision !== pending.expectedRevision + 1) throw new ApiError(409, '这道题已在其他页面更新，请打开本机草稿核对后再同步', { entity: 'question', id: base.id });
+        }
+        if (current.syncState !== 'synced') continue;
+        const latest = this.platform.journal.read(scope, key);
+        if (latest !== writtenRaw) continue;
+        if (current.state === 'collected') this.platform.journal.remove(scope, key);
+        else this.platform.journal.write(scope, key, JSON.stringify({ ...progress, checkpoint: { current, pending: null } }));
+      }
+    })().finally(() => { this.syncing = undefined; });
+    return this.syncing;
   }
   async forget() {
     this.credential = null;

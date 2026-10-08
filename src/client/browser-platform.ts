@@ -29,7 +29,17 @@ async function drafts<T>(mode: IDBTransactionMode, operation: (store: IDBObjectS
 }
 
 export function browserPlatform(): ClientPlatform {
+  const journalPrefix = (scope: DraftScope) => `klbook.edits:${scope.libraryId}:${scope.accountId}:`;
   return {
+    journal: {
+      read: (scope, id) => localStorage.getItem(journalPrefix(scope) + id),
+      write: (scope, id, value) => localStorage.setItem(journalPrefix(scope) + id, value),
+      remove: (scope, id) => localStorage.removeItem(journalPrefix(scope) + id),
+      entries(scope) {
+        const prefix = journalPrefix(scope);
+        return Object.keys(localStorage).filter(key => key.startsWith(prefix)).map(key => [key.slice(prefix.length), localStorage.getItem(key)!]);
+      }
+    },
     target: {
       async read() { return serverOrigin(connectionSettings().active); },
       async write(value) { localStorage.setItem('klbook.connection', JSON.stringify({ active: serverOrigin(value), pending: null })); },

@@ -6,6 +6,12 @@ export interface SavedCredential {
 }
 export interface DraftScope { libraryId: string; accountId: string }
 export interface ClientPlatform {
+  journal: {
+    read(scope: DraftScope, id: string): string | null;
+    write(scope: DraftScope, id: string, value: string): void;
+    remove(scope: DraftScope, id: string): void;
+    entries(scope: DraftScope): [string, string][];
+  };
   target: { read(): Promise<string>; write(value: string): Promise<void>; readPending(): Promise<string | null>; writePending(value: string): Promise<void> };
   credentials: {
     read(target: string): Promise<SavedCredential | null>;

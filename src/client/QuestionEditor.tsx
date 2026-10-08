@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { OriginalPage, Question, Subject } from '../shared/collection.ts';
 import { validQuestionRegion } from '../shared/collection.ts';
 import { ApiError, FamilyApi } from './api.ts';
@@ -21,6 +21,7 @@ import { ConflictQuestionView } from './ConflictQuestionView.tsx';
 import type { ReadingMaterial } from '../shared/reading-materials.ts';
 import { RecognitionPanel } from './RecognitionPanel.tsx';
 import { recognitionScope, useCropRecognition } from './useCropRecognition.ts';
+import type { QuestionCheckpoint } from './question-journal.ts';
 
 export function QuestionEditor({ api, question: initialQuestion, proposedReading, subjects, sources, active, admin = false, creating = false, externalBusy = false, grant, pageCache, onSaved, onCurrent, onBack, onCancelled, onAccessError, onNewFromPage, onReading, onAnswers }: {
   api: FamilyApi; question: Question; subjects: Subject[]; sources: Source[]; active: boolean; admin?: boolean; creating?: boolean; grant?: string; pageCache: CaptureCache; onSaved(question: Question): void; onBack(): void; onNewFromPage(page: OriginalPage): void; onAccessError(error: ApiError): Promise<void>;
@@ -31,13 +32,31 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
   onCurrent(question: Question): void;
   proposedReading?: ReadingMaterial;
 }) {
-  const [question, setQuestion] = useState(initialQuestion);
+  const [local] = useState(() => {
+    try { return { journal: !admin && !creating ? api.questionJournal(initialQuestion.id) : undefined, error: '' }; }
+    catch (failure) { return { journal: undefined, error: failure instanceof Error ? failure.message : '本机整理进度无法读取' }; }
+  });
+  const restored = useRef(local.journal?.read()).current;
+  const [question, setQuestion] = useState(restored?.checkpoint.current ?? initialQuestion);
   const recordId = useRef(initialQuestion.id);
-  const [fields, setFields] = useState(() => ({ ...editable(question), ...(proposedReading ? { readingMaterialId: proposedReading.id } : {}) }));
+  const [fields, setFields] = useState(() => ({ ...(restored?.fields ?? editable(question)), ...(proposedReading ? { readingMaterialId: proposedReading.id } : {}) }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [step, setStep] = useState<'crop' | 'confirm'>(question.region ? 'confirm' : 'crop');
+  const [step, setStep] = useState<'crop' | 'confirm'>(restored?.step ?? (question.region ? 'confirm' : 'crop'));
+  const [localError, setLocalError] = useState(local.error);
+  const [progress, setProgress] = useState(restored ? '已在本机保留' : '');
+  const currentEdit = useRef({ fields, step });
+  currentEdit.current = { fields, step };
+  const autoRunning = useRef(false);
+  const paused = useRef(false);
+  const completed = useRef(false);
+  const live = useRef(true);
+  useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
+  function checkpoint(value: QuestionCheckpoint) {
+    if (!local.journal || completed.current) return;
+    local.journal.write({ version: 1, ...currentEdit.current, checkpoint: value, updatedAt: Date.now() });
+  }
   const [originalOpen, setOriginalOpen] = useState(false);
   const [selectedPart, setSelectedPart] = useState(question.parts[0]!.id);
   const automaticRecognition = useCropRecognition(api, grant);
@@ -59,17 +78,48 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
         : await api.saveQuestion(recordId.current, input, grant);
       recordId.current = result.id;
       return result;
-    }, conflictMessage: '这道题已在其他页面更新，请核对双方内容', conflictTarget: { entity: 'question', id: recordId.current } });
+    }, checkpoint: local.journal ? { initial: restored?.checkpoint, write: checkpoint } : undefined,
+    defer: (value, desired) => api.deferQuestion(value.id, desired),
+    conflictMessage: '这道题已在其他页面更新，请核对双方内容', conflictTarget: { entity: 'question', id: recordId.current } });
   const working = externalBusy || busy || append.busy || append.loading || conflict.loading;
   const editingLocked = working || !!cancelOperation.current;
   const baseline = useRef(JSON.stringify(editable(question)));
   const dirty = JSON.stringify(fields) !== baseline.current;
   const leave = useEditorLeave({
-    dirty, busy: working, canSave: active && !cancelOperation.current, title: '还有未保存的修改', error,
+    dirty: local.journal ? !!localError : dirty, busy: working, canSave: active && !cancelOperation.current, title: '还有未保存的修改', error: localError || error,
     description: <><p>{question.state === 'draft' ? '保存后离开会保留为草稿，稍后可以继续整理。' : '保存后离开会更新这道错题，保留原来的收集时间。'}</p>{!active && <p className="message">管理验证已到期。选择继续编辑，重新验证家长身份后就能保存；也可以放弃本次修改并离开。</p>}</>,
     save: () => save(question.state),
     discard: () => { const saved = saver.discard(); setQuestion(saved); setFields(editable(saved)); baseline.current = JSON.stringify(editable(saved)); conflict.clear(); },
   });
+
+  useLayoutEffect(() => {
+    if (!local.journal || paused.current) return;
+    try { checkpoint(saver.snapshot()); setLocalError(''); if (dirty) setProgress('已在本机保留'); }
+    catch (failure) { setLocalError(failure instanceof Error ? failure.message : '本机整理进度未能保存'); }
+  }, [fields, step]);
+  useEffect(() => {
+    if (!local.journal || localError || question.state !== 'draft' || !dirty || !active || editingLocked || conflict.open || paused.current) return;
+    const timer = setTimeout(() => {
+      if (autoRunning.current || paused.current) return;
+      autoRunning.current = true;
+      const snapshot = fields;
+      setProgress('正在同步草稿…');
+      void saver.save(questionContent(snapshot, 'draft')).then(saved => {
+        if (!live.current || paused.current) return;
+        setQuestion(saved); onCurrent(saved); baseline.current = JSON.stringify(editable(saved));
+        setProgress(saved.syncState === 'pending' ? '已在本机保留，等待同步' : JSON.stringify(currentEdit.current.fields) === JSON.stringify(snapshot) ? '草稿已同步到家庭电脑' : '已在本机保留');
+        void append.committed(saved);
+      }).catch(async failure => {
+        if (!live.current || paused.current) return;
+        setProgress('已在本机保留，等待同步');
+        if (failure instanceof ApiError && [401, 403].includes(failure.status)) await onAccessError(failure);
+        else if (failure instanceof ApiError && failure.status === 409) { setError(failure.message); await conflict.show(); }
+        else if (failure instanceof ApiError) setError(failure.message);
+        else setLocalError('本机整理进度未能完整保存，请保留页面并重试。');
+      }).finally(() => { autoRunning.current = false; });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [fields, active, editingLocked, localError, question.revision, conflict.open]);
 
   async function save(state: 'draft' | 'collected') {
     if (!active || editingLocked || (admin && !grant)) return false;
@@ -80,7 +130,8 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
       const saved = await saver.save(content, true);
       setQuestion(saved); setFields(editable(saved)); baseline.current = JSON.stringify(editable(saved));
       await append.committed(saved);
-      setNotice(saved.state === 'draft' ? '草稿已保存到家庭资料库，可以稍后继续。' : '已同步到家庭资料库');
+      if (saved.state === 'collected') { paused.current = true; if (saved.syncState === 'synced') { local.journal?.complete(); completed.current = true; } }
+      setNotice(saved.syncState === 'pending' ? '已在本机保留，等待同步' : saved.state === 'draft' ? '草稿已保存到家庭资料库，可以稍后继续。' : '已同步到家庭资料库');
       onSaved(saved);
       if (admin && saved.region) setStep('confirm');
       return true;
@@ -94,8 +145,9 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
   }
   async function cancelCurrent() {
     if (working || !active || question.state !== 'draft') return;
-    setBusy(true); setError('');
+    setBusy(true); setError(''); paused.current = true;
     try {
+      await saver.idle();
       // Retain current edits for undo; retry an uncertain cancellation before attempting another save.
       if (!cancelOperation.current) {
         const saved = await saver.save(questionContent(fields, 'draft'), true);
@@ -104,11 +156,12 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
         cancelOperation.current = { operationId: crypto.randomUUID(), expectedRevision: saved.revision, cancelled: true };
       }
       await api.cancelDraft(recordId.current, cancelOperation.current, grant);
+      local.journal?.complete(); completed.current = true;
       leave.complete(onCancelled);
     } catch (failure) {
       setError(`${failure instanceof Error ? failure.message : '取消未完成'}。材料仍保留，请重试取消或返回列表核对。`);
       if (failure instanceof ApiError && [401, 403].includes(failure.status)) await onAccessError(failure);
-      if (failure instanceof ApiError && failure.status === 409) { cancelOperation.current = undefined; await conflict.show(); }
+      if (failure instanceof ApiError && failure.status === 409) { cancelOperation.current = undefined; paused.current = false; await conflict.show(); }
     } finally { setBusy(false); }
   }
   function resolveConflict(keep: boolean) {
@@ -136,6 +189,8 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
   return <section className="card collection-card question-editor">
     <div className="section-heading"><div><p className="eyebrow">{admin ? '资料整理' : step === 'crop' ? '第 1 步 · 确认题目范围' : '第 2 步 · 确认信息'} · {question.state === 'draft' ? '草稿' : '已收集'}</p><h1>{admin ? '错题资料详情' : step === 'crop' ? '框住这道题' : question.state === 'draft' ? '确认并保存' : '补充或更正信息'}</h1>{admin && <p className="hint">{question.collectedAt ? '收集于' : '暂存于'} {new Date(question.collectedAt ?? question.createdAt).toLocaleString('zh-CN')}</p>}</div><button className="quiet" disabled={working} onClick={() => leave.requestLeave(onBack)}>返回列表</button></div>
     {error && !leave.leaving && <p role="alert" className="message error">{error}</p>}
+    {localError && <p role="alert" className="message error">{localError}<button className="quiet" onClick={() => { try { checkpoint(saver.snapshot()); setLocalError(''); setProgress('已在本机保留'); } catch (failure) { setLocalError((failure as Error).message); } }}>重试本机保存</button></p>}
+    {local.journal && progress && !localError && <p role="status" className="draft-progress">{progress}</p>}
     {notice && !dirty && <p role="status" className="message">{notice}</p>}
     <div className="material-actions">
       {step === 'crop' && <CaptureInput label="换图" multiple={false} busy={editingLocked || !active || creating || (!!append.capture && !append.appended)} onChoose={files => append.choose(files, selectedPart)} onCancel={() => {}} />}

@@ -39,7 +39,14 @@ export function App({ platform }: { platform: ClientPlatform }) {
       if (version !== bootVersion.current) return;
       setApi(connection.api);
       if (!connection.info.initialized) { setScreen('setup'); return; }
-      try { const next = await connection.api.home(); if (version === bootVersion.current) { setHome(next); setScreen('home'); } }
+      try {
+        const next = await connection.api.home();
+        if (!connection.api.offline) {
+          try { await connection.api.syncProgress(); }
+          catch (failure) { if (failure instanceof ApiError && failure.status === 401) throw failure; if (version === bootVersion.current) setNotice(`本机资料仍保留：${failure instanceof Error ? failure.message : '同步未完成，请核对后重试'}`); }
+        }
+        if (version === bootVersion.current) { setHome(next); setScreen('home'); }
+      }
       catch (failure) {
         if (version !== bootVersion.current) return;
         if (!(failure instanceof ApiError && failure.status === 401)) throw failure;

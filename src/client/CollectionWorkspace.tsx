@@ -247,7 +247,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, navigate
     {admin && screen === 'edit' && continuation}
     {screen === 'detail' && selected && <section className="card collection-card">
       <div className="section-heading"><div><p className="eyebrow">{subjectName(selected.subjectId)} · 已收集</p><h1>错题详情</h1></div><button className="quiet" disabled={busy} onClick={back}>返回列表</button></div>
-      <p className="sync-state">已同步到家庭资料库</p><div className="detail-material"><QuestionParts api={api} parts={selected.parts} /></div>
+      <p className="sync-state">{selected.syncState === 'pending' ? '本机已收集，待同步' : '已同步到家庭资料库'}</p><div className="detail-material"><QuestionParts api={api} parts={selected.parts} /></div>
       {selected.readingMaterial && <ReadingMaterialView api={api} material={selected.readingMaterial} />}
       <AnswerView api={api} parts={selected.answerParts} />
       <p className="study-stage">{stageLabel(selected.studyStage)}</p>

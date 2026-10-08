@@ -18,7 +18,7 @@ export interface QuestionPart { id: string; originalPage: OriginalPage; region: 
 export interface QuestionPartEdit { id: string; pageId: string; region: Region | null; transcription?: string; recognition?: RecognitionReference | null }
 export interface Question {
   id: string; libraryId: string; learnerId: string; revision: number;
-  state: 'draft' | 'collected'; syncState: 'synced'; subjectId: string | null; region: Region | null;
+  state: 'draft' | 'collected'; syncState: 'synced' | 'pending'; subjectId: string | null; region: Region | null;
   sourceId: string | null; source: string; pageNumber: string; questionNumber: string; note: string;
   createdAt: number; updatedAt: number; collectedAt: number | null;
   originalPage: OriginalPage;
