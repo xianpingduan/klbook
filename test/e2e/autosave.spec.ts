@@ -217,6 +217,9 @@ test('填写后立即刷新或返回自动保留进度，只有显式保存才�
   } finally { await f.close(); }
 });
 
+test.describe('真实停服与离线页面', () => {
+  test.use({ serviceWorkers: 'allow' });
+
 test('准备后的页面停服仍能重开并编辑，恢复后只收集一次', async ({ page, request }) => {
   const f = await fixture(request);
   let restarted: Awaited<ReturnType<typeof startServer>> | undefined;
@@ -290,4 +293,61 @@ test('停服时新选图片仍可框题并确认收集，重开恢复后自动�
     expect((await (await request.get(`${f.url}/api/v1/collection/questions?state=collected`, { headers: f.headers })).json()).total).toBe(1);
   } finally { await restarted?.stop();
     await f.close(); }
+});
+
+});
+
+test('离线确认收集后的未提交更正，补传只提交确认内容并保留更正', async ({ page, request }) => {
+  const f = await fixture(request);
+  try {
+    await startQuestion(page, f);
+    await expect(page.getByText('草稿已同步到家庭电脑', { exact: true })).toBeVisible();
+    await page.route('**/api/v1/**', route => route.abort());
+    await page.getByLabel('备注（选填）').fill('已确认收集内容');
+    await page.getByRole('button', { name: '保存到错题集', exact: true }).click();
+    await expect(page.getByText('本机已收集，待同步', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '编辑资料', exact: true }).click();
+    await optional(page);
+    await page.getByLabel('备注（选填）').fill('尚未确认的更正');
+    await page.unroute('**/api/v1/**');
+    await page.reload();
+    await page.getByRole('button', { name: '首页', exact: true }).click();
+    await page.getByRole('button', { name: '打开错题', exact: true }).click();
+    const list = await (await request.get(`${f.url}/api/v1/collection/questions?state=collected`, { headers: f.headers })).json();
+    expect(list.total).toBe(1); expect(list.items[0].note).toBe('已确认收集内容');
+    await page.getByRole('button', { name: '编辑资料', exact: true }).click();
+    await optional(page);
+    await expect(page.getByLabel('备注（选填）')).toHaveValue('尚未确认的更正');
+    await page.getByRole('button', { name: '保存修改', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '错题详情' })).toBeVisible();
+    const saved = await (await request.get(`${f.url}/api/v1/collection/questions?state=collected`, { headers: f.headers })).json();
+    expect(saved.total).toBe(1); expect(saved.items[0].note).toBe('尚未确认的更正');
+  } finally { await f.close(); }
+});
+
+test('其他设备取消旧草稿后本机编辑仍保留，明确撤销并核对后才能恢复', async ({ page, request }) => {
+  const f = await fixture(request);
+  try {
+    await startQuestion(page, f);
+    await expect(page.getByText('草稿已同步到家庭电脑', { exact: true })).toBeVisible();
+    const draft = (await (await request.get(`${f.url}/api/v1/collection/questions?state=draft`, { headers: f.headers })).json()).items[0];
+    await page.route('**/api/v1/**', route => route.abort());
+    await page.getByLabel('备注（选填）').fill('本设备尚未同步的备注');
+    const cancelled = await request.put(`${f.url}/api/v1/collection/questions/${draft.id}/cancellation`, { headers: f.headers, data: { operationId: crypto.randomUUID(), expectedRevision: draft.revision, cancelled: true } });
+    expect(cancelled.ok()).toBe(true);
+    await page.unroute('**/api/v1/**');
+    await page.reload();
+    await expect(page.getByRole('button', { name: '继续整理', exact: true })).toHaveCount(0);
+    await page.locator('details.cancelled-collections > summary').click();
+    await expect(page.getByText('本机还有整理进度；撤销后可核对保留。')).toBeVisible();
+    await page.getByRole('button', { name: '撤销取消', exact: true }).click();
+    await optional(page);
+    await expect(page.getByLabel('备注（选填）')).toHaveValue('本设备尚未同步的备注');
+    await expect(page.getByRole('button', { name: '保留本次编辑，继续核对', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '保留本次编辑，继续核对', exact: true }).click();
+    await page.getByRole('button', { name: '保存到错题集', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '错题详情' })).toBeVisible();
+    const saved = await (await request.get(`${f.url}/api/v1/collection/questions?state=collected`, { headers: f.headers })).json();
+    expect(saved.total).toBe(1); expect(saved.items[0].note).toBe('本设备尚未同步的备注');
+  } finally { await f.close(); }
 });

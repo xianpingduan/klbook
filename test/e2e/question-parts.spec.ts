@@ -131,7 +131,11 @@ test('手机尺寸学习端追加图片，未确认的新范围阻止保存离�
     await expect(page.getByRole('button', { name: '下一步，选学科' })).toBeDisabled();
     await reveal(page.getByRole('button', { name: '选择整页', exact: true, includeHidden: true }));
     await page.getByRole('button', { name: '选择整页', exact: true }).click();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const overflow = await page.evaluate(() => Array.from(document.querySelectorAll('body *')).filter(element => {
+      const box = element.getBoundingClientRect(); return box.width > 0 && box.right > innerWidth + .5;
+    }).map(element => `${element.tagName}.${element.className}`));
+    expect(overflow).toEqual([]);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: `test-results/question-parts-editor-${test.info().project.name}.png`, fullPage: true });
     await page.getByRole('button', { name: '下一步，选学科' }).click();
     await reveal(page.getByLabel('备注（选填）'));

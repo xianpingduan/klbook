@@ -69,6 +69,7 @@ test('从小题建立跨页共享原文，另一小题选择同一材料，解�
     await reveal(page.getByRole('combobox', { name: '阅读材料（选填）', exact: true, includeHidden: true }));
     await page.getByRole('combobox', { name: '阅读材料（选填）', exact: true }).selectOption('');
     await page.getByRole('button', { name: '保存修改', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '错题详情', exact: true })).toBeVisible();
     await expect(page.getByRole('region', { name: '共享阅读材料', exact: true })).toHaveCount(0);
     const updated = await (await request.get(`${server.url}/api/v1/collection/questions/${question.id}`, { headers })).json();
     expect(updated.readingMaterial).toBeNull(); expect(updated.collectedAt).toBe(question.collectedAt);

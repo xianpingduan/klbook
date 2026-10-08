@@ -79,6 +79,7 @@ for (const manualFirst of [false, true]) test(`${manualFirst ? '框题时先主�
     await page.getByRole('button', { name: '选用候选题 2', exact: true }).click();
     await page.getByRole('button', { name: '确认采用建议', exact: true }).click();
     await page.getByRole('button', { name: '保存到错题集', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '错题详情', exact: true })).toBeVisible();
     expect((await (await request.get(`${url}/api/v1/collection/questions?state=collected`, { headers })).json()).total).toBe(2);
     expect(f.calls()).toBe(1);
     await page.getByRole('button', { name: '编辑资料', exact: true }).click();

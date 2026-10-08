@@ -9,7 +9,7 @@ export function AdminOverview({ api, grant, onAccessError }: { api: FamilyApi; g
   useEffect(() => {
     let active = true;
     setCounts([]);
-    const queries = [api.questions('collected').then(list => list.total), api.questions('draft').then(list => list.total), api.managedSources(grant).then(sources => sources.filter(source => source.active).length), api.devices(grant).then(devices => devices.length)];
+    const queries = [api.questions('collected', 0, grant).then(list => list.total), api.questions('draft', 0, grant).then(list => list.total), api.managedSources(grant).then(sources => sources.filter(source => source.active).length), api.devices(grant).then(devices => devices.length)];
     queries.forEach((query, index) => {
       void query.then(value => {
         if (active) setCounts(current => { const next = [...current]; next[index] = { value }; return next; });

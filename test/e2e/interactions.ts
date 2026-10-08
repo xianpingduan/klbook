@@ -8,7 +8,8 @@ export async function reveal(control: Locator) {
 }
 
 export async function editAnswers(page: Page, name: string) {
-  if (await page.getByRole('heading', { name: '错题详情', exact: true }).isVisible()) await page.getByRole('button', { name: '编辑资料', exact: true }).click();
+  await page.locator('.question-editor').or(page.getByRole('button', { name: '编辑资料', exact: true })).waitFor({ state: 'visible' });
+  if (!await page.locator('.question-editor').isVisible()) await page.getByRole('button', { name: '编辑资料', exact: true }).click();
   const button = page.getByRole('button', { name, exact: true, includeHidden: true });
   await reveal(button); await button.click();
 }

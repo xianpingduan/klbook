@@ -15,14 +15,13 @@ import { QuestionJournal } from './question-journal.ts';
 import { LocalLibrary } from './local-library.ts';
 import { OfflineCaptures } from './offline-captures.ts';
 import { questionContent, questionFields } from './question-edit.ts';
-import type { QuestionProgress } from './question-journal.ts';
+import { revisionedSave } from './revisioned-save.ts';
+import { ApiError, ConnectionError } from './api-errors.ts';
+export { ApiError, ConnectionError } from './api-errors.ts';
 
-export class ConnectionError extends Error {}
-
-export class ApiError extends Error {
-  status: number;
-  conflict?: ConflictTarget;
-  constructor(status: number, message: string, conflict?: ConflictTarget) { super(message); this.status = status; this.conflict = conflict; }
+function questionContentFromOperation(input: ReturnType<typeof questionContent> & { operationId?: string; expectedRevision?: number }) {
+  const { operationId: _operation, expectedRevision: _revision, ...content } = input;
+  return content;
 }
 
 export class FamilyApi {
@@ -53,16 +52,16 @@ export class FamilyApi {
   adoptQuestionProgress(current: Question, readingMaterialId = current.readingMaterial?.id ?? null) {
     this.questionJournal(current.id).write({ version: 1, fields: { ...questionFields(current), readingMaterialId }, step: current.region ? 'confirm' : 'crop', checkpoint: { current, pending: null }, updatedAt: Date.now() });
   }
+  hasQuestionProgress(id: string) { return !!this.credential && QuestionJournal.entries(this.platform, this.credential, id).length > 0; }
   advanceQuestionProgress(previous: Question, current: Question, readingChanged = false) {
     if (!this.credential) return;
-    for (const [key, raw] of this.platform.journal.entries(this.credential)) {
-      if (!key.startsWith(`question:${previous.id}:`)) continue;
-      const progress = JSON.parse(raw) as QuestionProgress;
+    for (const entry of QuestionJournal.entries(this.platform, this.credential, previous.id)) {
+      const progress = entry.value;
       // Only this editor's acknowledged base can advance; divergent tabs still conflict.
       if (progress.checkpoint.pending || progress.checkpoint.current.revision !== previous.revision) continue;
-      this.platform.journal.write(this.credential, key, JSON.stringify({ ...progress,
+      entry.write({ ...progress,
         fields: { ...progress.fields, ...(readingChanged ? { readingMaterialId: current.readingMaterial?.id ?? null } : {}) },
-        checkpoint: { current, pending: null } }));
+        checkpoint: { current, pending: null } });
     }
   }
   static async probe(platform: ClientPlatform, address: string) {
@@ -169,19 +168,22 @@ export class FamilyApi {
   async cancelledDrafts(grant?: string) {
     const items = await this.request<DraftCancellation[]>('/collection/cancelled-drafts', 'GET', undefined, grant);
     const result = items.map(item => ({ ...item, id: this.captures?.localId(item.id) ?? item.id }));
-    for (const item of result) this.removeCancelledProgress(item.id);
+    for (const item of result) this.local?.removeQuestion(item.id);
     return result;
-  }
-  private removeCancelledProgress(id: string) {
-    this.local?.removeQuestion(id);
-    if (this.credential) for (const [key] of this.platform.journal.entries(this.credential)) {
-      if (key.startsWith(`question:${id}:`)) this.platform.journal.remove(this.credential, key);
-    }
   }
   async cancelDraft(id: string, input: DraftCancellationEdit, grant?: string) {
     await this.syncCaptures();
     const result = await this.request<DraftCancellation>(`/collection/questions/${encodeURIComponent(this.remoteId(id))}/cancellation`, 'PUT', input, grant);
-    if (result.cancelledAt) this.removeCancelledProgress(id);
+    if (result.cancelledAt) {
+      this.local?.removeQuestion(id);
+      // Only remove snapshots proven to be included in the acknowledged cancellation.
+      // A different tab/device may still have newer, unsubmitted edits.
+      if (this.credential) for (const entry of QuestionJournal.entries(this.platform, this.credential, id)) {
+        const { fields, checkpoint } = entry.value;
+        if (!checkpoint.pending && !checkpoint.intent && checkpoint.current.revision === input.expectedRevision &&
+          JSON.stringify(questionContent(fields, 'draft')) === JSON.stringify(questionContent(questionFields(checkpoint.current), 'draft'))) entry.remove();
+      }
+    }
     const items = this.local?.read<DraftCancellation[]>('/collection/cancelled-drafts') ?? [];
     this.local?.remember('/collection/cancelled-drafts', [...items.filter(item => item.id !== id && item.id !== result.id), ...(result.cancelledAt ? [{ ...result, id }] : [])]);
     return { ...result, id };
@@ -310,38 +312,31 @@ export class FamilyApi {
     this.syncing = (async () => {
       await this.verifiedHome();
       await this.syncCaptures();
-      await this.cancelledDrafts();
-      const snapshots = this.platform.journal.entries(scope).filter(([key]) => key.startsWith('question:'));
-      for (const [key, raw] of snapshots) {
-        const progress = JSON.parse(raw) as QuestionProgress;
+      const cancelled = new Set((await this.cancelledDrafts()).map(item => item.id));
+      for (const entry of QuestionJournal.entries(this.platform, scope)) {
+        const progress = entry.value;
         const base = progress.checkpoint.current;
-        if (base.state === 'collected' && !progress.checkpoint.pending) continue;
-        let writtenRaw = raw;
-        if (this.platform.journal.read(scope, key) !== raw) continue;
-        let current: Question;
-        if (progress.checkpoint.pending) {
-          current = await this.saveQuestion(base.id, progress.checkpoint.pending, undefined, true);
-          if (current.syncState === 'synced' && current.revision !== progress.checkpoint.pending.expectedRevision + 1) throw new ApiError(409, '这道题已在其他页面更新，请打开本机草稿核对后再同步', { entity: 'question', id: base.id });
-        } else {
-          current = await this.question(base.id);
+        // Cancellation is never undone by automatic replay; preserve divergent edits for explicit undo and comparison.
+        if (cancelled.has(base.id) || !entry.unchanged()) continue;
+        const confirmed = progress.checkpoint.intent ?? progress.checkpoint.pending;
+        if (base.state === 'collected' && !confirmed) continue;
+        const contentOf = (value: Question) => questionContent(questionFields(value), value.state);
+        // Once collected, only the explicitly confirmed content may be sent. Later edits stay local.
+        const desired = confirmed?.state === 'collected' ? questionContentFromOperation(confirmed) : questionContent(progress.fields, base.state);
+        if (!progress.checkpoint.pending) {
+          const current = await this.question(base.id);
           if (current.revision !== base.revision) throw new ApiError(409, '这道题已在其他页面更新，请打开本机草稿核对后再同步', { entity: 'question', id: base.id });
         }
-        if (current.syncState !== 'synced') continue;
-        const state = progress.checkpoint.intent?.state ?? progress.checkpoint.pending?.state ?? base.state;
-        const desired = questionContent(progress.fields, state);
-        if (JSON.stringify(desired) !== JSON.stringify(questionContent(questionFields(current), current.state))) {
-          const pending = { ...desired, expectedRevision: current.revision, operationId: crypto.randomUUID() };
-          if (this.platform.journal.read(scope, key) !== writtenRaw) continue;
-          writtenRaw = JSON.stringify({ ...progress, checkpoint: { current, pending, intent: desired } });
-          this.platform.journal.write(scope, key, writtenRaw);
-          current = await this.saveQuestion(base.id, pending, undefined, true);
-          if (current.syncState === 'synced' && current.revision !== pending.expectedRevision + 1) throw new ApiError(409, '这道题已在其他页面更新，请打开本机草稿核对后再同步', { entity: 'question', id: base.id });
-        }
-        if (current.syncState !== 'synced') continue;
-        const latest = this.platform.journal.read(scope, key);
-        if (latest !== writtenRaw) continue;
-        if (current.state === 'collected') this.platform.journal.remove(scope, key);
-        else this.platform.journal.write(scope, key, JSON.stringify({ ...progress, checkpoint: { current, pending: null } }));
+        const saver = revisionedSave(() => ({ initial: base, contentOf,
+          persist: (input: QuestionEdit) => this.saveQuestion(base.id, input, undefined, true),
+          defer: (_value: Question, content: ReturnType<typeof questionContent>) => this.deferQuestion(base.id, content),
+          conflictMessage: '这道题已在其他页面更新，请打开本机草稿核对后再同步', conflictTarget: { entity: 'question' as const, id: base.id },
+          checkpoint: { initial: progress.checkpoint, write: checkpoint => entry.write({ ...progress, checkpoint }) }
+        }));
+        const current = await saver.save(desired);
+        if (current.syncState !== 'synced' || !entry.unchanged()) continue;
+        if (current.state === 'collected' && JSON.stringify(questionContent(progress.fields, 'collected')) === JSON.stringify(desired)) entry.remove();
+        // Otherwise keep the newer unsubmitted fields with their now-acknowledged base.
       }
     })().finally(() => { this.syncing = undefined; });
     return this.syncing;

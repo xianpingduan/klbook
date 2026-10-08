@@ -30,6 +30,7 @@ test('学习端先无答案收集，再补同页和另页解答，其他小题�
     await page.getByRole('button', { name: '选择整页', exact: true }).click();
     await page.getByRole('button', { name: '保存答案并返回', exact: true }).click();
     await expect(page.getByRole('heading', { name: '错题详情', exact: true })).toBeVisible();
+    await expect(page.locator('.detail-material').getByRole('img', { name: '已收集的题目区', exact: true })).toBeVisible();
     await page.getByText('查看纸质答案（1 个解答区）', { exact: true }).click();
     await expect(page.getByRole('img', { name: '纸质解答区', exact: true })).toHaveCount(1);
     await editAnswers(page, '整理纸质答案');
@@ -42,6 +43,8 @@ test('学习端先无答案收集，再补同页和另页解答，其他小题�
     await reveal(page.getByRole('button', { name: '向前移动', exact: true, includeHidden: true }));
     await page.getByRole('button', { name: '向前移动', exact: true }).click();
     await page.getByRole('button', { name: '保存答案并返回', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '错题详情', exact: true })).toBeVisible();
+    await expect(page.locator('.detail-material').getByRole('img', { name: '已收集的题目区', exact: true })).toBeVisible();
     await page.getByText('查看原始页', { exact: true }).click();
     await expect(page.getByRole('img', { name: '原始页（保留作答和批改）', exact: true })).toHaveCount(2);
     const saved: Question = await (await request.get(`${server.url}/api/v1/collection/questions/${question.id}`, { headers })).json();
@@ -74,6 +77,7 @@ test('学习端先无答案收集，再补同页和另页解答，其他小题�
     await expect(page.getByRole('button', { name: '编辑资料', exact: true })).toBeVisible();
     await page.reload();
     await page.getByRole('article').filter({ has: page.getByRole('heading', { name: '未填写来源 · 第 2 题', exact: true }) }).getByRole('button', { name: '打开错题', exact: true }).click();
+    await expect(page.locator('.detail-material').getByRole('img', { name: '已收集的题目区', exact: true })).toBeVisible();
     await page.getByText('查看纸质答案（1 个解答区）', { exact: true }).click();
     await expect(page.getByRole('img', { name: '纸质解答区', exact: true })).toHaveCount(1);
     expect(await (await request.get(`${server.url}/api/v1/collection/pages/${saved.answerParts[0]!.originalPage.id}/original`, { headers })).body()).toEqual(continuation);
