@@ -23,7 +23,7 @@ export class BaiduOcr {
   private http: VendorHttp;
   private cached?: { key: string; token: string; until: number };
   constructor(http: VendorHttp = (url, init) => fetch(url, init)) { this.http = http; }
-  async recognize(credentials: OcrCredentials, config: OcrConfig, image: Buffer, signal: AbortSignal, permit: () => void): Promise<OcrLine[]> {
+  async recognize(credentials: OcrCredentials, config: OcrConfig, image: Buffer, signal: AbortSignal, permit: () => void): Promise<import('./ocr-provider.ts').OcrResult> {
     let dispatched = false;
     const timed = AbortSignal.any([signal, AbortSignal.timeout(config.timeoutSeconds * 1000)]);
     try {
@@ -53,7 +53,7 @@ export class BaiduOcr {
       }
       const lines = linesOf(data, [credentials.apiKey, credentials.secretKey, this.cached.token]);
       if (!lines.length) throw new OcrFailure('请求已返回，但未识别出文字；请检查服务能力后重新测试', false, true);
-      return lines;
+      return { lines };
     } catch (error) {
       if (error instanceof OcrFailure) throw error;
       if (signal.aborted) throw new OcrFailure('服务已停止，调用结果不确定；不会自动重试', false, dispatched);

@@ -129,7 +129,18 @@ const migrations = [
   CREATE INDEX ocrByPage ON ocrTests(libraryId, pageId, createdAt);
   CREATE TABLE initialPageRecognition (pageId TEXT PRIMARY KEY REFERENCES originalPages(id), message TEXT NOT NULL DEFAULT '');
   ALTER TABLE questionParts ADD COLUMN transcription TEXT NOT NULL DEFAULT '';
-  ALTER TABLE questionParts ADD COLUMN recognition TEXT;`
+  ALTER TABLE questionParts ADD COLUMN recognition TEXT;`,
+  `ALTER TABLE questions ADD COLUMN cancelledAt INTEGER;
+  CREATE TABLE draftCancellationOperations (
+    libraryId TEXT NOT NULL, accountId TEXT NOT NULL, operationId TEXT NOT NULL,
+    requestHash TEXT NOT NULL, receipt TEXT NOT NULL,
+    PRIMARY KEY(libraryId, accountId, operationId)
+  );
+  ALTER TABLE ocrTests ADD COLUMN inputRegion TEXT;
+  CREATE TABLE automaticRegionRecognitions (
+    pageId TEXT NOT NULL REFERENCES originalPages(id), region TEXT NOT NULL,
+    runId TEXT NOT NULL REFERENCES ocrTests(id), PRIMARY KEY(pageId, region)
+  );`
 ];
 
 export function openDatabase(dataDir: string) {

@@ -18,6 +18,7 @@ export function useEditorLeave({ dirty, busy, canSave, title, description, error
     requestLeave,
     leaving: !!leaving,
     dismiss: () => setLeaving(undefined),
+    complete: finish,
     dialog: createPortal(<dialog ref={dialog} className="leave-dialog" aria-labelledby={titleId} onCancel={event => { event.preventDefault(); if (!busy) setLeaving(undefined); }}>
       <h2 id={titleId}>{title}</h2>{description}
       {error && <p role="alert" className="message error">{error}</p>}

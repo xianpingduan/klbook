@@ -75,7 +75,7 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
     type: 'object', required: ['recoveryCode', 'newPassword', 'deviceName'], additionalProperties: false,
     properties: { recoveryCode: text(128), newPassword: text(128, 12), deviceName: text(64) }
   } } }, async (request, reply) => reply.code(201).send(await access.recover(request.body)));
-  collectionRoutes(app, access, collection, ocr);
+  collectionRoutes(app, access, collection);
   sourceRoutes(app, access, new Sources(db));
   studyRoutes(app, access, new Study(db));
   ocrRoutes(app, access, ocr);

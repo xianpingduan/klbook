@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Home } from '../shared/contracts.ts';
 import { MAX_IMAGE_BYTES } from '../shared/collection.ts';
 import type { OriginalPage, Question, QuestionList, Subject } from '../shared/collection.ts';
+import type { DraftCancellation } from '../shared/collection.ts';
 import type { ClientPlatform } from './platform.ts';
 import { ApiError, FamilyApi } from './api.ts';
 import { CaptureCache } from './capture-cache.ts';
@@ -27,8 +28,9 @@ import { QuestionFilters } from './QuestionFilters.tsx';
 import type { FilterOptions, QuestionFilters as Filters } from '../shared/collection.ts';
 import { ReadingLinkConflict } from './ReadingLinkConflict.tsx';
 
-export function CollectionWorkspace({ api, home, platform, path, grant, onAccessError, onEditing, active = true, mode = 'workspace' }: {
+export function CollectionWorkspace({ api, home, platform, path, grant, navigate, onAccessError, onEditing, active = true, mode = 'workspace' }: {
   api: FamilyApi; home: Home; platform: ClientPlatform; path: PagePath; grant?: string; onAccessError(error: ApiError): Promise<void>; onEditing(active: boolean): void; active?: boolean; mode?: 'home' | 'collect' | 'workspace';
+  navigate(path: PagePath): void;
 }) {
   const cache = useMemo(() => new CaptureCache(platform, { libraryId: home.library.id, accountId: home.account.id }), [platform, home.library.id, home.account.id]);
   const [screen, setScreen] = useState<'list' | 'edit' | 'detail' | 'reading' | 'answers' | 'reading-conflict'>('list');
@@ -58,6 +60,8 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
   const [notice, setNotice] = useState('');
   const [originalOpen, setOriginalOpen] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const [cancelled, setCancelled] = useState<DraftCancellation[]>([]);
+  const undoOperations = useRef(new Map<string, string>());
   const listState = mode === 'home' ? 'collected' : mode === 'collect' ? 'draft' : state;
   const admin = mode === 'workspace';
   const managementGrant = admin ? grant : undefined;
@@ -78,9 +82,10 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
     if (!active) return;
     let current = true;
     setLoading(true); setReadError(''); setList({ items: [], total: 0, offset: 0, limit: 50 });
-    void Promise.all([api.subjects(), api.questions(listState, 0, managementGrant, mode === 'collect' ? {} : filters), api.sources(), api.filterOptions(managementGrant), api.studySettings()]).then(([subjects, list, sources, options, settings]) => {
+    void Promise.all([api.subjects(), api.questions(listState, 0, managementGrant, mode === 'collect' ? {} : filters), api.sources(), api.filterOptions(managementGrant), api.studySettings(), mode === 'home' ? Promise.resolve([]) : api.cancelledDrafts(managementGrant)]).then(([subjects, list, sources, options, settings, cancelled]) => {
       if (!current) return;
       setSubjects(subjects); setList(list); setSources(sources); setFilterOptions(options); setDefaultStage(settings.stage);
+      setCancelled(cancelled);
     }).catch(async failure => {
       if (!current) return;
       if (failure instanceof ApiError && [401, 403].includes(failure.status)) { await onAccessError(failure); return; }
@@ -137,6 +142,15 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
     setRefresh(value => value + 1);
   }
   function back() { setError(''); setNotice(''); setSelected(undefined); setProposedReading(undefined); setCreating(false); setOriginalOpen(false); setScreen('list'); setRefresh(value => value + 1); }
+  async function undo(item: DraftCancellation) {
+    const key = `${item.id}:${item.revision}`;
+    if (!undoOperations.current.has(key)) undoOperations.current.set(key, crypto.randomUUID());
+    try {
+      await api.cancelDraft(item.id, { operationId: undoOperations.current.get(key)!, expectedRevision: item.revision, cancelled: false }, managementGrant);
+      const question = await api.question(item.id, managementGrant);
+      setSelected(question); setCreating(false); setScreen('edit'); setRefresh(value => value + 1);
+    } catch (failure) { setRefresh(value => value + 1); throw failure; }
+  }
   function newFromPage(page: OriginalPage) {
     if (!selected || !active || busy || (admin && !grant)) return;
     setProposedReading(undefined);
@@ -208,6 +222,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
     {notice && <p role="status" className="message">{notice}</p>}
     {screen === 'list' && mode === 'collect' && <section className="collection-entry" aria-label="收集新材料"><h1>收集</h1><p className="intro">先把材料留下来，再慢慢整理。</p><CaptureChoices busy={busy || cacheLoading || !!pending} onChoose={choose} onNotice={setNotice} />{pending && <p className="hint">先继续或取消本机待上传图片，再选择新的材料。</p>}</section>}
     {screen === 'list' && mode !== 'home' && batch && <CaptureQueue batch={batch} busy={busy} onUpload={item => void run(() => upload(item))} onCancel={item => void run(() => cancel(item))} />}
+    {screen === 'list' && mode !== 'home' && cancelled.length > 0 && <details className="card cancelled-collections" open={notice === '已取消本次收集，材料仍保留。'}><summary>已取消的收集</summary>{cancelled.map(item => <div className="material-actions" key={item.id}><span>{date(item.cancelledAt!)}</span><button className="quiet" disabled={busy || !active} onClick={() => void run(() => undo(item))}>撤销取消</button></div>)}</details>}
     {screen === 'list' && <section className="card collection-card" aria-label={listState === 'draft' ? '已保存的草稿' : '已收集错题'}>
       <div className="section-heading"><div>{admin ? <h1>错题资料</h1> : <h2>{listState === 'draft' ? '已保存的草稿' : '已收集'}</h2>}{mode === 'collect' && <p className="hint">已保存在家庭电脑，可以换设备继续整理。</p>}</div>{admin && <div className="admin-upload"><CaptureInput label="上传材料" busy={busy || cacheLoading || !!pending} onChoose={choose} onCancel={() => setNotice('已取消选择，已有材料保留。')} /></div>}</div>
       {admin && <p className="hint">支持 JPEG、PNG、静态 WebP；每张最多 15 MB、4000 万像素，每批最多 10 张、合计 75 MB。{pending ? '请先继续或取消本机待上传材料。' : '选择图片后可框题、确认学科并保存。'}</p>}
@@ -223,7 +238,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, onAccess
       </article>)}</div>}
       {list.items.length < list.total && <button className="quiet" disabled={busy || cacheLoading || loading} onClick={() => void run(async () => { const more = await api.questions(listState, list.items.length, managementGrant, mode === 'collect' ? {} : filters); setList(current => ({ ...more, items: [...current.items, ...more.items] })); })}>加载更多</button>}
     </section>}
-    {screen === 'edit' && selected && <QuestionEditor key={selected.id} api={api} question={selected} proposedReading={proposedReading} subjects={subjects} sources={sources} active={active} externalBusy={busy} admin={admin} creating={creating} grant={managementGrant} pageCache={pageCache} onBack={back} onNewFromPage={newFromPage} onReading={openReading} onAnswers={openAnswers} onAccessError={onAccessError} onCurrent={setSelected} onSaved={question => { setSelected(question); setProposedReading(undefined); setCreating(false); setRefresh(value => value + 1); if (!admin && question.state === 'collected') setScreen('detail'); }} />}
+    {screen === 'edit' && selected && <QuestionEditor key={selected.id} api={api} question={selected} proposedReading={proposedReading} subjects={subjects} sources={sources} active={active} externalBusy={busy} admin={admin} creating={creating} grant={managementGrant} pageCache={pageCache} onBack={back} onCancelled={() => { back(); setNotice('已取消本次收集，材料仍保留。'); if (!admin) navigate('/learn/collect'); }} onNewFromPage={newFromPage} onReading={openReading} onAnswers={openAnswers} onAccessError={onAccessError} onCurrent={setSelected} onSaved={question => { setSelected(question); setProposedReading(undefined); setCreating(false); setRefresh(value => value + 1); if (!admin && question.state === 'collected') setScreen('detail'); }} />}
     {screen === 'answers' && selected && <AnswerEditor key={selected.id} api={api} question={selected} subjects={subjects} sources={sources} cache={answerCache} grant={managementGrant} active={active} onBack={() => setScreen(answerReturn.current)} onCurrent={setSelected} onSaved={question => { setSelected(question); setScreen(answerReturn.current); setRefresh(value => value + 1); }} onAccessError={onAccessError} />}
     {screen === 'reading' && reading && <ReadingMaterialEditor key={reading.id} api={api} material={reading} cache={readingCache} grant={managementGrant} active={active} onBack={() => { setReading(undefined); setScreen('edit'); }} onSaved={readingSaved} onAccessError={onAccessError} />}
     {screen === 'reading-conflict' && reading && selected && <ReadingLinkConflict api={api} question={selected} material={reading} subjects={subjects} sources={sources} grant={managementGrant} active={active} onAccessError={onAccessError}

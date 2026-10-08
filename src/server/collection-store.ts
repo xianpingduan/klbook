@@ -11,8 +11,9 @@ import { ReadingMaterials } from './reading-materials.ts';
 import { Study, normalizeStage } from './study.ts';
 import type { StudyStage } from '../shared/study.ts';
 import type { FilterOptions, QuestionFilters } from '../shared/collection.ts';
+import type { DraftCancellation, DraftCancellationEdit } from '../shared/collection.ts';
 
-interface QuestionRow extends Omit<Question, 'originalPage' | 'parts' | 'region' | 'syncState' | 'readingMaterial' | 'answerParts' | 'studyStage'>, StudyStage { originalPageId: string; region: string | null }
+interface QuestionRow extends Omit<Question, 'originalPage' | 'parts' | 'region' | 'syncState' | 'readingMaterial' | 'answerParts' | 'studyStage'>, StudyStage { originalPageId: string; region: string | null; cancelledAt: number | null }
 export class CollectionStore {
   private db: Database.Database;
   private files: Attachments;
@@ -43,7 +44,8 @@ export class CollectionStore {
   get(libraryId: string, id: string): Question {
     const row = this.db.prepare<[string, string], QuestionRow>('SELECT * FROM questions WHERE libraryId = ? AND id = ?').get(libraryId, id);
     if (!row) throw new AccessError(404, '找不到这道题');
-    const { originalPageId, region, schoolYear, grade, term, ...rest } = row;
+    if (row.cancelledAt !== null) throw new AccessError(409, '本次收集已取消，请到收集页撤销取消后继续');
+    const { originalPageId, region, schoolYear, grade, term, cancelledAt: _cancelled, ...rest } = row;
     const parts = this.db.prepare<[string], { id: string; pageId: string; region: string | null; transcription: string; recognition: string | null }>('SELECT id, pageId, region, transcription, recognition FROM questionParts WHERE questionId = ? ORDER BY position').all(id)
       .map(part => ({ id: part.id, originalPage: this.publicPage(libraryId, part.pageId), region: part.region ? JSON.parse(part.region) as Region : null, transcription: part.transcription, recognition: part.recognition ? JSON.parse(part.recognition) : null }));
     const reading = this.db.prepare<[string], { materialId: string }>('SELECT materialId FROM questionReadings WHERE questionId = ?').get(id);
@@ -52,11 +54,11 @@ export class CollectionStore {
     return { ...rest, studyStage: { schoolYear, grade, term }, source: rest.sourceId ? this.sources.get(rest.sourceId).name : rest.source, region: region ? JSON.parse(region) as Region : null, originalPage: this.publicPage(libraryId, originalPageId), parts, answerParts, readingMaterial: reading ? this.readings.get(libraryId, reading.materialId) : null, syncState: 'synced' };
   }
   filterOptions(libraryId: string): FilterOptions {
-    const values = (column: 'schoolYear' | 'grade') => this.db.prepare<[string], { value: string }>(`SELECT DISTINCT ${column} AS value FROM questions WHERE libraryId = ? AND ${column} IS NOT NULL ORDER BY ${column} DESC`).all(libraryId).map(row => row.value);
+    const values = (column: 'schoolYear' | 'grade') => this.db.prepare<[string], { value: string }>(`SELECT DISTINCT ${column} AS value FROM questions WHERE libraryId = ? AND cancelledAt IS NULL AND ${column} IS NOT NULL ORDER BY ${column} DESC`).all(libraryId).map(row => row.value);
     return { schoolYears: values('schoolYear'), grades: values('grade'), sources: this.sources.list(true) };
   }
   list(libraryId: string, state: 'draft' | 'collected', offset: number, filters: QuestionFilters = {}): QuestionList {
-    const clauses = ['libraryId = ?', 'state = ?'];
+    const clauses = ['libraryId = ?', 'state = ?', 'cancelledAt IS NULL'];
     const values: (string | number)[] = [libraryId, state];
     for (const key of ['subjectId', 'schoolYear', 'grade', 'term', 'sourceId'] as const) {
       if (!filters[key]) continue;
@@ -70,6 +72,28 @@ export class CollectionStore {
     const ids = this.db.prepare<(string | number)[], { id: string }>(`SELECT id FROM questions WHERE ${where} ORDER BY createdAt DESC, id LIMIT 50 OFFSET ?`).all(...values, offset);
     const total = this.db.prepare<(string | number)[], { count: number }>(`SELECT COUNT(*) AS count FROM questions WHERE ${where}`).get(...values)!.count;
     return { items: ids.map(row => this.get(libraryId, row.id)), total, offset, limit: 50 };
+  }
+  cancelledDrafts(libraryId: string): DraftCancellation[] {
+    return this.db.prepare<[string], DraftCancellation>('SELECT id, revision, cancelledAt FROM questions WHERE libraryId = ? AND cancelledAt IS NOT NULL ORDER BY cancelledAt DESC, id').all(libraryId);
+  }
+  cancelDraft(authorize: () => Home, id: string, input: DraftCancellationEdit): DraftCancellation {
+    return this.db.transaction(() => {
+      const home = authorize();
+      const requestHash = fileHash(Buffer.from(JSON.stringify({ id, expectedRevision: input.expectedRevision, cancelled: input.cancelled })));
+      const previous = this.db.prepare<[string, string, string], { requestHash: string; receipt: string }>('SELECT requestHash, receipt FROM draftCancellationOperations WHERE libraryId = ? AND accountId = ? AND operationId = ?').get(home.library.id, home.account.id, input.operationId);
+      if (previous) {
+        if (previous.requestHash !== requestHash) throw new AccessError(409, '此次重试内容已改变，请刷新后重试');
+        return JSON.parse(previous.receipt) as DraftCancellation;
+      }
+      const row = this.db.prepare<[string, string], QuestionRow>('SELECT * FROM questions WHERE libraryId = ? AND id = ?').get(home.library.id, id);
+      if (!row) throw new AccessError(404, '找不到这道题');
+      if (row.state !== 'draft') throw new AccessError(409, '已收集题目不能取消本次收集');
+      if (row.revision !== input.expectedRevision || (row.cancelledAt !== null) === input.cancelled) throw new AccessError(409, '草稿状态已在其他页面更新，请刷新后核对');
+      const receipt = { id, revision: row.revision + 1, cancelledAt: input.cancelled ? this.now() : null };
+      this.db.prepare('UPDATE questions SET revision = ?, cancelledAt = ?, updatedAt = ? WHERE id = ?').run(receipt.revision, receipt.cancelledAt, this.now(), id);
+      this.db.prepare('INSERT INTO draftCancellationOperations VALUES (?, ?, ?, ?, ?)').run(home.library.id, home.account.id, input.operationId, requestHash, JSON.stringify(receipt));
+      return receipt;
+    })();
   }
   private replay(home: Home, operationId: string, requestHash: string) {
     const operation = this.db.prepare<[string, string, string], { requestHash: string; questionId: string }>('SELECT requestHash, questionId FROM collectionOperations WHERE libraryId = ? AND accountId = ? AND operationId = ?').get(home.library.id, home.account.id, operationId);

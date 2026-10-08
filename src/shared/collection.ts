@@ -3,6 +3,8 @@ import type { StudyStage } from './study.ts';
 import type { Source } from './sources.ts';
 
 export interface Subject { id: string; name: string }
+export interface DraftCancellation { id: string; revision: number; cancelledAt: number | null }
+export interface DraftCancellationEdit { operationId: string; expectedRevision: number; cancelled: boolean }
 export interface Region { x: number; y: number; width: number; height: number }
 export function validQuestionRegion(region: Region | null): region is Region {
   return !!region && Object.values(region).every(Number.isFinite) && region.x >= 0 && region.y >= 0 && region.width > 0 && region.height > 0

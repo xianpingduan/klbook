@@ -19,8 +19,9 @@ export interface OcrCandidate {
   id: string; text: string; region: import('./collection.ts').Region; questionNumber: string; subjectId: string | null;
 }
 export interface PageRecognition extends OcrTest {
-  pageId: string | null; inputWidth: number | null; inputHeight: number | null; candidates: OcrCandidate[];
+  pageId: string | null; inputWidth: number | null; inputHeight: number | null; inputRegion: import('./collection.ts').Region | null; candidates: OcrCandidate[];
 }
+export interface PageRecognitionRequest { region?: import('./collection.ts').Region; automatic?: boolean }
 export interface PageRecognitions {
   initialMessage: string;
   service: { provider: OcrProvider; enabled: boolean; available: boolean; formulas: boolean };

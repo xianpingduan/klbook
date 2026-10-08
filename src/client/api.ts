@@ -8,7 +8,8 @@ import type { StudySettings, StudySettingsEdit, StudyStage } from '../shared/stu
 import type { FilterOptions, QuestionFilters } from '../shared/collection.ts';
 import type { ConflictTarget } from '../shared/conflicts.ts';
 import type { OcrEdit, OcrSettings, OcrTest } from '../shared/ocr.ts';
-import type { PageRecognition, PageRecognitions } from '../shared/ocr.ts';
+import type { PageRecognition, PageRecognitions, PageRecognitionRequest } from '../shared/ocr.ts';
+import type { DraftCancellation, DraftCancellationEdit } from '../shared/collection.ts';
 
 export class ApiError extends Error {
   status: number;
@@ -71,7 +72,7 @@ export class FamilyApi {
   subjects() { return this.request<Subject[]>('/collection/subjects'); }
   pageRecognitions(pageId: string, grant?: string) { return this.request<PageRecognitions>(`/collection/pages/${encodeURIComponent(pageId)}/recognitions`, 'GET', undefined, grant); }
   pageRecognition(pageId: string, id: string, grant?: string) { return this.request<PageRecognition>(`/collection/pages/${encodeURIComponent(pageId)}/recognitions/${encodeURIComponent(id)}`, 'GET', undefined, grant); }
-  recognizePage(pageId: string, id: string, grant?: string) { return this.request<PageRecognition>(`/collection/pages/${encodeURIComponent(pageId)}/recognitions/${encodeURIComponent(id)}`, 'PUT', undefined, grant); }
+  recognizePage(pageId: string, id: string, grant?: string, input?: PageRecognitionRequest) { return this.request<PageRecognition>(`/collection/pages/${encodeURIComponent(pageId)}/recognitions/${encodeURIComponent(id)}`, 'PUT', input, grant); }
   ocrSettings(grant: string) { return this.request<OcrSettings>('/admin/ocr', 'GET', undefined, grant); }
   saveOcr(grant: string, input: OcrEdit) { return this.request<OcrSettings>('/admin/ocr', 'PUT', input, grant); }
   testOcr(grant: string, id: string, expectedRevision: number) { return this.request<OcrTest>(`/admin/ocr/tests/${encodeURIComponent(id)}`, 'PUT', { expectedRevision, sample: 'school-v1' }, grant); }
@@ -94,6 +95,8 @@ export class FamilyApi {
     return this.request<QuestionList>(`/collection/questions?${query}`, 'GET', undefined, grant);
   }
   question(id: string, grant?: string) { return this.request<Question>(`/collection/questions/${encodeURIComponent(id)}`, 'GET', undefined, grant); }
+  cancelledDrafts(grant?: string) { return this.request<DraftCancellation[]>('/collection/cancelled-drafts', 'GET', undefined, grant); }
+  cancelDraft(id: string, input: DraftCancellationEdit, grant?: string) { return this.request<DraftCancellation>(`/collection/questions/${encodeURIComponent(id)}/cancellation`, 'PUT', input, grant); }
   saveQuestion(id: string, input: QuestionEdit, grant?: string) { return this.request<Question>(`/collection/questions/${encodeURIComponent(id)}`, 'PUT', input, grant); }
   createQuestion(pageId: string, input: QuestionCreate, grant?: string) { return this.request<Question>(`/collection/pages/${encodeURIComponent(pageId)}/questions`, 'POST', input, grant); }
   uploadImage(file: Blob, operationId: string, grant?: string, stage?: StudyStage) { return this.upload<Question>('drafts', file, operationId, grant, stage); }

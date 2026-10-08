@@ -15,6 +15,65 @@ const vendorResult = () => Response.json({ header: { code: 0 }, payload: { resul
   { exception: 0, coord: [{ x: 40, y: 300 }, { x: 450, y: 300 }, { x: 450, y: 340 }, { x: 40, y: 340 }], words: [{ content: '2. 计算 25 + 16 =' }] }
 ] }] })).toString('base64') } } });
 
+test('上传不识别；自动识别所选区域幂等，改框重新识别，结果坐标仍对应原图', async () => {
+  let calls = 0;
+  const dimensions: number[][] = [];
+  const f = await familyFixture({ ocrHttp: async (_url, init) => {
+    calls++;
+    const payload = JSON.parse(String(init.body)).payload.sf8e6aca1_data_1;
+    const meta = await sharp(Buffer.from(payload.image, 'base64')).metadata();
+    dimensions.push([meta.width!, meta.height!]);
+    assert.equal(payload.encoding, 'jpg'); assert.equal(meta.format, 'jpeg');
+    return vendorResult();
+  } });
+  try {
+    const parent = await ocrParent(f), headers = auth(f.first.token);
+    await f.app.inject({ method: 'PUT', url: '/api/v1/admin/ocr', headers: parent, payload: { operationId: randomUUID(), expectedRevision: 0, config, credentials } });
+    const bytes = await sharp(await readFile(new URL('../fixtures/paper.svg', import.meta.url))).jpeg().toBuffer();
+    const draft = (await f.app.inject({ method: 'POST', url: '/api/v1/collection/drafts', headers: { ...headers, 'content-type': 'image/jpeg', 'idempotency-key': randomUUID() }, payload: bytes })).json();
+    const pageId = draft.originalPage.id;
+    assert.deepEqual((await completed(f, pageId)).runs, []);
+    assert.equal(calls, 0);
+    const region = { x: .1, y: .2, width: .8, height: .6 }, id = randomUUID();
+    const start = (runId: string, selected = region, automatic = true) => f.app.inject({ method: 'PUT', url: `/api/v1/collection/pages/${pageId}/recognitions/${runId}`, headers, payload: { region: selected, automatic } });
+    assert.equal((await start(id)).statusCode, 202);
+    const run = (await completed(f, pageId)).runs[0];
+    assert.equal(run.status, 'succeeded'); assert.deepEqual(run.inputRegion, region);
+    assert.deepEqual(dimensions, [[512, 480]]);
+    for (const candidate of run.candidates) {
+      assert.ok(candidate.region.x >= .1 && candidate.region.y >= .2);
+      assert.ok(candidate.region.x + candidate.region.width <= .900001 && candidate.region.y + candidate.region.height <= .800001);
+    }
+    assert.equal((await start(randomUUID())).json().id, id);
+    assert.equal(calls, 1);
+    assert.equal((await start(id, { ...region, y: .1 })).statusCode, 409);
+    assert.equal((await start(randomUUID(), { ...region, x: .5 })).statusCode, 422);
+    assert.equal((await start(randomUUID(), { ...region, y: .1 })).statusCode, 202);
+    await completed(f, pageId); assert.equal(calls, 2);
+    assert.deepEqual((await f.app.inject({ url: `/api/v1/collection/pages/${pageId}/original`, headers })).rawPayload, bytes);
+  } finally { await f.close(); }
+});
+
+test('无题号的文字不冒充候选题，学年日期不提供数学建议', async () => {
+  let text = '2026-2027学年';
+  const f = await familyFixture({ ocrHttp: async () => Response.json({ header: { code: 0 }, payload: { result: { encoding: 'utf8', compress: 'raw', format: 'json', text: Buffer.from(JSON.stringify({ pages: [{ exception: 0, lines: [{ exception: 0, coord: [{ x: 10, y: 10 }, { x: 400, y: 10 }, { x: 400, y: 40 }, { x: 10, y: 40 }], words: [{ content: text }] }] }] })).toString('base64') } } }) });
+  try {
+    const parent = await ocrParent(f), headers = auth(f.first.token);
+    await f.app.inject({ method: 'PUT', url: '/api/v1/admin/ocr', headers: parent, payload: { operationId: randomUUID(), expectedRevision: 0, config, credentials } });
+    const bytes = await sharp(await readFile(new URL('../fixtures/paper.svg', import.meta.url))).png().toBuffer();
+    const draft = (await f.app.inject({ method: 'POST', url: '/api/v1/collection/drafts', headers: { ...headers, 'content-type': 'image/png', 'idempotency-key': randomUUID() }, payload: bytes })).json();
+    const pageId = draft.originalPage.id;
+    for (const numbered of [false, true]) {
+      text = `${numbered ? '1. ' : ''}2026-2027学年`;
+      await f.app.inject({ method: 'PUT', url: `/api/v1/collection/pages/${pageId}/recognitions/${randomUUID()}`, headers });
+      const run = (await completed(f, pageId)).runs[0];
+      assert.equal(run.lines[0].text, text);
+      assert.equal(run.candidates.length, numbered ? 1 : 0);
+      if (numbered) assert.equal(run.candidates[0].subjectId, null);
+    }
+  } finally { await f.close(); }
+});
+
 test('收集调用超过最近记录上限后，后台仍保留当前配置的样例测试结果', async () => {
   const f = await familyFixture({ ocrHttp: async () => vendorResult() });
   try {
@@ -27,6 +86,7 @@ test('收集调用超过最近记录上限后，后台仍保留当前配置的�
     const bytes = await sharp(await readFile(new URL('../fixtures/paper.svg', import.meta.url))).png().toBuffer();
     const draft = (await f.app.inject({ method: 'POST', url: '/api/v1/collection/drafts', headers: { ...headers, 'content-type': 'image/png', 'idempotency-key': randomUUID() }, payload: bytes })).json();
     const pageId = draft.originalPage.id;
+    await f.app.inject({ method: 'PUT', url: `/api/v1/collection/pages/${pageId}/recognitions/${randomUUID()}`, headers });
     await completed(f, pageId);
     for (let i = 0; i < 20; i++) {
       assert.equal((await f.app.inject({ method: 'PUT', url: `/api/v1/collection/pages/${pageId}/recognitions/${randomUUID()}`, headers })).statusCode, 202);
@@ -113,7 +173,7 @@ test('原图先保存；停用不识别，启用后主动识别历史页，结�
   } finally { await f.close(); }
 });
 
-test('新上传页只识别一次；候选经确认后保存更正文字，重试识别不改写已确认内容', async () => {
+test('手动发起识别后候选经确认保存更正文字，上传重试和重新识别不改写已确认内容', async () => {
   let calls = 0;
   const f = await familyFixture({ ocrHttp: async () => { calls++; return vendorResult(); } });
   try {
@@ -122,7 +182,9 @@ test('新上传页只识别一次；候选经确认后保存更正文字，重�
     const bytes = await sharp(await readFile(new URL('../fixtures/paper.svg', import.meta.url))).png().toBuffer();
     const upload = { method: 'POST' as const, url: '/api/v1/collection/drafts', headers: { ...headers, 'content-type': 'image/png', 'idempotency-key': randomUUID() }, payload: bytes };
     const draft = (await f.app.inject(upload)).json();
-    const pageId = draft.originalPage.id, result = await completed(f, pageId), run = result.runs[0];
+    const pageId = draft.originalPage.id;
+    await f.app.inject({ method: 'PUT', url: `/api/v1/collection/pages/${pageId}/recognitions/${randomUUID()}`, headers });
+    const result = await completed(f, pageId), run = result.runs[0];
     assert.equal(run?.status, 'succeeded', JSON.stringify(result)); assert.equal(calls, 1);
     await f.app.inject(upload); assert.equal(calls, 1, '上传响应丢失后不重复识别');
     const candidate = run.candidates[0];
@@ -192,6 +254,7 @@ test('迟到结果不改写题目，跨页冒用识别引用被拒绝；撤销�
     const bytes = await sharp(await readFile(new URL('../fixtures/paper.svg', import.meta.url))).png().toBuffer();
     const draft = (await f.app.inject({ method: 'POST', url: '/api/v1/collection/drafts', headers: { ...child, 'content-type': 'image/png', 'idempotency-key': randomUUID() }, payload: bytes })).json();
     const pageId = draft.originalPage.id;
+    await f.app.inject({ method: 'PUT', url: `/api/v1/collection/pages/${pageId}/recognitions/${randomUUID()}`, headers: child });
     for (let i = 0; i < 100 && !respond; i++) await new Promise(resolve => setTimeout(resolve, 10));
     assert.ok(respond);
     const edit = { operationId: randomUUID(), expectedRevision: 1, state: 'collected', subjectId: 'math', sourceId: null, region: { x: .1, y: .1, width: .8, height: .8 }, pageNumber: '', questionNumber: '手动', note: '未等识别结果' };
@@ -222,7 +285,7 @@ test('带方向信息的图片用正向副本识别，原始文件保留；重�
     calls++;
     const buffer = Buffer.from(JSON.parse(String(init.body)).payload.sf8e6aca1_data_1.image, 'base64');
     const meta = await sharp(buffer).metadata();
-    assert.equal(meta.width, 640); assert.equal(meta.height, 800); assert.equal(meta.format, 'png');
+    assert.equal(meta.width, 640); assert.equal(meta.height, 800); assert.equal(meta.format, 'jpeg');
     assert.ok(buffer.length <= 3 * 1024 * 1024);
     return vendorResult();
   } });
@@ -231,6 +294,7 @@ test('带方向信息的图片用正向副本识别，原始文件保留；重�
     await f.app.inject({ method: 'PUT', url: '/api/v1/admin/ocr', headers: parent, payload: { operationId: randomUUID(), expectedRevision: 0, config, credentials } });
     const original = await sharp({ create: { width: 800, height: 640, channels: 3, background: 'white' } }).jpeg().withMetadata({ orientation: 6 }).toBuffer();
     const draft = (await f.app.inject({ method: 'POST', url: '/api/v1/collection/drafts', headers: { ...headers, 'content-type': 'image/jpeg', 'idempotency-key': randomUUID() }, payload: original })).json();
+    await f.app.inject({ method: 'PUT', url: `/api/v1/collection/pages/${draft.originalPage.id}/recognitions/${randomUUID()}`, headers });
     const done = await completed(f, draft.originalPage.id), run = done.runs[0];
     assert.equal(run.inputWidth, 640); assert.equal(run.inputHeight, 800);
     const region = run.candidates[0].region;

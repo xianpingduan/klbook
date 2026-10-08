@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { FamilyAccess } from './family-access.ts';
 import type { OcrService } from './ocr-service.ts';
-import type { OcrEdit } from '../shared/ocr.ts';
+import type { OcrEdit, PageRecognitionRequest } from '../shared/ocr.ts';
 import { ocrSample } from './ocr-sample.ts';
 
 export function ocrRoutes(app: FastifyInstance, access: FamilyAccess, ocr: OcrService) {
@@ -14,7 +14,9 @@ export function ocrRoutes(app: FastifyInstance, access: FamilyAccess, ocr: OcrSe
     routes.addHook('onRequest', async request => { authorize(request.headers); });
     routes.get<{ Params: { pageId: string } }>('/:pageId/recognitions', { schema: { params } }, async request => ocr.pageRuns(() => authorize(request.headers), request.params.pageId));
     routes.get<{ Params: { pageId: string; id: string } }>('/:pageId/recognitions/:id', { schema: { params } }, async request => ocr.pageRun(() => authorize(request.headers), request.params.pageId, request.params.id));
-    routes.put<{ Params: { pageId: string; id: string } }>('/:pageId/recognitions/:id', { schema: { params } }, async (request, reply) => reply.code(202).send(ocr.startPage(() => authorize(request.headers), request.params.pageId, request.params.id)));
+    routes.put<{ Params: { pageId: string; id: string }; Body: PageRecognitionRequest | undefined }>('/:pageId/recognitions/:id', { preValidation: async request => { if (request.body === undefined) request.body = {}; }, schema: { params, body: {
+      type: 'object', additionalProperties: false, properties: { automatic: { type: 'boolean' }, region: { type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], properties: { x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' } } } }
+    } } }, async (request, reply) => reply.code(202).send(ocr.startPage(() => authorize(request.headers), request.params.pageId, request.params.id, request.body)));
   }, { prefix: '/api/v1/collection/pages' });
   app.register(async routes => {
     const parent = (headers: { authorization?: string; 'x-parent-authorization'?: unknown }) => access.parentHome(/^Bearer [A-Za-z0-9_-]{43}$/.test(headers.authorization ?? '') ? headers.authorization!.slice(7) : '', String(headers['x-parent-authorization'] ?? ''));

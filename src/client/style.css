@@ -276,6 +276,10 @@ select:focus-visible, textarea:focus-visible { outline: 3px solid #ceac53; outli
 /* Recognition suggestions remain optional beside the preserved paper image. */
 .recognition-panel { margin-block: 1rem; padding: 1rem; background: #f5f8fc; border: 1px solid #dce5ed; border-radius: 14px; min-width: 0; }
 .recognition-panel h2 { margin-top: 0; }
+.recognition-panel > summary, .cancelled-collections > summary { cursor: pointer; font-weight: 600; min-height: 32px; }
+.app-surface .material-actions .file-picker { margin: 0; padding: 12px 20px; min-height: 44px; border: 0; border-radius: 10px; background: #eaf3ed; color: var(--accent); }
+.material-actions .file-picker .capture-symbol { display: none; }
+.material-actions .file-picker input { position: absolute; inset: 0; margin: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .recognition-candidates { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: .7rem; }
 .recognition-candidates article { min-width: 0; padding: .8rem; background: white; border: 1px solid #dce5ed; border-radius: 10px; }
 .recognition-excerpt { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 9rem; overflow: auto; }

@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import type { OcrConfig, OcrCredentials, OcrLine } from '../shared/ocr.ts';
-import { OcrFailure, object, readOcrResponse, type VendorHttp } from './ocr-provider.ts';
+import { OcrFailure, object, readOcrResponse, type VendorHttp, type OcrResult } from './ocr-provider.ts';
 
 async function authenticationFailure(response: Response): Promise<OcrFailure> {
   const data = await readOcrResponse(response).catch(() => ({}));
@@ -15,18 +15,19 @@ async function authenticationFailure(response: Response): Promise<OcrFailure> {
   return new OcrFailure('讯飞鉴权失败，请检查 APPID、APIKey、APISecret、服务权限及电脑系统时间');
 }
 
-function textLines(data: Record<string, unknown>, credentials: OcrCredentials): OcrLine[] {
+function textLines(data: Record<string, unknown>, credentials: OcrCredentials): OcrResult {
   const result = object(object(data.payload).result);
   if (result.compress !== 'raw' || result.encoding !== 'utf8' || result.format !== 'json' || typeof result.text !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(result.text) || result.text.length % 4 !== 0) throw new OcrFailure('讯飞返回的识别数据格式不完整，请稍后重新测试', false, true);
   const decoded = object(JSON.parse(Buffer.from(result.text, 'base64').toString('utf8')));
   if (!Array.isArray(decoded.pages) || !decoded.pages.length) throw new OcrFailure('讯飞未返回可用页面，请核对服务后重新测试', false, true);
   const lines: OcrLine[] = [];
+  let skipped = 0;
   for (const item of decoded.pages) {
     const page = object(item);
     if (page.exception !== 0 || !Array.isArray(page.lines)) throw new OcrFailure('讯飞未能完整识别页面，请重新测试并核对材料', false, true);
     for (const item of page.lines) {
       const line = object(item);
-      if (line.exception !== 0 || !Array.isArray(line.words)) throw new OcrFailure('讯飞返回了不完整的文字行，请重新测试并核对材料', false, true);
+      if (line.exception !== 0 || !Array.isArray(line.words) || line.words.some(word => typeof object(word).content !== 'string')) { skipped++; continue; }
       if (lines.length >= 500) throw new OcrFailure('识别结果过长，请缩小材料范围后测试', false, true);
       let text = '';
       for (const word of line.words) {
@@ -48,14 +49,14 @@ function textLines(data: Record<string, unknown>, credentials: OcrCredentials): 
     }
   }
   if (!lines.length) throw new OcrFailure('请求已返回，但讯飞未识别出文字，请核对材料', false, true);
-  return lines;
+  return { lines, ...(skipped ? { warning: `部分识别：已保留 ${lines.length} 行文字，${skipped} 行未能读取，请以原图为准` } : {}) };
 }
 
 export class XfyunOcr {
   private http: VendorHttp;
   private now: () => number;
   constructor(http: VendorHttp = (url, init) => fetch(url, init), now = Date.now) { this.http = http; this.now = now; }
-  async recognize(credentials: OcrCredentials, config: OcrConfig, image: Buffer, signal: AbortSignal, permit: () => void): Promise<OcrLine[]> {
+  async recognize(credentials: OcrCredentials, config: OcrConfig, image: Buffer, signal: AbortSignal, permit: () => void): Promise<OcrResult> {
     let dispatched = false;
     const timed = AbortSignal.any([signal, AbortSignal.timeout(config.timeoutSeconds * 1000)]);
     try {
@@ -67,7 +68,7 @@ export class XfyunOcr {
       const signature = createHmac('sha256', credentials.secretKey).update(`host: ${url.host}\ndate: ${date}\nPOST ${url.pathname} HTTP/1.1`).digest('base64');
       const authorization = Buffer.from(`api_key="${credentials.apiKey}", algorithm="hmac-sha256", headers="host date request-line", signature="${signature}"`).toString('base64');
       url.search = new URLSearchParams({ authorization, host: url.host, date }).toString();
-      const body = JSON.stringify({ header: { app_id: credentials.appId, status: 3 }, parameter: { sf8e6aca1: { category: 'ch_en_public_cloud', result: { encoding: 'utf8', compress: 'raw', format: 'json' } } }, payload: { sf8e6aca1_data_1: { encoding: 'png', status: 3, image: encoded } } });
+      const body = JSON.stringify({ header: { app_id: credentials.appId, status: 3 }, parameter: { sf8e6aca1: { category: 'ch_en_public_cloud', result: { encoding: 'utf8', compress: 'raw', format: 'json' } } }, payload: { sf8e6aca1_data_1: { encoding: image[0] === 0xff && image[1] === 0xd8 ? 'jpg' : 'png', status: 3, image: encoded } } });
       permit(); timed.throwIfAborted(); dispatched = true;
       const response = await this.http(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, redirect: 'error', signal: timed });
       if (!response.ok) {

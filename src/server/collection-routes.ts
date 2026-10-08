@@ -2,12 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import type { FamilyAccess } from './family-access.ts';
 import { CollectionStore } from './collection-store.ts';
 import { MAX_IMAGE_BYTES } from '../shared/collection.ts';
-import type { AnswerEdit, QuestionCreate, QuestionEdit, QuestionFilters } from '../shared/collection.ts';
+import type { AnswerEdit, DraftCancellationEdit, QuestionCreate, QuestionEdit, QuestionFilters } from '../shared/collection.ts';
 import { AccessError } from './family-access.ts';
 import type { ReadingMaterialEdit } from '../shared/reading-materials.ts';
 import { stageSchema } from './study-routes.ts';
 import { normalizeStage } from './study.ts';
-import type { OcrService } from './ocr-service.ts';
 
 const regionSchema = { anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], properties: {
   x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 },
@@ -31,7 +30,7 @@ const createBody = {
   }
 };
 
-export function collectionRoutes(app: FastifyInstance, access: FamilyAccess, collection: CollectionStore, ocr: OcrService) {
+export function collectionRoutes(app: FastifyInstance, access: FamilyAccess, collection: CollectionStore) {
   app.register(async routes => {
     const token = (value: string | undefined) => /^Bearer [A-Za-z0-9_-]{43}$/.test(value ?? '') ? value!.slice(7) : '';
     // Learning keeps device-session access; management requests also validate their grant.
@@ -41,6 +40,12 @@ export function collectionRoutes(app: FastifyInstance, access: FamilyAccess, col
     routes.addHook('onRequest', async request => { authorize(request.headers); });
     routes.addContentTypeParser(['image/jpeg', 'image/png', 'image/webp'], { parseAs: 'buffer', bodyLimit: MAX_IMAGE_BYTES }, (_request, body, done) => done(null, body));
     routes.get('/subjects', async () => collection.subjects());
+    routes.get('/cancelled-drafts', async request => collection.cancelledDrafts(authorize(request.headers).library.id));
+    routes.put<{ Params: { id: string }; Body: DraftCancellationEdit }>('/questions/:id/cancellation', { schema: { params: idParams, body: {
+      type: 'object', additionalProperties: false, required: ['operationId', 'expectedRevision', 'cancelled'], properties: {
+        operationId: { type: 'string', format: 'uuid' }, expectedRevision: { type: 'integer', minimum: 1 }, cancelled: { type: 'boolean' }
+      }
+    } } }, async request => collection.cancelDraft(() => authorize(request.headers), request.params.id, request.body));
     routes.get('/filter-options', async request => collection.filterOptions(authorize(request.headers).library.id));
     routes.get<{ Querystring: { offset?: string } }>('/answer-pages', { schema: { querystring: { type: 'object', additionalProperties: false, properties: { offset: { type: 'string', pattern: '^[0-9]{1,7}$' } } } } }, async request => collection.answerPages(authorize(request.headers).library.id, Number(request.query.offset ?? 0)));
     routes.put<{ Params: { id: string }; Body: AnswerEdit }>('/questions/:id/answers', { schema: { params: idParams, body: {
@@ -65,8 +70,7 @@ export function collectionRoutes(app: FastifyInstance, access: FamilyAccess, col
         catch { throw new AccessError(422, '暂存的学习阶段格式不正确，请核对材料后重试'); }
       }
       if (path === '/drafts') {
-        const { question, created } = await collection.upload(() => authorize(request.headers), request.headers['idempotency-key'], request.body, stage);
-        if (created) ocr.uploadedPage(() => authorize(request.headers), question.originalPage.id);
+        const { question } = await collection.upload(() => authorize(request.headers), request.headers['idempotency-key'], request.body, stage);
         return reply.code(201).send(question);
       }
       const result = await collection.uploadPage(() => authorize(request.headers), request.headers['idempotency-key'], request.body);

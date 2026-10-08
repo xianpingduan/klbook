@@ -90,6 +90,24 @@ test('讯飞按官方签名向指定接口发送PNG，解码文字及坐标，�
   } finally { await f.close(); }
 });
 
+test('讯飞局部文字行异常保留有效文字并标明不完整，不自动重复收费调用', async () => {
+  let calls = 0;
+  const f = await familyFixture({ ocrHttp: async () => {
+    calls++;
+    return Response.json({ header: { code: 0 }, payload: { result: { compress: 'raw', encoding: 'utf8', format: 'json', text: Buffer.from(JSON.stringify({ pages: [{ exception: 0, lines: [
+      { exception: 0, words: [{ content: '可读题干' }] }, { exception: 2, words: [] }, { exception: 0, words: [{ content: null }] }
+    ] }] })).toString('base64') } } });
+  } });
+  try {
+    const headers = await parent(f);
+    await f.app.inject({ method: 'PUT', url: path, headers, payload: { operationId: randomUUID(), expectedRevision: 0, config: { ...config, provider: 'xfyun', formulas: false, retries: 2 }, credentials: xfyun } });
+    await f.app.inject({ method: 'PUT', url: `${path}/tests/${randomUUID()}`, headers, payload: { expectedRevision: 1, sample: 'school-v1' } });
+    const data = await finish(f, headers);
+    assert.equal(data.tests[0].status, 'succeeded'); assert.deepEqual(data.tests[0].lines, [{ text: '可读题干' }]);
+    assert.match(data.tests[0].message, /部分识别.*2.*原图/); assert.equal(calls, 1); assert.equal(data.usage.attempts, 1);
+  } finally { await f.close(); }
+});
+
 test('讯飞鉴权和嵌套业务异常均不伪报成功，错误与畸形响应不回显凭据', async () => {
   let mode: 'auth' | 'service' | 'page' | 'line' | 'invalid' = 'auth', calls = 0;
   const f = await familyFixture({ ocrHttp: async () => {

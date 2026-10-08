@@ -1,4 +1,5 @@
 export type VendorHttp = (url: URL, init: RequestInit) => Promise<Response>;
+export interface OcrResult { lines: import('../shared/ocr.ts').OcrLine[]; warning?: string }
 export class OcrFailure extends Error {
   retryable: boolean; chargeable: boolean;
   constructor(message: string, retryable = false, chargeable = false) { super(message); this.retryable = retryable; this.chargeable = chargeable; }

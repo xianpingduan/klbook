@@ -9,15 +9,16 @@ import { XfyunOcr } from './xfyun-ocr.ts';
 import { OcrFailure, type VendorHttp } from './ocr-provider.ts';
 import { ocrSample } from './ocr-sample.ts';
 import { setTimeout as pause } from 'node:timers/promises';
-import sharp from 'sharp';
-import type { PageRecognition, PageRecognitions } from '../shared/ocr.ts';
+import type { PageRecognition, PageRecognitions, PageRecognitionRequest } from '../shared/ocr.ts';
+import { validQuestionRegion, type Region } from '../shared/collection.ts';
+import { recognitionImage } from './recognition-image.ts';
 import type { CollectionStore } from './collection-store.ts';
 import { recognitionCandidates } from './recognition-candidates.ts';
 
 type SettingsRow = { revision: number; config: string };
-type RecognitionRow = Omit<PageRecognition, 'lines' | 'candidates'> & { lines: string; candidates: string };
-const recognitionFields = 'id, revision, provider, sample, status, createdAt, finishedAt, durationMs, attempts, message, lines, pageId, inputWidth, inputHeight, candidates';
-const recognitionResult = (row: RecognitionRow): PageRecognition => ({ ...row, lines: JSON.parse(row.lines), candidates: JSON.parse(row.candidates) });
+type RecognitionRow = Omit<PageRecognition, 'lines' | 'candidates' | 'inputRegion'> & { lines: string; candidates: string; inputRegion: string | null };
+const recognitionFields = 'id, revision, provider, sample, status, createdAt, finishedAt, durationMs, attempts, message, lines, pageId, inputWidth, inputHeight, candidates, inputRegion';
+const recognitionResult = (row: RecognitionRow): PageRecognition => ({ ...row, lines: JSON.parse(row.lines), candidates: JSON.parse(row.candidates), inputRegion: row.inputRegion ? JSON.parse(row.inputRegion) : null });
 export class OcrService {
   private db: Database.Database;
   private vault: CredentialVault;
@@ -42,42 +43,40 @@ export class OcrService {
       service: { provider: config.provider, enabled: config.enabled, available: credentialAvailable, formulas: config.provider === 'baidu' && config.formulas },
       runs: this.db.prepare<[string, string], RecognitionRow>(`SELECT ${recognitionFields} FROM ocrTests WHERE libraryId = ? AND pageId = ? ORDER BY createdAt DESC, rowid DESC LIMIT 20`).all(home.library.id, pageId).map(recognitionResult) };
   }
-  uploadedPage(authorize: () => Home, pageId: string) {
-    try {
-      const home = authorize(); this.collection.publicPage(home.library.id, pageId);
-      if (!this.db.prepare('INSERT OR IGNORE INTO initialPageRecognition (pageId) VALUES (?)').run(pageId).changes) return;
-      this.startPage(authorize, pageId, pageId);
-    } catch (error) {
-      // Original material is already durable; an optional external capability must not fail its upload.
-      try { this.db.prepare('UPDATE initialPageRecognition SET message = ? WHERE pageId = ?').run(error instanceof AccessError ? error.message : '识别暂不可用，可以继续手动框题', pageId); }
-      catch { /* Preserve the successful upload even if an auxiliary record cannot be written. */ }
-    }
-  }
   pageRun(authorize: () => Home, pageId: string, id: string) {
     const home = authorize(); this.collection.publicPage(home.library.id, pageId);
     const row = this.db.prepare<[string, string, string], RecognitionRow>(`SELECT ${recognitionFields} FROM ocrTests WHERE libraryId = ? AND pageId = ? AND id = ?`).get(home.library.id, pageId, id);
     if (!row) throw new AccessError(404, '找不到这次图片识别记录');
     return recognitionResult(row);
   }
-  startPage(authorize: () => Home, pageId: string, id: string) {
+  startPage(authorize: () => Home, pageId: string, id: string, input: PageRecognitionRequest = {}) {
+    if ((input.region && !validQuestionRegion(input.region)) || (input.automatic && !input.region)) throw new AccessError(422, '请先确认图片内的题目范围');
+    const region = input.region ? { x: input.region.x, y: input.region.y, width: input.region.width, height: input.region.height } : null;
+    const regionKey = region ? JSON.stringify(region) : null;
+    let resultId = id;
     this.db.transaction(() => {
       const home = authorize(); this.collection.publicPage(home.library.id, pageId);
-      const previous = this.db.prepare<[string], { pageId: string; libraryId: string }>('SELECT pageId, libraryId FROM ocrTests WHERE id = ?').get(id);
+      const previous = this.db.prepare<[string], { pageId: string; libraryId: string; inputRegion: string | null }>('SELECT pageId, libraryId, inputRegion FROM ocrTests WHERE id = ?').get(id);
       if (previous) {
-        if (previous.pageId !== pageId || previous.libraryId !== home.library.id) throw new AccessError(409, '此识别请求已属于其他材料');
+        if (previous.pageId !== pageId || previous.libraryId !== home.library.id || previous.inputRegion !== regionKey) throw new AccessError(409, '此识别请求已属于其他材料或范围');
         return;
       }
+      if (input.automatic) {
+        const initial = this.db.prepare<[string, string], { runId: string }>('SELECT runId FROM automaticRegionRecognitions WHERE pageId = ? AND region = ?').get(pageId, regionKey!);
+        if (initial) { resultId = initial.runId; return; }
+      }
       if (this.pendingCount >= 10 || this.stopping.signal.aborted) throw new AccessError(409, '待识别材料较多，可以先手动框题，稍后重试');
-      if (this.db.prepare("SELECT 1 FROM ocrTests WHERE pageId = ? AND status = 'running'").get(pageId)) throw new AccessError(409, '这张图片正在识别，请等待读取结果');
+      if (this.db.prepare("SELECT 1 FROM ocrTests WHERE pageId = ? AND inputRegion IS ? AND status = 'running'").get(pageId, regionKey)) throw new AccessError(409, '这个范围正在识别，请等待读取结果');
       const row = this.row(), config: OcrConfig = JSON.parse(row.config), sealed = this.sealed(config.provider);
       if (!config.enabled) throw new AccessError(422, '图片识别已停用，可以继续手动框题');
       if (!sealed) throw new AccessError(422, '尚未配置图片识别，可以继续手动框题');
       this.vault.open(sealed); this.checkQuota(config);
-      this.db.prepare("INSERT INTO ocrTests (id, accountId, revision, provider, sample, status, createdAt, libraryId, pageId) VALUES (?, ?, ?, ?, 'original-page', 'running', ?, ?, ?)").run(id, home.account.id, row.revision, config.provider, this.now(), home.library.id, pageId);
+      this.db.prepare("INSERT INTO ocrTests (id, accountId, revision, provider, sample, status, createdAt, libraryId, pageId, inputRegion) VALUES (?, ?, ?, ?, 'original-page', 'running', ?, ?, ?, ?)").run(id, home.account.id, row.revision, config.provider, this.now(), home.library.id, pageId, regionKey);
+      if (input.automatic) this.db.prepare('INSERT INTO automaticRegionRecognitions VALUES (?, ?, ?)').run(pageId, regionKey!, id);
       this.db.prepare("INSERT INTO serviceAudit (capability, actor, at, action) VALUES ('ocr', ?, ?, '识别收集材料')").run(home.account.username, this.now());
-      this.schedule(id, () => this.runRecognition(id, row, sealed, { authorize, libraryId: home.library.id, pageId }));
+      this.schedule(id, () => this.runRecognition(id, row, sealed, { authorize, libraryId: home.library.id, pageId, region }));
     })();
-    return this.pageRun(authorize, pageId, id);
+    return this.pageRun(authorize, pageId, resultId);
   }
   private schedule(id: string, run: () => Promise<void>) {
     this.pendingCount++;
@@ -175,20 +174,15 @@ export class OcrService {
       if (!JSON.parse(this.row().config).enabled) throw new OcrFailure('图片识别已停用，可以继续手动框题');
     }
   }
-  private async runRecognition(id: string, row: SettingsRow, sealed: string, page?: { authorize: () => Home; libraryId: string; pageId: string }) {
+  private async runRecognition(id: string, row: SettingsRow, sealed: string, page?: { authorize: () => Home; libraryId: string; pageId: string; region: Region | null }) {
     const started = performance.now(); const config: OcrConfig = JSON.parse(row.config);
     const credentials: OcrCredentials = JSON.parse(this.vault.open(sealed));
     let image: Buffer, width = 1000, height = 600;
+    let inputRegion: Region = { x: 0, y: 0, width: 1, height: 1 };
     if (page) {
       const original = await this.collection.attachment(page.libraryId, page.pageId, 'original');
-      let bound = 2800;
-      for (;;) {
-        const prepared = await sharp(original.bytes).autoOrient().resize({ width: bound, height: bound, fit: 'inside', withoutEnlargement: true }).png().toBuffer({ resolveWithObject: true });
-        image = prepared.data; width = prepared.info.width; height = prepared.info.height;
-        if (image.length <= 3 * 1024 * 1024) break;
-        if (bound <= 700) throw new OcrFailure('材料暂无法转换为识别图片，可以继续手动框题');
-        bound = Math.floor(bound * .75);
-      }
+      const prepared = await recognitionImage(original.bytes, page.region);
+      image = prepared.image; width = prepared.width; height = prepared.height; inputRegion = prepared.region;
       this.db.prepare('UPDATE ocrTests SET inputWidth = ?, inputHeight = ? WHERE id = ?').run(width, height, id);
     } else image = await ocrSample();
     let failure = new OcrFailure('测试未完成');
@@ -203,11 +197,17 @@ export class OcrService {
         })();
       } catch (error) { failure = new OcrFailure(error instanceof AccessError || error instanceof OcrFailure ? error.message : '本地调用记录无法保存'); break; }
       try {
-        const lines = await this.vendors[config.provider].recognize(credentials, config, image, this.stopping.signal, () => this.permit(row.revision, page?.authorize));
+        const { lines, warning } = await this.vendors[config.provider].recognize(credentials, config, image, this.stopping.signal, () => this.permit(row.revision, page?.authorize));
         this.db.transaction(() => {
           this.db.prepare('UPDATE serviceAttempts SET status = \'succeeded\', finishedAt = ?, message = \'识别成功\' WHERE id = ?').run(this.now(), attemptId);
-          this.db.prepare('UPDATE ocrTests SET status = \'succeeded\', finishedAt = ?, durationMs = ?, message = \'测试成功，请核对识别文字\', lines = ? WHERE id = ?').run(this.now(), Math.round(performance.now() - started), JSON.stringify(lines), id);
-          if (page) this.db.prepare('UPDATE ocrTests SET message = ?, candidates = ? WHERE id = ?').run('识别完成，请确认题目范围和文字', JSON.stringify(recognitionCandidates(lines, width, height, this.collection.subjects())), id);
+          this.db.prepare('UPDATE ocrTests SET status = \'succeeded\', finishedAt = ?, durationMs = ?, message = ?, lines = ? WHERE id = ?').run(this.now(), Math.round(performance.now() - started), warning ?? '测试成功，请核对识别文字', JSON.stringify(lines), id);
+          if (page) {
+            const candidates = recognitionCandidates(lines, width, height, this.collection.subjects()).map(candidate => ({ ...candidate, region: {
+              x: inputRegion.x + candidate.region.x * inputRegion.width, y: inputRegion.y + candidate.region.y * inputRegion.height,
+              width: candidate.region.width * inputRegion.width, height: candidate.region.height * inputRegion.height
+            } }));
+            this.db.prepare('UPDATE ocrTests SET message = ?, candidates = ? WHERE id = ?').run(warning ?? '识别完成，可按需核对文字', JSON.stringify(candidates), id);
+          }
         })();
         return;
       } catch (error) {

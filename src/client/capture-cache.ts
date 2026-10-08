@@ -2,7 +2,7 @@ import type { ClientPlatform, DraftScope } from './platform.ts';
 import type { StudyStage } from '../shared/study.ts';
 import { emptyStage, validStage } from '../shared/study.ts';
 
-export interface PendingCapture { operationId: string; file: Blob; name: string; studyStage?: StudyStage }
+export interface PendingCapture { operationId: string; file: Blob; name: string; studyStage?: StudyStage; replacePartId?: string }
 export interface CaptureBatch { items: PendingCapture[]; total: number; uploaded: number; cancelled: number }
 // One Blob atomically stores a length-prefixed JSON header and the untouched image bytes.
 export class CaptureCache {
@@ -42,7 +42,7 @@ export class CaptureCache {
     } catch { throw new Error('本设备暂存信息无法读取，请保留原图片并重试。'); }
   }
   async save(capture: PendingCapture) {
-    const header = new TextEncoder().encode(JSON.stringify({ version: 1, operationId: capture.operationId, name: capture.name, type: capture.file.type, studyStage: capture.studyStage }));
+    const header = new TextEncoder().encode(JSON.stringify({ version: 1, operationId: capture.operationId, name: capture.name, type: capture.file.type, studyStage: capture.studyStage, replacePartId: capture.replacePartId }));
     const length = new ArrayBuffer(4);
     new DataView(length).setUint32(0, header.byteLength);
     const blob = new Blob([length, header, capture.file]);
@@ -59,7 +59,8 @@ export class CaptureCache {
       if (header.version !== 1 || typeof header.operationId !== 'string' || !/^[a-f0-9-]{36}$/i.test(header.operationId) || typeof header.name !== 'string' || typeof header.type !== 'string') throw new Error('Invalid header');
       const studyStage = header.studyStage ?? emptyStage;
       if (!validStage(studyStage)) throw new Error('Invalid study stage');
-      return { operationId: header.operationId, file: blob.slice(length + 4, blob.size, header.type), name: header.name, studyStage };
+      if (header.replacePartId !== undefined && (typeof header.replacePartId !== 'string' || !/^[a-f0-9-]{36}$/i.test(header.replacePartId))) throw new Error('Invalid replacement');
+      return { operationId: header.operationId, file: blob.slice(length + 4, blob.size, header.type), name: header.name, studyStage, replacePartId: header.replacePartId };
     } catch { throw new Error('本设备暂存信息无法读取，请重新选择原图片。'); }
   }
   remove() { return this.platform.drafts.remove(this.scope, this.key); }
