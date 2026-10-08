@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>错题集 · 收集交互预览</title>
+  <link rel="stylesheet" href="preview.css">
+</head>
+<body>
+  <header class="preview-header">
+    <a class="preview-brand" href="?variant=A&step=confirm&size=phone"><span class="logo">记</span><span>错题集 <small>交互预览</small></span></a>
+    <div class="sizes" aria-label="预览尺寸"><button data-size="phone">手机</button><button data-size="tablet">平板</button><button data-size="desktop">电脑</button></div>
+    <span class="preview-disclaimer">示例资料 · 保存与同步为模拟</span>
+  </header>
+  <main class="preview-layout">
+    <aside class="design-intro">
+      <span class="overline">收集，更轻松一点</span>
+      <h1>把注意力<br>留给这道题。</h1>
+      <p>沿用熟悉的样子，减少每一步需要面对的选择。</p>
+      <nav class="step-links" aria-label="预览流程">
+        <button data-step="collect"><span>01</span> 收集入口</button>
+        <button data-step="crop"><span>02</span> 框住题目</button>
+        <button data-step="confirm"><span>03</span> 确认并保存</button>
+        <button data-step="detail"><span>04</span> 题目详情</button>
+      </nav>
+      <div class="variant-note" id="variant-note"></div>
+    </aside>
+    <section class="device-area" aria-label="学习端预览">
+      <div class="device" id="device"><div class="app" id="app"></div></div>
+      <p class="preview-state" id="preview-state" aria-live="polite"></p>
+    </section>
+    <aside class="design-notes"><span class="overline">这次重点看什么</span><h2>更少打断<br>更明确的下一步</h2><ul><li>拍照、相册直接进入</li><li>主按钮始终在手边</li><li>补充信息按需展开</li><li>返回后可以接着整理</li></ul><p>自动保留进度仅演示交互，正式能力需后续实现。刷新预览会重置示例。</p><a href="http://127.0.0.1:8787/learn/collect" target="_blank" rel="noopener">打开当前正式页面 ↗</a></aside>
+  </main>
+  <nav class="prototype-switcher" aria-label="切换布局方案"><button id="previous-variant" aria-label="上一个方案">←</button><div><strong id="variant-label"></strong><span id="variant-caption"></span></div><button id="next-variant" aria-label="下一个方案">→</button></nav>
+  <script type="module" src="preview.js"></script>
+</body>
+</html>
