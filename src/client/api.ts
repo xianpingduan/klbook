@@ -212,8 +212,13 @@ export class FamilyApi {
     try { return this.rememberQuestion(await this.request<Question>(`/collection/questions/${encodeURIComponent(this.remoteId(id))}`, 'GET', undefined, grant)); }
     catch (failure) { if (failure instanceof ApiError && failure.status === 410) this.local?.deleted(id, failure.message); if (failure instanceof ConnectionError && !grant) { const saved = this.local?.read<Question>(`/collection/questions/${id}`); if (saved) return saved; } throw failure; }
   }
-  async deletedQuestions(grant?: string) {
-    const items = await this.request<Deletion[]>('/collection/deleted-questions', 'GET', undefined, grant);
+  async deletedQuestions(grant?: string, forceOnline = false) {
+    // An offline screen only needs last-known deletion metadata. Reconnect synchronization
+    // verifies the live home first, so its deletion check always goes to the server.
+    const items = this.offline && !grant && !forceOnline ? this.local?.read<Deletion[]>('/collection/deleted-questions') ?? []
+      : forceOnline ? await this.send<Deletion[]>('/collection/deleted-questions', { headers: grant ? { 'X-Parent-Authorization': grant } : {} }, response => response.json())
+      : await this.request<Deletion[]>('/collection/deleted-questions', 'GET', undefined, grant);
+    if (forceOnline) { try { this.local?.remember('/collection/deleted-questions', items); } catch { /* Online replay remains valid; offline checks use the last durable metadata. */ } }
     const result = items.map(item => ({ ...item, id: this.captures?.localId(item.id) ?? item.id }));
     for (const item of result) this.local?.deleted(item.id, item.purgedAt === null ? '已被家长移入回收站，请由家长恢复后再核对本机修改。' : '已永久删除，不能恢复；本机文字仍保留，可复制需要的内容。');
     return result;
@@ -384,7 +389,7 @@ export class FamilyApi {
       await this.verifiedHome();
       await this.syncCaptures();
       const cancelled = new Set((await this.cancelledDrafts()).map(item => item.id));
-      const deleted = new Set((await this.deletedQuestions()).map(item => item.id));
+      const deleted = new Set((await this.deletedQuestions(undefined, true)).map(item => item.id));
       for (const record of this.captures?.records() ?? []) if (record.blocked && record.question) deleted.add(record.question.id);
       for (const entry of QuestionJournal.entries(this.platform, scope)) {
         const progress = entry.value;

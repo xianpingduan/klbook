@@ -138,11 +138,13 @@ test('上传回执丢失后服务器已删草稿，不重复建回且不阻塞�
       expect((await request.put(`${f.url}/api/v1/admin/trash/${draft.id}`, { headers: f.parent, data: { operationId: crypto.randomUUID(), expectedRevision: draft.revision, action: 'trash' } })).status()).toBe(200);
       await route.abort();
     }, { times: 1 });
+    await expect(page.getByLabel('选择题目图片')).toBeEnabled();
     await page.getByLabel('选择题目图片').setInputFiles({ name: '已删除.png', mimeType: 'image/png', buffer: image });
     await expect(page.getByRole('heading', { name: '框住这道题' })).toBeVisible();
     await page.reload();
     await expect(page.getByText('已删除题目的本机内容', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '继续整理' })).toHaveCount(0);
+    await expect(page.getByLabel('选择题目图片')).toBeEnabled();
     await page.getByLabel('选择题目图片').setInputFiles({ name: '新材料.png', mimeType: 'image/png', buffer: image });
     await reveal(page.getByRole('button', { name: '选择整页', exact: true, includeHidden: true }));
     await page.getByRole('button', { name: '选择整页', exact: true }).click();
