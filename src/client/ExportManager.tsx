@@ -22,6 +22,7 @@ export function ExportManager({ api, grant, active, onAccessError }: { api: Fami
   async function failure(reason: unknown) {
     if (!mounted.current) return;
     setError(reason instanceof Error ? reason.message : '导出失败，请重试');
+    if (reason instanceof ApiError && reason.status === 404) { setJob(undefined); operation.current = undefined; }
     if (reason instanceof ApiError && [401, 403].includes(reason.status)) await onAccessError(reason);
   }
   useEffect(() => {

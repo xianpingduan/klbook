@@ -19,7 +19,7 @@ async function fixture(request: APIRequestContext) {
   const draft = await (await request.post(`${server.url}/api/v1/collection/drafts`, { headers: { ...headers, 'Content-Type': 'image/png', 'Idempotency-Key': crypto.randomUUID() }, data: bytes })).json();
   const fields = { state: 'collected', subjectId: 'math', region: { x: 0, y: 0, width: 1, height: 1 }, sourceId: null, pageNumber: '3', questionNumber: '8', note: '电脑已同步的备注' };
   const question = await (await request.put(`${server.url}/api/v1/collection/questions/${draft.id}`, { headers, data: { ...fields, operationId: crypto.randomUUID(), expectedRevision: 1 } })).json();
-  return { ...server, headers, bytes, question, fields, async close() { await server.stop(); await rm(dir, { recursive: true, force: true }); } };
+  return { ...server, dir, headers, bytes, question, fields, async close() { await server.stop(); await rm(dir, { recursive: true, force: true }); } };
 }
 async function login(page: Page, url: string) {
   await page.goto(url); await page.getByLabel('家长账号').fill('parent');
@@ -116,4 +116,28 @@ test('生成回执丢失可重试同一操作，下载授权到期后重新验�
     expect(await (await download).failure()).toBeNull();
     expect(ids).toHaveLength(2);
   } finally { await f.close(); }
+});
+
+test('生成回执返回时服务已重启，页面清除失效任务并能重新生成', async ({ page, request }) => {
+  const f = await fixture(request);
+  let restarted: Awaited<ReturnType<typeof startServer>> | undefined;
+  try {
+    await login(page, `${f.url}/admin/exports`); await unlock(page);
+    await page.route('**/api/v1/admin/exports/*', async route => {
+      if (route.request().method() !== 'PUT' || restarted) return route.continue();
+      const response = await route.fetch();
+      expect(response.status()).toBe(202);
+      expect((await response.json()).status).toBe('preparing');
+      await f.stop(); restarted = await startServer(f.dir, Number(new URL(f.url).port));
+      await route.fulfill({ response });
+    });
+    await page.getByRole('button', { name: '确认范围并生成资料包' }).click();
+    await expect(page.getByRole('alert')).toContainText('服务已重启');
+    await expect(page.getByRole('button', { name: '确认范围并生成资料包' })).toBeEnabled();
+    await page.getByRole('button', { name: '刷新导出范围' }).click();
+    await page.getByRole('button', { name: '确认范围并生成资料包' }).click();
+    const downloaded = page.waitForEvent('download');
+    await page.getByRole('button', { name: '下载 ZIP 资料包' }).click();
+    expect(await (await downloaded).failure()).toBeNull();
+  } finally { await restarted?.stop(); await f.close(); }
 });
