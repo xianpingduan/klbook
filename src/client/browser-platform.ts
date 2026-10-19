@@ -2,6 +2,19 @@ import type { ClientPlatform, DraftScope, SavedCredential } from './platform.ts'
 import { serverOrigin } from './platform.ts';
 
 function draftKey(scope: DraftScope, id: string) { return [scope.libraryId, scope.accountId, id]; }
+function readCredential(target: string): SavedCredential | null {
+  const raw = localStorage.getItem(`klbook.credential:${target}`);
+  if (!raw) return null;
+  try {
+    const value: Partial<SavedCredential> = JSON.parse(raw);
+    if (value.target === target && typeof value.libraryId === 'string' && typeof value.accountId === 'string' && typeof value.token === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value.token)) return value as SavedCredential;
+  } catch { /* A damaged credential is treated as signed out. */ }
+  localStorage.removeItem(`klbook.credential:${target}`);
+  return null;
+}
+function rememberScope(target: string, scope: DraftScope) {
+  localStorage.setItem(`klbook.retained-scope:${target}`, JSON.stringify({ libraryId: scope.libraryId, accountId: scope.accountId }));
+}
 function connectionSettings(): { active: string; pending: string | null } {
   const raw = localStorage.getItem('klbook.connection');
   if (!raw) return { active: localStorage.getItem('klbook.target') ?? window.location.origin, pending: null };
@@ -47,18 +60,28 @@ export function browserPlatform(): ClientPlatform {
       async writePending(value) { localStorage.setItem('klbook.connection', JSON.stringify({ ...connectionSettings(), pending: serverOrigin(value) })); }
     },
     credentials: {
-      async read(target) {
-        const raw = localStorage.getItem(`klbook.credential:${target}`);
+      async read(target) { return readCredential(target); },
+      async scope(target) {
+        const credential = readCredential(target);
+        if (credential) return { libraryId: credential.libraryId, accountId: credential.accountId };
+        const raw = localStorage.getItem(`klbook.retained-scope:${target}`);
         if (!raw) return null;
         try {
-          const value: Partial<SavedCredential> = JSON.parse(raw);
-          if (value.target === target && typeof value.libraryId === 'string' && typeof value.accountId === 'string' && typeof value.token === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value.token)) return value as SavedCredential;
-        } catch { /* A damaged credential is treated as signed out. */ }
-        localStorage.removeItem(`klbook.credential:${target}`);
-        return null;
+          const value = JSON.parse(raw);
+          if (value && typeof value.libraryId === 'string' && typeof value.accountId === 'string') return { libraryId: value.libraryId, accountId: value.accountId };
+        } catch { /* Preserve the record and report an unreadable count. */ }
+        throw new Error('本机材料归属无法读取，请重新登录原资料库后核对');
       },
-      async write(value) { localStorage.setItem(`klbook.credential:${value.target}`, JSON.stringify(value)); },
-      async remove(target) { localStorage.removeItem(`klbook.credential:${target}`); }
+      async write(value) {
+        rememberScope(value.target, value);
+        localStorage.setItem(`klbook.credential:${value.target}`, JSON.stringify(value));
+      },
+      async remove(target) {
+        const credential = readCredential(target);
+        localStorage.removeItem(`klbook.credential:${target}`);
+        // Also preserve ownership for sessions saved before this metadata existed.
+        if (credential) rememberScope(target, credential);
+      }
     },
     drafts: {
       async keys(scope) {

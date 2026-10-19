@@ -223,3 +223,37 @@ for (const delayed of ['身份检查', '上传回执']) {
     } finally { release(); await second.stop(); await first.stop(); await rm(root, { recursive: true, force: true }); }
   });
 }
+
+test('会话撤销后重开仍显示原库待处理数量，重新登录才继续补传', async ({ page, request }) => {
+  const root = await mkdtemp(join(tmpdir(), 'klbook-switch-revoked-'));
+  const first = await startServer(join(root, 'a'));
+  try {
+    const a = await setup(request, first.url, join(root, 'a'));
+    const headers = { Authorization: `Bearer ${a.token}` };
+    const grant = await (await request.post(`${first.url}/api/v1/admin/grants`, { headers, data: { password: 'family password 123' } })).json();
+    await page.goto(`${first.url}/learn/collect`); await login(page);
+    const bytes = await sharp(await readFile('test/fixtures/paper.svg')).png().toBuffer();
+    await page.route(`${first.url}/api/v1/collection/drafts`, route => route.abort());
+    await page.getByLabel('从相册选择（可多选）').setInputFiles({ name: '撤销后仍保留.png', mimeType: 'image/png', buffer: bytes });
+    await expect(page.getByRole('heading', { name: '框住这道题' })).toBeVisible();
+    await page.getByRole('button', { name: '返回列表', exact: true }).click();
+    await settings(page);
+    await expect(page.getByText('待上传图片：1 张', { exact: true })).toBeVisible();
+    const devices = await (await request.get(`${first.url}/api/v1/admin/devices`, { headers: { ...headers, 'X-Parent-Authorization': grant.token } })).json();
+    const device = devices.find((value: { id: string }) => value.id !== a.session.id);
+    expect(device).toBeTruthy();
+    expect((await request.delete(`${first.url}/api/v1/admin/devices/${device.id}`, { headers: { ...headers, 'X-Parent-Authorization': grant.token } })).ok()).toBe(true);
+    await page.unroute(`${first.url}/api/v1/collection/drafts`);
+    await page.getByRole('button', { name: '返回', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '登录家庭资料库', exact: true })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole('heading', { name: '登录家庭资料库', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '连接设置', exact: true }).click();
+    await expect(page.getByText('待上传图片：1 张', { exact: true })).toBeVisible();
+    expect((await (await request.get(`${first.url}/api/v1/collection/questions?state=draft`, { headers })).json()).total).toBe(0);
+    await select(page, first.url); await login(page);
+    await page.getByRole('button', { name: '收集', exact: true }).click();
+    await expect(page.getByRole('button', { name: '继续整理', exact: true })).toHaveCount(1);
+    expect((await (await request.get(`${first.url}/api/v1/collection/questions?state=draft`, { headers })).json()).total).toBe(1);
+  } finally { await first.stop(); await rm(root, { recursive: true, force: true }); }
+});

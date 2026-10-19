@@ -15,6 +15,8 @@ export interface ClientPlatform {
   target: { read(): Promise<string>; write(value: string): Promise<void>; readPending(): Promise<string | null>; writePending(value: string): Promise<void> };
   credentials: {
     read(target: string): Promise<SavedCredential | null>;
+    /** Last authenticated owner of retained work; never grants access or enables replay. */
+    scope(target: string): Promise<DraftScope | null>;
     write(value: SavedCredential): Promise<void>;
     remove(target: string): Promise<void>;
   };

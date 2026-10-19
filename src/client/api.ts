@@ -50,10 +50,13 @@ export class FamilyApi {
     this.platform = platform; this.target = target; this.credential = credential;
   }
   get address() { return this.target; }
-  pendingWork() { return this.credential ? pendingLocalWork(this.platform, this.credential) : Promise.resolve({ images: 0, questions: 0 }); }
+  async pendingWork() {
+    const scope = this.credential ?? await this.platform.credentials.scope(this.target);
+    return scope ? pendingLocalWork(this.platform, scope) : { images: 0, questions: 0 };
+  }
   static async savedPendingWork(platform: ClientPlatform) {
-    const credential = await platform.credentials.read(await platform.target.read());
-    return credential ? pendingLocalWork(platform, credential) : { images: 0, questions: 0 };
+    const scope = await platform.credentials.scope(await platform.target.read());
+    return scope ? pendingLocalWork(platform, scope) : { images: 0, questions: 0 };
   }
   questionJournal(id: string) {
     if (!this.credential) throw new Error('请先登录资料库');
