@@ -8,6 +8,7 @@ import type { StudySettings, StudySettingsEdit, StudyStage } from '../shared/stu
 import type { FilterOptions, QuestionFilters } from '../shared/collection.ts';
 import type { ConflictTarget } from '../shared/conflicts.ts';
 import type { OcrEdit, OcrSettings, OcrTest } from '../shared/ocr.ts';
+import type { SpeechEdit, SpeechSettings, SpeechTest } from '../shared/speech.ts';
 import type { PageRecognition, PageRecognitions, PageRecognitionRequest } from '../shared/ocr.ts';
 import type { DraftCancellation, DraftCancellationEdit } from '../shared/collection.ts';
 import type { Region } from '../shared/collection.ts';
@@ -157,6 +158,11 @@ export class FamilyApi {
   pageRecognition(pageId: string, id: string, grant?: string) { return this.request<PageRecognition>(`/collection/pages/${encodeURIComponent(this.remoteId(pageId))}/recognitions/${encodeURIComponent(id)}`, 'GET', undefined, grant); }
   async recognizePage(pageId: string, id: string, grant?: string, input?: PageRecognitionRequest) { await this.syncCaptures(); return this.request<PageRecognition>(`/collection/pages/${encodeURIComponent(this.remoteId(pageId))}/recognitions/${encodeURIComponent(id)}`, 'PUT', input, grant); }
   ocrSettings(grant: string) { return this.request<OcrSettings>('/admin/ocr', 'GET', undefined, grant); }
+  speechSettings(grant: string) { return this.request<SpeechSettings>('/admin/speech', 'GET', undefined, grant); }
+  saveSpeech(grant: string, input: SpeechEdit) { return this.request<SpeechSettings>('/admin/speech', 'PUT', input, grant); }
+  testSpeech(grant: string, id: string, revision: number, audio: File) {
+    return this.send<SpeechTest>(`/admin/speech/tests/${encodeURIComponent(id)}?revision=${revision}`, { method: 'PUT', headers: { 'Content-Type': 'audio/wav', 'X-Parent-Authorization': grant }, body: audio }, response => response.json());
+  }
   saveOcr(grant: string, input: OcrEdit) { return this.request<OcrSettings>('/admin/ocr', 'PUT', input, grant); }
   testOcr(grant: string, id: string, expectedRevision: number) { return this.request<OcrTest>(`/admin/ocr/tests/${encodeURIComponent(id)}`, 'PUT', { expectedRevision, sample: 'school-v1' }, grant); }
   async ocrSample(grant: string) { return this.send('/admin/ocr/sample', { headers: { 'X-Parent-Authorization': grant } }, response => response.blob()); }

@@ -6,7 +6,7 @@ import type { SessionResult } from '../../src/shared/contracts.ts';
 
 export const password = 'family password 123';
 export const auth = (token: string, grant?: string) => ({ authorization: `Bearer ${token}`, ...(grant ? { 'x-parent-authorization': grant } : {}) });
-export async function familyFixture(options: Pick<Parameters<typeof createApp>[0], 'ocrHttp'> = {}) {
+export async function familyFixture(options: Pick<Parameters<typeof createApp>[0], 'ocrHttp' | 'speechSocket'> = {}) {
   const parent = process.env.KLBOOK_TEST_DATA_PARENT ?? tmpdir();
   if (!isAbsolute(parent)) throw new Error('KLBOOK_TEST_DATA_PARENT must be absolute');
   const dataDir = await mkdtemp(join(parent, 'klbook-api-'));

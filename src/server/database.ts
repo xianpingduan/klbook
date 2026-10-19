@@ -140,7 +140,14 @@ const migrations = [
   CREATE TABLE automaticRegionRecognitions (
     pageId TEXT NOT NULL REFERENCES originalPages(id), region TEXT NOT NULL,
     runId TEXT NOT NULL REFERENCES ocrTests(id), PRIMARY KEY(pageId, region)
-  );`
+  );`,
+  `CREATE TABLE speechSettings (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), revision INTEGER NOT NULL, config TEXT NOT NULL, credentials TEXT);
+  CREATE TABLE speechTests (id TEXT PRIMARY KEY, accountId TEXT NOT NULL, requestHash TEXT NOT NULL, revision INTEGER NOT NULL, status TEXT NOT NULL,
+    createdAt INTEGER NOT NULL, finishedAt INTEGER, durationMs INTEGER, attempts INTEGER NOT NULL DEFAULT 0,
+    audioMs INTEGER NOT NULL, audioBytes INTEGER NOT NULL, sampleRate INTEGER NOT NULL, message TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '');
+  CREATE TABLE speechAttempts (id INTEGER PRIMARY KEY, testId TEXT NOT NULL REFERENCES speechTests(id), month TEXT NOT NULL,
+    startedAt INTEGER NOT NULL, finishedAt INTEGER, status TEXT NOT NULL, audioMs INTEGER NOT NULL, estimatedMills INTEGER NOT NULL, message TEXT NOT NULL DEFAULT '');
+  CREATE INDEX speechAttemptsByMonth ON speechAttempts(month);`
 ];
 
 export function openDatabase(dataDir: string) {

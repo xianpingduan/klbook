@@ -14,8 +14,11 @@ import { studyRoutes } from './study-routes.ts';
 import { OcrService } from './ocr-service.ts';
 import { ocrRoutes } from './ocr-routes.ts';
 import type { VendorHttp } from './ocr-provider.ts';
+import { SpeechService } from './speech-service.ts';
+import { speechRoutes } from './speech-routes.ts';
+import type { SpeechSocketFactory } from './xfyun-speech.ts';
 
-export function createApp(options: { dataDir: string; now?: () => number; allowedOrigins?: string[]; staticDir?: string; ocrHttp?: VendorHttp }) {
+export function createApp(options: { dataDir: string; now?: () => number; allowedOrigins?: string[]; staticDir?: string; ocrHttp?: VendorHttp; speechSocket?: SpeechSocketFactory }) {
   const db = openDatabase(options.dataDir);
   const access = new FamilyAccess(db, options.dataDir, options.now);
   const collection = new CollectionStore(db, options.dataDir, options.now);
@@ -25,7 +28,7 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
     reply.header('Cache-Control', 'no-store');
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('Referrer-Policy', 'no-referrer');
-    reply.header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self' https: http://127.0.0.1:* http://localhost:*; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+    reply.header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; connect-src 'self' https: http://127.0.0.1:* http://localhost:*; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     if (request.headers.origin && !origins.includes(request.headers.origin)) throw new AccessError(403, '此网页来源未获允许');
   });
   app.register(cors, { origin: origins, methods: ['GET', 'POST', 'PUT', 'DELETE'], allowedHeaders: ['Content-Type', 'Authorization', 'X-Parent-Authorization', 'Idempotency-Key', 'X-Learning-Stage'], credentials: false });
@@ -35,7 +38,8 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
     }
   });
   const ocr = new OcrService(db, options.dataDir, collection, options.now, options.ocrHttp);
-  app.addHook('onClose', async () => { await ocr.close(); db.close(); });
+  const speech = new SpeechService(db, options.dataDir, options.now, options.speechSocket);
+  app.addHook('onClose', async () => { await Promise.all([ocr.close(), speech.close()]); db.close(); });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof AccessError) return reply.code(error.statusCode).send({ message: error.message, ...(error.conflict ? { conflict: error.conflict } : {}) });
     if (error instanceof Error && 'validation' in error) return reply.code(400).send({ message: '请检查填写内容' });
@@ -79,6 +83,7 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
   sourceRoutes(app, access, new Sources(db));
   studyRoutes(app, access, new Study(db));
   ocrRoutes(app, access, ocr);
+  speechRoutes(app, access, speech);
   if (options.staticDir) {
     app.register(staticFiles, { root: options.staticDir, index: 'index.html' });
     for (const path of Object.keys(pages)) app.get(path, async (_request, reply) => reply.sendFile('index.html'));

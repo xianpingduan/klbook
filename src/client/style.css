@@ -321,3 +321,4 @@ select:focus-visible, textarea:focus-visible { outline: 3px solid #ceac53; outli
 .recognition-excerpt { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 9rem; overflow: auto; }
 .recognition-origin { margin-block: .7rem; }
 .confirmed-transcription { padding: .6rem; overflow-wrap: anywhere; }
+.ocr-manager audio { display: block; max-width: 100%; margin-block: 12px; }

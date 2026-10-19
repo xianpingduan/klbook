@@ -138,7 +138,7 @@ export class OcrService {
       }
       const current = this.row();
       if (current.revision !== input.expectedRevision) throw new AccessError(409, '配置已在其他页面更新，请重新读取配置后核对');
-      const existingSecrets = !!this.db.prepare('SELECT 1 FROM ocrProviderCredentials LIMIT 1').get();
+      const existingSecrets = !!this.db.prepare('SELECT 1 FROM ocrProviderCredentials LIMIT 1').get() || !!this.db.prepare('SELECT 1 FROM speechSettings WHERE credentials IS NOT NULL').get();
       const sealed = credentials ? this.vault.seal(JSON.stringify(credentials), existingSecrets) : this.sealed(config.provider);
       if (config.enabled) {
         if (!sealed) throw new AccessError(422, '请先填写识别服务凭据');
