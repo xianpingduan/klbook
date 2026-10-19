@@ -10,6 +10,17 @@ export class AiFailure extends Error {
   }
 }
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+const businessErrors: Record<number, { message: string; retryable?: boolean; uncertain?: boolean }> = {
+  10007: { message: '讯飞仍在处理上一项请求，请稍后重试', retryable: true },
+  10013: { message: '讯飞输入内容审核未通过，请调整测试文字后再发送' },
+  10019: { message: '讯飞提示输入内容不适合处理，请调整测试文字后再发送' },
+  10014: { message: '讯飞输出内容审核未通过，未展示该回复；请调整测试内容后再试', uncertain: true },
+  10907: { message: '讯飞提示输入 token 超过上限，请精简测试文字后再试' },
+  11200: { message: '所选模型未获授权或用量已超限，请核对讯飞控制台权限和额度' },
+  11201: { message: '讯飞当日调用额度已用完，请核对额度或改日重试' },
+  11202: { message: '讯飞请求过于频繁，请稍后重试', retryable: true },
+  11203: { message: '讯飞同时处理的请求已达上限，请稍后重试', retryable: true }
+};
 function metering(value: unknown): AiMeter {
   const usage = object(value), input = usage.prompt_tokens, output = usage.completion_tokens, total = usage.total_tokens;
   if (![input, output, total].every(n => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0 && n <= 10_000_000) || Number(input) + Number(output) !== total) return noMeter;
@@ -43,17 +54,22 @@ export class XfyunAi {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${credentials.apiPassword}` },
         body: JSON.stringify({ model: config.model, messages: [{ role: 'user', content: prompt }], stream: false, max_tokens: config.maxOutputTokens,
           ...(config.model === '4.0Ultra' ? { tools: [{ type: 'web_search', web_search: { enable: false } }], tool_choice: 'none' } : {}) }) });
-      if (!response.ok) {
-        await response.body?.cancel().catch(() => undefined);
-        if ([401, 403].includes(response.status)) throw new AiFailure('讯飞鉴权或权限检查失败，请核对所选模型的 APIPassword 和开通情况');
-        if (response.status === 429) throw new AiFailure('讯飞调用频率或额度受限，请检查控制台额度后重试', true);
-        if (response.status >= 500) throw new AiFailure('讯飞服务暂时异常，本次结果和费用不确定', true, true);
-        throw new AiFailure('讯飞拒绝了测试请求，请核对模型权限和配置');
+      const body = await readResponse(response, signal).catch(error => { if (response.ok || signal.aborted) throw error; return object(null); });
+      const meter = metering(body.usage);
+      const codeValue = body.code ?? object(body.error).code;
+      if (typeof codeValue === 'number' && businessErrors[codeValue]) {
+        const error = businessErrors[codeValue]!;
+        throw new AiFailure(`${error.message}（代码 ${codeValue}）`, !!error.retryable, !!error.uncertain, meter);
       }
-      const body = await readResponse(response, signal), meter = metering(body.usage);
+      if (!response.ok) {
+        if ([401, 403].includes(response.status)) throw new AiFailure('讯飞鉴权或权限检查失败，请核对所选模型的 APIPassword 和开通情况', false, false, meter);
+        if (response.status === 429) throw new AiFailure('讯飞调用频率或额度受限，请检查控制台额度后重试', true, false, meter);
+        if (response.status >= 500) throw new AiFailure('讯飞服务暂时异常，本次结果和费用不确定', true, true, meter);
+        throw new AiFailure('讯飞拒绝了测试请求，请核对模型权限和配置', false, false, meter);
+      }
       if (body.error || (typeof body.code === 'number' && body.code !== 0)) {
         const code = typeof body.code === 'number' && Number.isSafeInteger(body.code) ? `（代码 ${body.code}）` : '';
-        throw new AiFailure(`讯飞返回业务错误${code}，请核对模型权限、凭据和剩余额度`, false, false, meter);
+        throw new AiFailure(`讯飞返回业务错误${code}，请稍后重试或核对控制台；本次费用不确定`, false, true, meter);
       }
       if (body.code !== undefined && body.code !== 0) throw new AiFailure('讯飞返回格式异常，本次结果和费用不确定', false, true, meter);
       const choice = object(Array.isArray(body.choices) ? body.choices[0] : undefined), message = object(choice.message);

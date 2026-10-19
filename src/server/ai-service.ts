@@ -1,14 +1,22 @@
 import type Database from 'better-sqlite3';
 import type { Home } from '../shared/contracts.ts';
-import { aiModels, defaultAiConfig, type AiConfig, type AiCredentials, type AiEdit, type AiModel, type AiSettings, type AiTest } from '../shared/ai.ts';
+import { aiInputTokenLimits, aiModels, defaultAiConfig, type AiConfig, type AiCredentials, type AiEdit, type AiModel, type AiSettings, type AiTest } from '../shared/ai.ts';
 import { AccessError } from './family-access.ts';
 import { CredentialVault } from './credential-vault.ts';
 import { digest } from './secrets.ts';
-import { AiFailure, XfyunAi, type AiHttp } from './xfyun-ai.ts';
+import { AiFailure, XfyunAi, type AiHttp, type AiMeter } from './xfyun-ai.ts';
 import { setTimeout as pause } from 'node:timers/promises';
 
 type SettingsRow = { revision: number; config: string };
-const testFields = 'id, revision, model, prompt, status, createdAt, finishedAt, durationMs, attempts, message, text, promptTokens, completionTokens, totalTokens';
+const testFields = `id, revision, model, prompt, status, createdAt, finishedAt, durationMs, attempts, message, text, promptTokens, completionTokens, totalTokens,
+  (SELECT COALESCE(SUM(estimatedMicros), 0) / 10000.0 FROM aiAttempts WHERE testId = aiTests.id) AS estimatedCents,
+  (SELECT COALESCE(SUM(estimatedMicros), 0) / 10000.0 FROM aiAttempts WHERE testId = aiTests.id AND costBasis = 'reserved') AS reservedCents`;
+// Integer micro-yuan preserve small token charges; round upward by at most one micro-yuan per attempt.
+function costMicros(config: AiConfig, inputTokens: number, outputTokens: number) {
+  const price = config.modelPrices[config.model];
+  return Math.ceil((inputTokens * price.inputCentsPerMillion + outputTokens * price.outputCentsPerMillion) / 100);
+}
+function reservedMicros(config: AiConfig) { return costMicros(config, aiInputTokenLimits[config.model], config.maxOutputTokens); }
 export class AiService {
   private db: Database.Database;
   private vault: CredentialVault;
@@ -29,7 +37,7 @@ export class AiService {
   private usage(): AiSettings['usage'] {
     return { month: this.month(), ...this.db.prepare<[string], Omit<AiSettings['usage'], 'month'>>(`SELECT COUNT(*) AS attempts, COUNT(totalTokens) AS reportedAttempts,
       COALESCE(SUM(promptTokens), 0) AS promptTokens, COALESCE(SUM(completionTokens), 0) AS completionTokens, COALESCE(SUM(totalTokens), 0) AS totalTokens,
-      COALESCE(SUM(estimatedMills), 0) / 10.0 AS estimatedCents FROM aiAttempts WHERE month = ?`).get(this.month())! };
+      COALESCE(SUM(estimatedMicros), 0) / 10000.0 AS estimatedCents FROM aiAttempts WHERE month = ?`).get(this.month())! };
   }
   private credentialState(model: AiModel) {
     const sealed = this.sealed(model); let available = false;
@@ -44,9 +52,7 @@ export class AiService {
       audit: this.db.prepare<[], AiSettings['audit'][number]>("SELECT actor, at, action FROM serviceAudit WHERE capability = 'ai' ORDER BY id DESC LIMIT 30").all() };
   }
   save(authorize: () => Home, input: AiEdit) {
-    const priceMills = Math.round(input.config.priceCents * 10);
-    if (Math.abs(priceMills - input.config.priceCents * 10) > 1e-8) throw new AccessError(422, '单价最多保留三位元小数');
-    const config: AiConfig = { ...input.config, name: input.config.name.trim(), priceCents: priceMills / 10 };
+    const config: AiConfig = { ...input.config, name: input.config.name.trim() };
     if (!config.name) throw new AccessError(422, '请填写服务名称');
     const credentials = input.credentials && { apiPassword: input.credentials.apiPassword.trim() };
     if (credentials && !/^[\x21-\x7e]{1,512}$/.test(credentials.apiPassword)) throw new AccessError(422, '请填写所选模型 HTTP 接口的 APIPassword，不包含空格或换行');
@@ -62,6 +68,7 @@ export class AiService {
       if (row.revision !== input.expectedRevision) throw new AccessError(409, '配置已在其他页面更新，请重新读取配置后核对');
       const sealed = credentials ? this.vault.seal(JSON.stringify(credentials)) : this.sealed(config.model);
       if (config.enabled) {
+        if (!config.modelPrices[config.model].confirmed) throw new AccessError(422, '请先核对所选模型的输入、输出计费单价；免费额度内也需明确确认');
         if (!sealed) throw new AccessError(422, '请先保存所选模型的 APIPassword');
         this.vault.open(sealed);
       }
@@ -103,8 +110,15 @@ export class AiService {
   }
   private checkQuota(config: AiConfig) {
     const usage = this.usage();
+    if (!config.modelPrices[config.model].confirmed) throw new AccessError(422, '请先核对所选模型的计费单价');
     if (usage.attempts >= config.monthlyLimit) throw new AccessError(422, '已达到 AI 学习本月次数上限');
-    if (Math.round(usage.estimatedCents * 10) + Math.round(config.priceCents * 10) > config.monthlyBudgetCents * 10) throw new AccessError(422, '本次调用会超过 AI 学习本月估算预算');
+    if (Math.round(usage.estimatedCents * 10000) + reservedMicros(config) > config.monthlyBudgetCents * 10000) throw new AccessError(422, '本次预留会超过 AI 学习本月估算预算');
+  }
+  private settleAttempt(id: number, config: AiConfig, status: string, message: string, meter: AiMeter, retainReservation: boolean) {
+    const reported = meter.promptTokens !== null && meter.completionTokens !== null;
+    const estimate = reported ? costMicros(config, meter.promptTokens!, meter.completionTokens!) : retainReservation ? reservedMicros(config) : 0;
+    this.db.prepare('UPDATE aiAttempts SET status = ?, finishedAt = ?, estimatedMicros = ?, costBasis = ?, message = ?, promptTokens = ?, completionTokens = ?, totalTokens = ? WHERE id = ?')
+      .run(status, this.now(), estimate, reported ? 'reported' : retainReservation ? 'reserved' : 'none', message, meter.promptTokens, meter.completionTokens, meter.totalTokens, id);
   }
   private async run(id: string, row: SettingsRow, credentials: AiCredentials, prompt: string, authorize: () => Home) {
     const started = performance.now(), config: AiConfig = JSON.parse(row.config);
@@ -116,7 +130,7 @@ export class AiService {
           authorize();
           if (this.stopping.signal.aborted || this.row().revision !== row.revision || !JSON.parse(this.row().config).enabled) throw new AccessError(422, '配置已更改或 AI 学习已停用，尚未发出的调用已停止');
           this.checkQuota(config);
-          const attempt = this.db.prepare("INSERT INTO aiAttempts (testId, model, month, startedAt, status, estimatedMills) VALUES (?, ?, ?, ?, 'running', ?)").run(id, config.model, this.month(), this.now(), Math.round(config.priceCents * 10));
+          const attempt = this.db.prepare("INSERT INTO aiAttempts (testId, model, month, startedAt, status, estimatedMicros) VALUES (?, ?, ?, ?, 'running', ?)").run(id, config.model, this.month(), this.now(), reservedMicros(config));
           this.db.prepare('UPDATE aiTests SET attempts = attempts + 1 WHERE id = ?').run(id);
           return Number(attempt.lastInsertRowid);
         })();
@@ -125,14 +139,13 @@ export class AiService {
         const result = await this.vendor.complete(credentials, config, prompt, this.stopping.signal);
         const { promptTokens, completionTokens, totalTokens } = result.meter;
         this.db.transaction(() => {
-          this.db.prepare("UPDATE aiAttempts SET status = 'succeeded', finishedAt = ?, promptTokens = ?, completionTokens = ?, totalTokens = ?, message = ? WHERE id = ?").run(this.now(), promptTokens, completionTokens, totalTokens, result.message, attemptId);
+          this.settleAttempt(attemptId, config, 'succeeded', result.message, result.meter, true);
           this.db.prepare("UPDATE aiTests SET status = 'succeeded', finishedAt = ?, durationMs = ?, text = ?, message = ?, promptTokens = ?, completionTokens = ?, totalTokens = ? WHERE id = ?").run(this.now(), Math.round(performance.now() - started), result.text, result.message, promptTokens, completionTokens, totalTokens, id);
         })();
         return;
       } catch (error) {
         failure = error instanceof AiFailure ? error : new AiFailure('本地结果无法完整保存，请检查磁盘后读取记录', false, true);
-        const { promptTokens, completionTokens, totalTokens } = failure.meter;
-        this.db.prepare('UPDATE aiAttempts SET status = ?, finishedAt = ?, estimatedMills = CASE WHEN ? THEN estimatedMills ELSE 0 END, message = ?, promptTokens = ?, completionTokens = ?, totalTokens = ? WHERE id = ?').run(failure.uncertain ? 'unknown' : 'failed', this.now(), Number(failure.uncertain || (totalTokens ?? 0) > 0), failure.message, promptTokens, completionTokens, totalTokens, attemptId);
+        this.settleAttempt(attemptId, config, failure.uncertain ? 'unknown' : 'failed', failure.message, failure.meter, failure.uncertain);
         if (!failure.retryable || retry >= config.retries) break;
         await pause(500 * (retry + 1), undefined, { signal: this.stopping.signal }).catch(() => undefined);
       }

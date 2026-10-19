@@ -30,6 +30,7 @@ test('后台 AI 独立配置、预览测试内容、模型凭据隔离、丢失�
     const prompt = page.getByLabel('本次发送的测试内容', { exact: true }), submit = page.getByRole('button', { name: '发送以上文字并测试', exact: true });
     await prompt.fill('请给出一个计算长方形周长的提示。');
     await expect(submit).toBeDisabled();
+    await page.getByLabel('已核对所选模型的单价和免费额度', { exact: true }).check();
     await page.getByLabel('启用 AI 学习服务', { exact: true }).check();
     await page.getByRole('button', { name: '保存配置', exact: true }).click();
     await expect(submit).toBeEnabled();
@@ -48,6 +49,10 @@ test('后台 AI 独立配置、预览测试内容、模型凭据隔离、丢失�
     await expect(page.getByLabel('启用 AI 学习服务', { exact: true })).not.toBeChecked();
     await expect(page.getByText('所选模型尚未配置凭据。', { exact: true })).toBeVisible();
     await password.fill('browser-ultra:secret');
+    await expect(page.getByLabel('已核对所选模型的单价和免费额度', { exact: true })).not.toBeChecked();
+    await page.getByLabel('输入单价（元／百万 token）', { exact: true }).fill('2');
+    await page.getByLabel('输出单价（元／百万 token）', { exact: true }).fill('6');
+    await page.getByLabel('已核对所选模型的单价和免费额度', { exact: true }).check();
     await page.getByLabel('启用 AI 学习服务', { exact: true }).check();
     await page.getByRole('button', { name: '保存配置', exact: true }).click();
     await expect(submit).toBeEnabled(); await submit.click();

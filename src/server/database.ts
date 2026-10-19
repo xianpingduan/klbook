@@ -154,7 +154,7 @@ const migrations = [
     createdAt INTEGER NOT NULL, finishedAt INTEGER, durationMs INTEGER, attempts INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '',
     promptTokens INTEGER, completionTokens INTEGER, totalTokens INTEGER);
   CREATE TABLE aiAttempts (id INTEGER PRIMARY KEY, testId TEXT NOT NULL REFERENCES aiTests(id), model TEXT NOT NULL, month TEXT NOT NULL, startedAt INTEGER NOT NULL, finishedAt INTEGER,
-    status TEXT NOT NULL, estimatedMills INTEGER NOT NULL, promptTokens INTEGER, completionTokens INTEGER, totalTokens INTEGER, message TEXT NOT NULL DEFAULT '');
+    status TEXT NOT NULL, estimatedMicros INTEGER NOT NULL, costBasis TEXT NOT NULL DEFAULT 'reserved', promptTokens INTEGER, completionTokens INTEGER, totalTokens INTEGER, message TEXT NOT NULL DEFAULT '');
   CREATE INDEX aiAttemptsByMonth ON aiAttempts(month);`
 ];
 

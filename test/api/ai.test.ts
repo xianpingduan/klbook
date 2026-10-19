@@ -11,6 +11,54 @@ import { join } from 'node:path';
 
 const path = '/api/v1/admin/ai';
 const credentials = { apiPassword: 'test-spark-password:keep-private' };
+const prices = (input = 0, output = 0) => ({ lite: { inputCentsPerMillion: input, outputCentsPerMillion: output, confirmed: true }, '4.0Ultra': { inputCentsPerMillion: input, outputCentsPerMillion: output, confirmed: true } });
+
+test('已知 AI 内容审核和长度错误给出对应提示，非成功 HTTP 返回的有效计量也保留', async () => {
+  let code = 10013, status = 200;
+  const vendor = aiVendor(() => Response.json({ code, message: credentials.apiPassword, usage: { prompt_tokens: 28, completion_tokens: 19, total_tokens: 47 } }, { status }));
+  const f = await familyFixture({ aiHttp: vendor.http });
+  try {
+    const { headers, data } = await configure(f, { modelPrices: prices(200, 600) });
+    for (const item of [{ code: 10013, text: '调整测试文字' }, { code: 10019, text: '调整测试文字' }, { code: 10014, text: '输出内容审核' }, { code: 10907, text: '精简测试文字' }]) {
+      code = item.code; assert.equal((await submit(f, headers, data.revision)).statusCode, 202);
+      const result = await finishedAi(f, headers);
+      assert.match(result.tests[0]!.message, new RegExp(item.text));
+      assert.equal(result.tests[0]?.estimatedCents, 0.017);
+      assert.equal(JSON.stringify(result).includes(credentials.apiPassword), false);
+    }
+    status = 429; code = 11202;
+    assert.equal((await submit(f, headers, data.revision)).statusCode, 202);
+    const result = await finishedAi(f, headers);
+    assert.equal(result.tests[0]?.totalTokens, 47); assert.equal(result.usage.estimatedCents, 0.085);
+    assert.equal(result.usage.reportedAttempts, 5);
+  } finally { await f.close(); }
+});
+
+test('AI 按所选模型的输入输出单价结算可得 token，发送前预留上限且切换模型需单独确认价格', async () => {
+  const vendor = aiVendor(), f = await familyFixture({ aiHttp: vendor.http });
+  try {
+    const headers = await ocrParent(f), initial = (await f.app.inject({ url: path, headers })).json();
+    const prices = { lite: { inputCentsPerMillion: 200, outputCentsPerMillion: 600, confirmed: true }, '4.0Ultra': { inputCentsPerMillion: 500, outputCentsPerMillion: 1500, confirmed: false } };
+    const config = { ...initial.config, enabled: true, modelPrices: prices, monthlyBudgetCents: 1 };
+    const save = (expectedRevision: number, next: typeof config) => f.app.inject({ method: 'PUT', url: path, headers, payload: { operationId: randomUUID(), expectedRevision, config: next, credentials } });
+    let saved = await save(0, config);
+    assert.equal(saved.statusCode, 200, saved.body);
+    assert.equal((await submit(f, headers, 1)).statusCode, 422); assert.equal(vendor.calls.length, 0);
+    saved = await save(1, { ...config, monthlyBudgetCents: 100 });
+    assert.equal(saved.statusCode, 200);
+    assert.equal((await submit(f, headers, 2)).statusCode, 202);
+    let result = await finishedAi(f, headers);
+    // 28 input tokens at ¥2/million + 19 output tokens at ¥6/million = ¥0.000170.
+    assert.equal(result.usage.estimatedCents, 0.017); assert.equal(result.tests[0]?.estimatedCents, 0.017); assert.equal(result.tests[0]?.reservedCents, 0);
+    const ultra = { ...config, model: '4.0Ultra', monthlyBudgetCents: 100 };
+    assert.equal((await save(2, ultra)).statusCode, 422);
+    saved = await save(2, { ...ultra, modelPrices: { ...prices, '4.0Ultra': { ...prices['4.0Ultra'], confirmed: true } } });
+    assert.equal(saved.statusCode, 200, saved.body);
+    assert.equal((await submit(f, headers, 3)).statusCode, 202);
+    result = await finishedAi(f, headers);
+    assert.equal(result.tests[0]?.estimatedCents, 0.0425); assert.equal(result.usage.estimatedCents, 0.0595);
+  } finally { await f.close(); }
+});
 
 test('AI 超时和停服保留结果不确定的估算费用，重启不补发也不重复计量', async () => {
   const vendor = aiVendor(({ init }) => new Promise((_resolve, reject) => {
@@ -19,11 +67,11 @@ test('AI 超时和停服保留结果不确定的估算费用，重启不补发�
   }));
   const f = await familyFixture({ aiHttp: vendor.http });
   try {
-    let { headers, data } = await configure(f, { timeoutSeconds: 5, priceCents: 3 });
+    let { headers, data } = await configure(f, { timeoutSeconds: 5, modelPrices: prices(100) });
     assert.equal((await submit(f, headers, data.revision)).statusCode, 202);
     const timeout = await finishedAi(f, headers);
     assert.match(timeout.tests[0]!.message, /超时/); assert.equal(timeout.tests[0]?.status, 'failed');
-    assert.equal(timeout.usage.estimatedCents, 3); assert.equal(timeout.usage.reportedAttempts, 0);
+    assert.equal(timeout.usage.estimatedCents, 0.8192); assert.equal(timeout.usage.reportedAttempts, 0);
     ({ data } = await configure(f, { timeoutSeconds: 120 }, headers));
     const url = `${path}/tests/${randomUUID()}`, payload = { expectedRevision: data.revision, prompt: '停服测试' };
     assert.equal((await f.app.inject({ method: 'PUT', url, headers, payload })).statusCode, 202);
@@ -33,7 +81,7 @@ test('AI 超时和停服保留结果不确定的估算费用，重启不补发�
     const reopened = createApp({ dataDir: f.dataDir, aiHttp: vendor.http });
     try {
       const restored = (await reopened.inject({ url: path, headers })).json();
-      assert.equal(restored.tests[0].status, 'interrupted'); assert.equal(restored.usage.attempts, 2); assert.equal(restored.usage.estimatedCents, 6);
+      assert.equal(restored.tests[0].status, 'interrupted'); assert.equal(restored.usage.attempts, 2); assert.equal(restored.usage.estimatedCents, 1.6384);
       assert.equal((await reopened.inject({ method: 'PUT', url, headers, payload })).statusCode, 202);
       assert.equal(vendor.calls.length, 2);
     } finally { await reopened.close(); }
@@ -91,13 +139,13 @@ test('AI 测试发送前验证文字和权限，自动重试受次数、预算�
     assert.equal(result.tests[0]?.status, 'stopped'); assert.match(result.tests[0]!.message, /次数上限/);
     assert.equal(vendor.calls.length, 1); assert.equal(result.usage.estimatedCents, 0);
     assert.equal((await submit(f, headers, data.revision)).statusCode, 422);
-    ({ data } = await configure(f, { monthlyLimit: 10, monthlyBudgetCents: 2, priceCents: 1.5 }, headers));
+    ({ data } = await configure(f, { monthlyLimit: 10, monthlyBudgetCents: 1, modelPrices: prices(100) }, headers));
     reply = () => Response.json({}, { status: 503 });
     assert.equal((await submit(f, headers, data.revision)).statusCode, 202);
     result = await finishedAi(f, headers);
     assert.equal(result.tests[0]?.status, 'stopped'); assert.match(result.tests[0]!.message, /估算预算/);
-    assert.equal(vendor.calls.length, 2); assert.equal(result.usage.estimatedCents, 1.5);
-    ({ data } = await configure(f, { monthlyBudgetCents: 1000, priceCents: 0 }, headers));
+    assert.equal(vendor.calls.length, 2); assert.equal(result.usage.estimatedCents, 0.8192);
+    ({ data } = await configure(f, { monthlyBudgetCents: 1000, modelPrices: prices() }, headers));
     reply = async () => {
       const disabled = await f.app.inject({ method: 'PUT', url: path, headers, payload: { operationId: randomUUID(), expectedRevision: data.revision, config: { ...data.config, enabled: false } } });
       assert.equal(disabled.statusCode, 200); return Response.json({}, { status: 503 });
@@ -114,15 +162,15 @@ test('AI 错误不回显供应商秘密，缺失或无效计量不伪报零 toke
   let reply = aiReply;
   const vendor = aiVendor(() => reply()), f = await familyFixture({ aiHttp: vendor.http });
   try {
-    const { headers, data } = await configure(f, { priceCents: 2 });
+    const { headers, data } = await configure(f, { modelPrices: prices(100) });
     const cases = [
       { reply: () => Response.json({ error: { message: credentials.apiPassword } }, { status: 401 }), status: 'failed', message: '鉴权', estimated: 0 },
-      { reply: () => Response.json({ code: 10013, message: credentials.apiPassword }), status: 'failed', message: '业务错误', estimated: 0 },
-      { reply: () => new Response('invalid ' + credentials.apiPassword), status: 'failed', message: '无法读取', estimated: 2 },
-      { reply: () => Response.json({ code: 0, choices: [{ message: { role: 'assistant', content: '缺少计量仍有文字' } }] }), status: 'succeeded', message: '测试成功', estimated: 4 },
-      { reply: () => Response.json({ code: 0, choices: [{ message: { role: 'assistant', content: '计量无效仍保留文字' } }], usage: { prompt_tokens: -1, completion_tokens: 3, total_tokens: 2 } }), status: 'succeeded', message: '测试成功', estimated: 6 },
-      { reply: () => Response.json({ code: 0, choices: [{ message: { role: 'assistant', content: credentials.apiPassword }, finish_reason: 'length' }], usage: { prompt_tokens: 28, completion_tokens: 19, total_tokens: 47 } }), status: 'succeeded', message: '部分文字', estimated: 8 },
-      { reply: () => Response.json({ code: 0, choices: [{ message: { role: 'assistant', content: 'x'.repeat(1024 * 1024) } }] }), status: 'failed', message: '无法读取', estimated: 10 }
+      { reply: () => Response.json({ code: 10013, message: credentials.apiPassword }), status: 'failed', message: '输入内容审核', estimated: 0 },
+      { reply: () => new Response('invalid ' + credentials.apiPassword), status: 'failed', message: '无法读取', estimated: 0.8192 },
+      { reply: () => Response.json({ code: 0, choices: [{ message: { role: 'assistant', content: '缺少计量仍有文字' } }] }), status: 'succeeded', message: '测试成功', estimated: 1.6384 },
+      { reply: () => Response.json({ code: 0, choices: [{ message: { role: 'assistant', content: '计量无效仍保留文字' } }], usage: { prompt_tokens: -1, completion_tokens: 3, total_tokens: 2 } }), status: 'succeeded', message: '测试成功', estimated: 2.4576 },
+      { reply: () => Response.json({ code: 0, choices: [{ message: { role: 'assistant', content: credentials.apiPassword }, finish_reason: 'length' }], usage: { prompt_tokens: 28, completion_tokens: 19, total_tokens: 47 } }), status: 'succeeded', message: '部分文字', estimated: 2.4604 },
+      { reply: () => Response.json({ code: 0, choices: [{ message: { role: 'assistant', content: 'x'.repeat(1024 * 1024) } }] }), status: 'failed', message: '无法读取', estimated: 3.2796 }
     ];
     for (const item of cases) {
       reply = item.reply;
@@ -171,7 +219,7 @@ test('AI 学习配置只供家长管理，保存不调用，凭据不回显，�
 
 async function configure(f: Awaited<ReturnType<typeof familyFixture>>, changes: Record<string, unknown> = {}, existingHeaders?: ReturnType<typeof auth>) {
   const headers = existingHeaders ?? await ocrParent(f), initial = (await f.app.inject({ url: path, headers })).json();
-  const saved = await f.app.inject({ method: 'PUT', url: path, headers, payload: { operationId: randomUUID(), expectedRevision: initial.revision, config: { ...initial.config, enabled: true, ...changes }, credentials } });
+  const saved = await f.app.inject({ method: 'PUT', url: path, headers, payload: { operationId: randomUUID(), expectedRevision: initial.revision, config: { ...initial.config, enabled: true, modelPrices: initial.config.modelPrices.lite.confirmed ? initial.config.modelPrices : prices(), ...changes }, credentials } });
   assert.equal(saved.statusCode, 200, saved.body);
   return { headers, data: saved.json() };
 }
@@ -214,7 +262,7 @@ test('明确发送测试文字，按所选模型调用，记录 token 与结果�
   const vendor = aiVendor(), f = await familyFixture({ aiHttp: vendor.http });
   try {
     const headers = await ocrParent(f), initial = (await f.app.inject({ url: path, headers })).json();
-    const saved = await f.app.inject({ method: 'PUT', url: path, headers, payload: { operationId: randomUUID(), expectedRevision: 0, config: { ...initial.config, enabled: true, priceCents: 1.5 }, credentials } });
+    const saved = await f.app.inject({ method: 'PUT', url: path, headers, payload: { operationId: randomUUID(), expectedRevision: 0, config: { ...initial.config, enabled: true, modelPrices: prices(100) }, credentials } });
     assert.equal(saved.statusCode, 200, saved.body); assert.equal(vendor.calls.length, 0);
     const url = `${path}/tests/${randomUUID()}`, payload = { expectedRevision: 1, prompt: '请提示如何计算长方形周长。' };
     const submit = () => f.app.inject({ method: 'PUT', url, headers, payload });
@@ -228,7 +276,7 @@ test('明确发送测试文字，按所选模型调用，记录 token 与结果�
     assert.equal(result.tests[0]?.totalTokens, 47);
     assert.ok(result.tests[0]!.durationMs! >= 0);
     assert.equal(result.usage.attempts, 1); assert.equal(result.usage.reportedAttempts, 1);
-    assert.equal(result.usage.promptTokens, 28); assert.equal(result.usage.completionTokens, 19); assert.equal(result.usage.totalTokens, 47); assert.equal(result.usage.estimatedCents, 1.5);
+    assert.equal(result.usage.promptTokens, 28); assert.equal(result.usage.completionTokens, 19); assert.equal(result.usage.totalTokens, 47); assert.equal(result.usage.estimatedCents, 0.0028);
     assert.equal(vendor.calls.length, 1);
     const call = vendor.calls[0]!;
     assert.equal(call.url.href, 'https://spark-api-open.xf-yun.com/v1/chat/completions');
