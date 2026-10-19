@@ -1,4 +1,5 @@
 export type OcrProvider = 'baidu' | 'xfyun';
+export const recognitionProviderName = (provider: OcrProvider | 'imported') => provider === 'imported' ? '资料包识别记录' : ocrProviders[provider].label;
 export const ocrProviders = {
   baidu: { label: '百度 · 试卷分析与识别', name: '百度试卷识别', product: 'https://cloud.baidu.com/product/OCR/doc-analysis.html', docs: 'https://ai.baidu.com/ai-doc/OCR/jk9m7mj1l', price: 'https://cloud.baidu.com/product-price/ocr.html', priceCents: 16 },
   xfyun: { label: '讯飞 · 通用文字识别', name: '讯飞通用文字识别', product: 'https://www.xfyun.cn/services/textRecg1', docs: 'https://www.xfyun.cn/doc/words/universal_character_recognition/API.html', price: 'https://www.xfyun.cn/services/textRecg1', priceCents: 3.5 }
@@ -12,7 +13,7 @@ export interface OcrCredentials { apiKey: string; secretKey: string; appId?: str
 export interface OcrEdit { operationId: string; expectedRevision: number; config: OcrConfig; credentials?: OcrCredentials }
 export interface OcrLine { text: string; box?: { left: number; top: number; width: number; height: number } }
 export interface OcrTest {
-  id: string; revision: number; provider: OcrProvider; sample: 'school-v1' | 'original-page'; status: 'running' | 'succeeded' | 'failed' | 'interrupted' | 'stopped';
+  id: string; revision: number; provider: OcrProvider | 'imported'; sample: 'school-v1' | 'original-page'; status: 'running' | 'succeeded' | 'failed' | 'interrupted' | 'stopped';
   createdAt: number; finishedAt: number | null; durationMs: number | null; attempts: number; message: string; lines: OcrLine[];
 }
 export interface OcrCandidate {

@@ -21,6 +21,7 @@ export interface Question {
   state: 'draft' | 'collected'; syncState: 'synced' | 'pending'; subjectId: string | null; region: Region | null;
   sourceId: string | null; source: string; pageNumber: string; questionNumber: string; note: string;
   createdAt: number; updatedAt: number; collectedAt: number | null;
+  importedAt?: number | null;
   originalPage: OriginalPage;
   parts: QuestionPart[];
   readingMaterial: ReadingMaterial | null;

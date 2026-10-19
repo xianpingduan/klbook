@@ -117,7 +117,7 @@ export class OcrService {
       return { configured: !!sealed, available };
     };
     const credentialStatus = { baidu: status('baidu'), xfyun: status('xfyun') };
-    const tests = this.db.prepare<[], RecognitionRow>(`SELECT ${recognitionFields} FROM ocrTests ORDER BY createdAt DESC, rowid DESC LIMIT 20`).all().map(recognitionResult);
+    const tests = this.db.prepare<[], RecognitionRow>(`SELECT ${recognitionFields} FROM ocrTests WHERE provider != 'imported' ORDER BY createdAt DESC, rowid DESC LIMIT 20`).all().map(recognitionResult);
     const sample = this.db.prepare<[], RecognitionRow>(`SELECT ${recognitionFields} FROM ocrTests WHERE sample = 'school-v1' ORDER BY createdAt DESC, rowid DESC LIMIT 1`).get();
     const audit = this.db.prepare<[], OcrSettings['audit'][number]>('SELECT actor, at, action FROM serviceAudit WHERE capability = \'ocr\' ORDER BY id DESC LIMIT 30').all();
     return { revision: row.revision, config, credentialsConfigured: credentialStatus[config.provider].configured, credentialAvailable: credentialStatus[config.provider].available, credentialStatus, usage: this.usage(), tests, latestSample: sample ? recognitionResult(sample) : null, audit };

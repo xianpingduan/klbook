@@ -17,6 +17,7 @@ import { AiManager } from './AiManager.tsx';
 import { ServiceUsageManager } from './ServiceUsageManager.tsx';
 import { TrashManager } from './TrashManager.tsx';
 import { ExportManager } from './ExportManager.tsx';
+import { ImportManager } from './ImportManager.tsx';
 import { LeaveContext } from './navigation.ts';
 import { OfflinePreparation } from './OfflinePreparation.tsx';
 
@@ -51,6 +52,7 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
   const [usageStarted, setUsageStarted] = useState(false);
   const [trashStarted, setTrashStarted] = useState(false);
   const [exportsStarted, setExportsStarted] = useState(false);
+  const [importsStarted, setImportsStarted] = useState(false);
 
   useEffect(() => {
     if (collectionVisible) setCollectionStarted(true);
@@ -62,6 +64,7 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
     if (path === '/admin/services/usage' && grant) setUsageStarted(true);
     if (path === '/admin/trash' && grant) setTrashStarted(true);
     if (path === '/admin/exports' && grant) setExportsStarted(true);
+    if (path === '/admin/imports' && grant) setImportsStarted(true);
   }, [collectionVisible, path, grant]);
   useEffect(() => {
     if (!grant) return;
@@ -120,6 +123,9 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
     {path === '/admin/devices' && grant && <DeviceManager api={api} grant={grant.token} onAccessError={accessError} onSignedOut={deviceSignedOut} onRecoveryCode={recoveryCodeReady} />}
     <div hidden={path !== '/admin/exports' || !grant} inert={path !== '/admin/exports' || !grant}>
       {exportsStarted && <ExportManager api={api} grant={grant?.token} active={path === '/admin/exports'} onAccessError={accessError} />}
+    </div>
+    <div hidden={path !== '/admin/imports' || !grant} inert={path !== '/admin/imports' || !grant}>
+      {importsStarted && <ImportManager api={api} home={home} grant={grant?.token} active={path === '/admin/imports'} onAccessError={accessError} navigate={navigate} />}
     </div>
     <div hidden={path !== '/admin/services/ocr' || !grant} inert={path !== '/admin/services/ocr' || !grant}>
       {ocrStarted && <OcrManager api={api} grant={grant?.token} active={path === '/admin/services/ocr'} onAccessError={accessError} />}

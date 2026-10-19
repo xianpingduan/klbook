@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, type FamilyApi } from './api.ts';
-import { defaultOcrConfig, ocrProviders, type OcrProvider, type OcrConfig, type OcrEdit, type OcrSettings } from '../shared/ocr.ts';
+import { defaultOcrConfig, ocrProviders, recognitionProviderName, type OcrProvider, type OcrConfig, type OcrEdit, type OcrSettings } from '../shared/ocr.ts';
 import { useEditorLeave } from './useEditorLeave.tsx';
 
 const money = (cents: number) => `¥${(cents / 100).toFixed(Number.isInteger(cents) ? 2 : 3)}`;
@@ -147,7 +147,7 @@ export function OcrManager({ api, grant, active, onAccessError }: { api: FamilyA
     <button disabled={!sample || dirty || busy || loading || !grant || !active || !data.credentialAvailable || data.tests.some(test => test.status === 'running')} onClick={() => void test()}>{pendingTest.current ? '重试提交测试请求' : '发送样例并测试'}</button>
     {dirty && <p className="hint">请先保存配置再测试。</p>}
     <h2>用量与调用记录</h2><p>{data.usage.month}：尝试 {data.usage.attempts} 次 / {data.config.monthlyLimit} 次，估算费用 {money(data.usage.estimatedCents)} / {money(data.config.monthlyBudgetCents)}。这不是供应商账单。</p>
-    {data.tests.length === 0 ? <p>还没有调用记录。</p> : <div className="table-scroll"><table className="management-table" aria-label="图片识别调用记录"><thead><tr><th>时间</th><th>用途</th><th>供应商</th><th>结果</th><th>耗时</th><th>尝试次数</th></tr></thead><tbody>{data.tests.map(run => <tr key={run.id}><td>{date(run.createdAt)}</td><td>{run.sample === 'school-v1' ? '样例测试' : '收集材料'}</td><td>{ocrProviders[run.provider].label}</td><td>{run.status === 'running' ? '正在识别…' : run.message}</td><td>{run.durationMs === null ? '—' : `${run.durationMs} ms`}</td><td>{run.attempts}</td></tr>)}</tbody></table></div>}
+    {data.tests.length === 0 ? <p>还没有调用记录。</p> : <div className="table-scroll"><table className="management-table" aria-label="图片识别调用记录"><thead><tr><th>时间</th><th>用途</th><th>供应商</th><th>结果</th><th>耗时</th><th>尝试次数</th></tr></thead><tbody>{data.tests.map(run => <tr key={run.id}><td>{date(run.createdAt)}</td><td>{run.sample === 'school-v1' ? '样例测试' : '收集材料'}</td><td>{recognitionProviderName(run.provider)}</td><td>{run.status === 'running' ? '正在识别…' : run.message}</td><td>{run.durationMs === null ? '—' : `${run.durationMs} ms`}</td><td>{run.attempts}</td></tr>)}</tbody></table></div>}
     {latest?.lines.length ? <details open><summary>最近一次识别文字（需人工核对）</summary><pre className="ocr-text">{latest.lines.map(line => line.text).join('\n')}</pre></details> : null}
     <details><summary>最近配置操作</summary><ul>{data.audit.map((event, index) => <li key={index}>{date(event.at)} · {event.actor} · {event.action}</li>)}</ul></details>
     </>}

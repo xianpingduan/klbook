@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { QuestionPart, Subject } from '../shared/collection.ts';
-import { ocrProviders, type OcrCandidate, type PageRecognition, type PageRecognitions } from '../shared/ocr.ts';
+import { ocrProviders, recognitionProviderName, type OcrCandidate, type PageRecognition, type PageRecognitions } from '../shared/ocr.ts';
 import { ApiError, type FamilyApi } from './api.ts';
 import { recognitionScope } from './useCropRecognition.ts';
 
@@ -59,7 +59,7 @@ export function RecognitionPanel({ api, part, subjects, grant, disabled, refresh
     {data && <p className="hint">{ocrProviders[data.service.provider].label} · {!data.service.available ? '尚未配置' : data.service.enabled ? '已启用' : '已停用'}。{!data.service.formulas && '当前服务未提供专用公式识别，复杂公式请以原图为准。'}</p>}
     {error && <p className="message error">{error} <button className="quiet" disabled={disabled || busy} onClick={() => setRefresh(value => value + 1)}>重试读取识别记录</button></p>}
     {!run && <p className="hint">{data ? '当前范围暂无结果，框题后点下一步会尝试后台识别。' : '正在读取识别状态…'}</p>}
-    {data && data.runs.length > 1 && <label>查看识别批次<select value={run?.id ?? ''} disabled={disabled} onChange={event => { setSelected(event.target.value); setProposal(undefined); }}>{data.runs.map(item => <option key={item.id} value={item.id}>{new Date(item.createdAt).toLocaleString('zh-CN')} · {ocrProviders[item.provider].name} · {item.status === 'running' ? '识别中' : item.message}</option>)}</select></label>}
+    {data && data.runs.length > 1 && <label>查看识别批次<select value={run?.id ?? ''} disabled={disabled} onChange={event => { setSelected(event.target.value); setProposal(undefined); }}>{data.runs.map(item => <option key={item.id} value={item.id}>{new Date(item.createdAt).toLocaleString('zh-CN')} · {recognitionProviderName(item.provider)} · {item.status === 'running' ? '识别中' : item.message}</option>)}</select></label>}
     {run && <p className="hint">{run.status === 'running' ? '正在识别，仍可手动框题和保存；结果回来后由你决定是否采用。' : run.message}{run.durationMs !== null && ` · ${run.durationMs} ms`}</p>}
     {run?.status === 'succeeded' && <>
       <div className="recognition-candidates">{run.candidates.map(candidate => <article key={candidate.id}>
@@ -91,6 +91,6 @@ export function RecognitionOrigin({ api, part }: { api: FamilyApi; part: Questio
   const candidate = run?.candidates.find(item => item.id === part.recognition?.candidateId);
   return <details className="recognition-origin" onToggle={event => setOpen(event.currentTarget.open)}><summary>查看采用时的识别结果</summary>
     {error && <p>{error}<button className="quiet" onClick={() => setRetry(value => value + 1)}>重试读取原识别</button></p>}
-    {run ? <><p className="hint">{ocrProviders[run.provider].label} · {new Date(run.createdAt).toLocaleString('zh-CN')}。保留采用时的文字，供与当前更正内容对照。</p><pre className="ocr-text">{candidate?.text ?? run.lines.map(line => line.text).join('\n')}</pre></> : !error && open && <p>正在读取…</p>}
+    {run ? <><p className="hint">{recognitionProviderName(run.provider)} · {new Date(run.createdAt).toLocaleString('zh-CN')}。保留采用时的文字，供与当前更正内容对照。</p><pre className="ocr-text">{candidate?.text ?? run.lines.map(line => line.text).join('\n')}</pre></> : !error && open && <p>正在读取…</p>}
   </details>;
 }

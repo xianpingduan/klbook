@@ -6,6 +6,7 @@ export const pages = {
   '/admin/materials': { surface: 'admin', label: '错题资料' },
   '/admin/trash': { surface: 'admin', label: '回收站' },
   '/admin/exports': { surface: 'admin', label: '资料导出' },
+  '/admin/imports': { surface: 'admin', label: '资料导入' },
   '/admin/sources': { surface: 'admin', label: '来源管理' },
   '/admin/study': { surface: 'admin', label: '学科与学习阶段' },
   '/admin/services/ocr': { surface: 'admin', label: '图片识别服务' },

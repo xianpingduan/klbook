@@ -258,7 +258,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, navigate
       {selected.readingMaterial && <ReadingMaterialView api={api} material={selected.readingMaterial} />}
       <AnswerView api={api} parts={selected.answerParts} />
       <p className="study-stage">{stageLabel(selected.studyStage)}</p>
-      <dl><div><dt>收集时间</dt><dd>{date(selected.collectedAt!)}</dd></div><div><dt>来源</dt><dd>{selected.source || '未填写'}</dd></div><div><dt>页码 / 题号</dt><dd>{selected.pageNumber || '未填写'} / {selected.questionNumber || '未填写'}</dd></div><div><dt>备注</dt><dd className="note-text">{selected.note || '未填写'}</dd></div></dl>
+      <dl><div><dt>收集时间</dt><dd>{date(selected.collectedAt!)}</dd></div>{selected.importedAt != null && <div><dt>导入时间</dt><dd>{date(selected.importedAt)}</dd></div>}<div><dt>来源</dt><dd>{selected.source || '未填写'}</dd></div><div><dt>页码 / 题号</dt><dd>{selected.pageNumber || '未填写'} / {selected.questionNumber || '未填写'}</dd></div><div><dt>备注</dt><dd className="note-text">{selected.note || '未填写'}</dd></div></dl>
       <button className="quiet" disabled={busy} onClick={() => setScreen('edit')}>编辑资料</button>
       <details className="optional-info" onToggle={event => setOriginalOpen(event.currentTarget.open)}><summary>查看原始页</summary>
         {originalOpen && <div className="original-material"><p className="hint">这是上传时保留的完整原图，包含题目、作答和批改。</p><QuestionParts api={api} parts={[...selected.parts, ...selected.answerParts, ...(selected.readingMaterial?.parts ?? [])]} original /></div>}<NewQuestionFromPage parts={selected.parts} disabled={busy} onChoose={newFromPage} />

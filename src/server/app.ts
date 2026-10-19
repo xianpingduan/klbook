@@ -26,6 +26,8 @@ import { trashRoutes } from './trash-routes.ts';
 import type { AiHttp } from './xfyun-ai.ts';
 import { Exports } from './exports.ts';
 import { exportRoutes } from './export-routes.ts';
+import { Imports } from './imports.ts';
+import { importRoutes } from './import-routes.ts';
 
 export function createApp(options: { dataDir: string; now?: () => number; allowedOrigins?: string[]; staticDir?: string; ocrHttp?: VendorHttp; speechSocket?: SpeechSocketFactory; aiHttp?: AiHttp }) {
   const db = openDatabase(options.dataDir);
@@ -52,14 +54,16 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
   const ai = new AiService(db, options.dataDir, usage, options.now, options.aiHttp);
   const trash = new TrashStore(db, collection, options.dataDir, options.now);
   const exports = new Exports(db, collection, options.dataDir, options.now);
+  const imports = new Imports(db, collection, options.dataDir, options.now);
   let cleanupTimer: ReturnType<typeof setInterval> | undefined;
   app.addHook('onReady', async () => {
     await exports.initialize();
+    await imports.initialize();
     await trash.sweep();
-    cleanupTimer = setInterval(() => { void exports.prune().then(() => trash.sweep()).catch(() => {}); }, 60_000);
+    cleanupTimer = setInterval(() => { void exports.prune().then(() => imports.prune()).then(() => trash.sweep()).catch(() => {}); }, 60_000);
     cleanupTimer.unref();
   });
-  app.addHook('onClose', async () => { clearInterval(cleanupTimer); await Promise.all([ocr.close(), speech.close(), ai.close(), trash.close(), exports.close()]); db.close(); });
+  app.addHook('onClose', async () => { clearInterval(cleanupTimer); await Promise.all([ocr.close(), speech.close(), ai.close(), trash.close(), exports.close(), imports.close()]); db.close(); });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof AccessError) return reply.code(error.statusCode).send({ message: error.message, ...(error.conflict ? { conflict: error.conflict } : {}) });
     if (error instanceof Error && 'validation' in error) return reply.code(400).send({ message: '请检查填写内容' });
@@ -108,6 +112,7 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
   serviceUsageRoutes(app, access, usage);
   trashRoutes(app, access, trash);
   exportRoutes(app, access, exports);
+  importRoutes(app, access, imports);
   if (options.staticDir) {
     app.register(staticFiles, { root: options.staticDir, index: 'index.html' });
     for (const path of Object.keys(pages)) app.get(path, async (_request, reply) => reply.sendFile('index.html'));

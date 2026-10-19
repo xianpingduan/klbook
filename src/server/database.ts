@@ -193,7 +193,12 @@ const migrations = [
   DROP TABLE readingOperations;
   ALTER TABLE readingOperationsNew RENAME TO readingOperations;`,
   `CREATE TABLE exportPagePins (exportId TEXT NOT NULL, pageId TEXT NOT NULL REFERENCES originalPages(id), PRIMARY KEY(exportId, pageId));
-  CREATE INDEX exportsByPage ON exportPagePins(pageId);`
+  CREATE INDEX exportsByPage ON exportPagePins(pageId);`,
+  `ALTER TABLE questions ADD COLUMN importedAt INTEGER;
+  CREATE TABLE importIdentities (sourceLibraryId TEXT NOT NULL, kind TEXT NOT NULL, sourceId TEXT NOT NULL,
+    targetId TEXT NOT NULL, sourceHash TEXT NOT NULL, localHash TEXT NOT NULL, PRIMARY KEY(sourceLibraryId, kind, sourceId));
+  CREATE TABLE importReceipts (id TEXT PRIMARY KEY, libraryId TEXT NOT NULL, accountId TEXT NOT NULL, packageHash TEXT NOT NULL, previewToken TEXT NOT NULL, result TEXT NOT NULL);
+  CREATE TABLE importPendingPages (id TEXT PRIMARY KEY);`
 ];
 
 export function openDatabase(dataDir: string) {

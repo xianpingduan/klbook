@@ -16,6 +16,7 @@ import type { DraftCancellation, DraftCancellationEdit } from '../shared/collect
 import type { Region } from '../shared/collection.ts';
 import type { Deletion, TrashChange, TrashList, TrashReceipt } from '../shared/trash.ts';
 import type { ExportPreview, ExportJob } from '../shared/learning-package.ts';
+import type { ImportBatch, ImportReceipt } from '../shared/imports.ts';
 import { QuestionJournal } from './question-journal.ts';
 import { LocalLibrary } from './local-library.ts';
 import { OfflineCaptures } from './offline-captures.ts';
@@ -174,6 +175,10 @@ export class FamilyApi {
   saveServiceBudget(grant: string, input: ServiceBudgetEdit) { return this.request<ServiceUsage>('/admin/service-usage', 'PUT', input, grant); }
   trash(grant: string, offset = 0) { return this.request<TrashList>(`/admin/trash?offset=${offset}`, 'GET', undefined, grant); }
   exportPreview(grant: string) { return this.request<ExportPreview>('/admin/exports', 'GET', undefined, grant); }
+  uploadImport(grant: string, id: string, file: Blob) { return this.send<ImportBatch>(`/admin/imports/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/zip', 'X-Parent-Authorization': grant }, body: file }, response => response.json(), 300000); }
+  importStatus(grant: string, id: string) { return this.request<ImportBatch>(`/admin/imports/${encodeURIComponent(id)}`, 'GET', undefined, grant); }
+  confirmImport(grant: string, id: string, previewToken: string) { return this.send<ImportReceipt>(`/admin/imports/${encodeURIComponent(id)}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Parent-Authorization': grant }, body: JSON.stringify({ previewToken }) }, response => response.json(), 300000); }
+  removeImport(grant: string, id: string) { return this.request<void>(`/admin/imports/${encodeURIComponent(id)}`, 'DELETE', undefined, grant); }
   startExport(grant: string, id: string, previewToken: string) { return this.request<ExportJob>(`/admin/exports/${encodeURIComponent(id)}`, 'PUT', { previewToken }, grant); }
   exportStatus(grant: string, id: string) { return this.request<ExportJob>(`/admin/exports/${encodeURIComponent(id)}`, 'GET', undefined, grant); }
   exportFile(grant: string, id: string) { return this.send(`/admin/exports/${encodeURIComponent(id)}/file`, { headers: { 'X-Parent-Authorization': grant } }, response => response.blob(), 300000); }
