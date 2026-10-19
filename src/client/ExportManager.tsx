@@ -5,7 +5,7 @@ import type { PendingLocalWork } from './pending-local-work.ts';
 import { ApiError, FamilyApi } from './api.ts';
 
 const date = (value: number | null) => value === null ? '未设置' : new Date(value).toLocaleString('zh-CN');
-const size = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+const size = (bytes: number) => bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 export function ExportManager({ api, grant, active, onAccessError }: { api: FamilyApi; grant?: string; active: boolean; onAccessError(error: ApiError): Promise<void> }) {
   const [preview, setPreview] = useState<ExportPreview>();
   const [pending, setPending] = useState<PendingLocalWork>();
@@ -83,7 +83,7 @@ export function ExportManager({ api, grant, active, onAccessError }: { api: Fami
         <div><dt>收集日期</dt><dd>{preview.questionCount ? `${date(preview.collectedFrom)} 至 ${date(preview.collectedTo)}` : '暂无'}</dd></div>
       </dl>
       <p className="hint">包含原图、题目与答案范围、图片顺序、共享阅读材料、识别及更正文字、来源、备注和原收集日期。</p>
-      <div className="message" role="status"><strong>本机未同步内容</strong><p>{pending ? `${pending.images} 张待上传图片，${pending.questions} 道题有待处理的本机整理内容。` : '暂时无法核对，请刷新后再试。'}这些尚未同步的内容不在资料包中；请回到收集页处理后再刷新范围。</p></div>
+      <div className={pending && pending.images === 0 && pending.questions === 0 ? 'export-local-status' : 'message'} role="status"><strong>本机未同步内容</strong><p>{pending ? `${pending.images} 张待上传图片，${pending.questions} 道题有待处理的本机整理内容。` : '暂时无法核对，请刷新后再试。'}{pending && pending.images === 0 && pending.questions === 0 ? '当前设备没有待处理内容。' : '尚未同步的内容不在资料包中；请回到收集页处理后再刷新范围。'}</p></div>
       <p>不包含草稿、回收站和其他设备尚未上传的内容，也不包含账号密码、设备会话及服务配置。这份学习资料包不能代替完整资料库备份。</p>
       <button disabled={busy || working || !grant || !pending || preview.questionCount === 0} onClick={() => void generate()}>{operation.current ? '重试本次生成' : '确认范围并生成资料包'}</button>
       {preview.questionCount === 0 && <p>还没有可导出的已收集题目。</p>}

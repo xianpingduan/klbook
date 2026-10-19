@@ -42,6 +42,13 @@ export class Exports {
   }
   async start(authorize: () => Home, id: string, token: string) {
     await this.prune();
+    authorize();
+    // A failed attempt must not consume the capacity needed to retry after repairs.
+    // Its private artifacts are also swept at startup if the storage fault persists.
+    for (const [failedId, failed] of this.jobs) if (failedId !== id && failed.public.status === 'failed' && !failed.task) {
+      await rm(this.directory(failedId), { recursive: true, force: true }).catch(() => {});
+      this.jobs.delete(failedId);
+    }
     const home = authorize(), previous = this.jobs.get(id);
     if (previous) {
       this.owned(home, id);

@@ -327,8 +327,9 @@ select:focus-visible, textarea:focus-visible { outline: 3px solid #ceac53; outli
 .confirmed-transcription { padding: .6rem; overflow-wrap: anywhere; }
 .ocr-manager audio { display: block; max-width: 100%; margin-block: 12px; }
 .export-summary { display: grid; gap: 1rem; margin-block: 1.5rem; }
-.export-summary > div { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(0, 3fr); gap: 1rem; }
+.app-surface .export-summary > div { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(0, 3fr); gap: 1rem; }
 .export-summary dt { color: var(--muted); }
 .export-summary dd { margin: 0; overflow-wrap: anywhere; }
 .export-result { margin-top: 1.5rem; border-top: 1px solid #dce5e2; padding-top: 1rem; }
-@media (max-width: 600px) { .export-summary > div { grid-template-columns: minmax(0, 1fr); gap: .35rem; } }
+.export-local-status { padding: 1rem; background: #f4f8f6; border-radius: 12px; margin-block: 1rem; }
+@media (max-width: 600px) { .app-surface .export-summary > div { grid-template-columns: minmax(0, 1fr); gap: .35rem; } }

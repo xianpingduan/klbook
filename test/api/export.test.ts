@@ -182,6 +182,12 @@ test('缺图或临时目录故障不发布残包，修复后可重新生成；�
     await f.app.inject({ method: 'PUT', url: `${root}/${broken}`, headers: p.parent, payload: { previewToken: preview.token } });
     assert.equal((await finished(f, p.parent, broken)).status, 'failed');
     assert.equal((await f.app.inject({ url: `${root}/${broken}/file`, headers: p.parent })).statusCode, 409);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const retry = randomUUID();
+      const responses = await Promise.all([0, 1].map(() => f.app.inject({ method: 'PUT', url: `${root}/${retry}`, headers: p.parent, payload: { previewToken: preview.token } })));
+      for (const response of responses) assert.equal(response.statusCode, 202, '失败任务不能耗尽后续重试名额，同一新任务并发重试应返回已有任务');
+      assert.equal((await finished(f, p.parent, retry)).status, 'failed');
+    }
     await rename(original + '.held', original);
     const work = join(f.dataDir, 'export-work');
     await rename(work, work + '.held'); await writeFile(work, 'not a directory');
