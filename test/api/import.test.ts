@@ -94,13 +94,14 @@ test('完整往返保留跨页顺序、答案、共享原文、识别更正和�
     const first = await sample(source), sourceParent = await parent(source), headers = auth(source.first.token), targetParent = await parent(target);
     const page = async () => (await source.app.inject({ method: 'POST', url: '/api/v1/collection/pages', headers: { ...headers, 'content-type': 'image/png', 'idempotency-key': randomUUID() }, payload: first.bytes })).json();
     const secondPage = await page(), answer = await page(), readingPage = await page();
-    const subjectId = randomUUID(), sourceId = randomUUID(), readingId = randomUUID();
+    // The public APIs preserve uppercase UUIDs; an unmodified export must still round-trip.
+    const subjectId = randomUUID().toUpperCase(), sourceId = randomUUID().toUpperCase(), readingId = randomUUID().toUpperCase();
     await source.app.inject({ method: 'PUT', url: `/api/v1/admin/subjects/${subjectId}`, headers: sourceParent, payload: { name: '综合实践' } });
     await source.app.inject({ method: 'PUT', url: `/api/v1/admin/sources/${sourceId}`, headers: sourceParent, payload: { operationId: randomUUID(), expectedRevision: 0, name: '自编练习', active: false } });
     await source.app.inject({ method: 'PUT', url: `/api/v1/collection/reading-materials/${readingId}`, headers, payload: { operationId: randomUUID(), expectedRevision: 0, title: '共同原文', parts: [{ id: randomUUID(), pageId: readingPage.id, region: whole }] } });
     const cfg = { provider: 'xfyun', name: '测试边界', enabled: true, language: 'CHN_ENG', handwriting: true, formulas: false, timeoutSeconds: 5, retries: 0, monthlyLimit: 20, monthlyBudgetCents: 100, priceCents: 3.5 };
     await source.app.inject({ method: 'PUT', url: '/api/v1/admin/ocr', headers: sourceParent, payload: { operationId: randomUUID(), expectedRevision: 0, config: cfg, credentials: { appId: 'sample', apiKey: 'apikeyXXXXXXXXXXXXXXXXXXXXXXXXXX', secretKey: 'apisecretXXXXXXXXXXXXXXXXXXXXXXX' } } });
-    const runId = randomUUID(), pageId = first.question.originalPage.id;
+    const runId = randomUUID().toUpperCase(), pageId = first.question.originalPage.id;
     await source.app.inject({ method: 'PUT', url: `/api/v1/collection/pages/${pageId}/recognitions/${runId}`, headers });
     let run;
     for (let i = 0; i < 100; i++) { run = (await source.app.inject({ url: `/api/v1/collection/pages/${pageId}/recognitions/${runId}`, headers })).json(); if (run.status !== 'running') break; await new Promise(resolve => setTimeout(resolve, 10)); }
@@ -109,7 +110,7 @@ test('完整往返保留跨页顺序、答案、共享原文、识别更正和�
     await source.app.inject({ method: 'PUT', url: `/api/v1/admin/sources/${sourceId}`, headers: sourceParent, payload: { operationId: randomUUID(), expectedRevision: 1, name: '自编练习', active: true } });
     const fields = { state: 'collected', subjectId, sourceId, region: whole, pageNumber: '12', questionNumber: '4', note: '从另页开始读', readingMaterialId: readingId };
     const changed = await source.app.inject({ method: 'PUT', url: `/api/v1/collection/questions/${first.question.id}`, headers, payload: { ...fields, region: { x: .1, y: .2, width: .7, height: .6 }, operationId: randomUUID(), expectedRevision: first.question.revision,
-      parts: [{ id: randomUUID(), pageId: secondPage.id, region: { x: .1, y: .2, width: .7, height: .6 }, transcription: '第二页在前' }, { id: first.question.parts[0].id, pageId, region: whole, transcription: '人工更正 12 × 3 = ?', recognition: { runId, candidateId: run.candidates[0].id } }] } });
+      parts: [{ id: randomUUID().toUpperCase(), pageId: secondPage.id, region: { x: .1, y: .2, width: .7, height: .6 }, transcription: '第二页在前' }, { id: first.question.parts[0].id, pageId, region: whole, transcription: '人工更正 12 × 3 = ?', recognition: { runId, candidateId: run.candidates[0].id } }] } });
     assert.equal(changed.statusCode, 200, changed.body);
     const answered = await source.app.inject({ method: 'PUT', url: `/api/v1/collection/questions/${first.question.id}/answers`, headers, payload: { operationId: randomUUID(), expectedRevision: changed.json().revision, parts: [{ id: randomUUID(), pageId: answer.id, region: whole }] } });
     assert.equal(answered.statusCode, 200, answered.body);

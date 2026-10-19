@@ -32,7 +32,7 @@ export async function receivePackage(input: Readable, directory: string, library
       requirePackage(zip.entryCount <= 10003, '资料包文件数量超过当前支持范围');
       for await (const entry of zip.eachEntry()) {
         const name = entry.fileName;
-        const isImage = /^images\/[0-9a-f-]{36}\.(jpg|png|webp)$/.test(name);
+        const isImage = /^images\/[0-9a-fA-F-]{36}\.(jpg|png|webp)$/.test(name);
         requirePackage(isImage || ['manifest.json', 'manifest.sha256', 'data.json'].includes(name), '资料包包含不支持的文件或路径');
         requirePackage(!files.has(name) && !entry.isEncrypted() && [0, 8].includes(entry.compressionMethod), '资料包包含重复、加密或不支持的文件');
         const kind = (entry.externalFileAttributes >>> 16) & 0xf000;

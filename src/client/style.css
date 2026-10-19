@@ -333,3 +333,4 @@ select:focus-visible, textarea:focus-visible { outline: 3px solid #ceac53; outli
 .export-result { margin-top: 1.5rem; border-top: 1px solid #dce5e2; padding-top: 1rem; }
 .export-local-status { padding: 1rem; background: #f4f8f6; border-radius: 12px; margin-block: 1rem; }
 @media (max-width: 600px) { .app-surface .export-summary > div { grid-template-columns: minmax(0, 1fr); gap: .35rem; } }
+.import-manager .actions { display: flex; flex-wrap: wrap; gap: .75rem; }

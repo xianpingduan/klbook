@@ -77,10 +77,11 @@ export function ImportManager({ api, home, grant, active, onAccessError, navigat
   return <section className="card import-manager">
     <h1>导入学习资料</h1><p>选择本应用导出的资料包，核对后恢复到当前学习者的错题集。</p>
     <label>选择 ZIP 资料包<input type="file" accept=".zip,application/zip" disabled={busy || !grant} onChange={event => { const selected = event.target.files?.[0]; event.target.value = ''; void choose(selected); }} /></label>
+    {file && <p className="hint">当前资料包：{file.name}</p>}
     <p className="hint">支持格式 1，最大 512 MB。原收集日期和学习阶段会保留，不改变当前默认学习阶段或服务开关。</p>
     {busy && <p role="status">正在处理资料包，请保持页面打开…</p>}
     {error && <p className="message error" role="alert">{error}</p>}
-    {!batch && file && <><p>已选择：{file.name}</p><button disabled={busy || !grant} onClick={() => void retry()}>重新校验资料包</button></>}
+    {!batch && file && <button disabled={busy || !grant} onClick={() => void retry()}>重新校验资料包</button>}
     {batch?.status === 'preview' && <>
       <div className="section-heading"><h2>核对导入内容</h2><button className="quiet" disabled={busy} onClick={() => setRefresh(v => v + 1)}>刷新预览</button></div>
       <dl className="export-summary">

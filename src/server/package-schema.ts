@@ -12,7 +12,7 @@ function object(value: unknown, keys: string, optional = ''): asserts value is O
   const required = keys.split(' ').filter(Boolean), allowed = [...required, ...optional.split(' ')];
   requirePackage(required.every(k => Object.hasOwn(value, k)) && Object.keys(value).every(k => allowed.includes(k)));
 }
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const uuid = (value: unknown) => typeof value === 'string' && uuidPattern.test(value);
 const hash = (value: unknown) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const text = (value: unknown, max: number, min = 0) => typeof value === 'string' && value.length >= min && value.length <= max;
