@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { startServer } from './server.ts';
 
-test('详情图片在按下编辑按钮期间加载完成，按钮不移位且一次点击进入编辑', async ({ page, request }) => {
+for (const fails of [false, true]) test(`详情图片在按下编辑按钮期间加载${fails ? '失败' : '完成'}，按钮不移位且一次点击进入编辑`, async ({ page, request }) => {
   const dir = await mkdtemp(join(tmpdir(), 'klbook-image-layout-'));
   const server = await startServer(dir);
   let release = () => {};
@@ -25,7 +25,7 @@ test('详情图片在按下编辑按钮期间加载完成，按钮不移位且�
     await page.getByRole('button', { name: '登录此设备', exact: true }).click();
     await expect(page.getByRole('img', { name: '已收集的题目区', exact: true }).locator('image')).toHaveAttribute('href', /^blob:/);
     const waiting = new Promise<void>(resolve => { release = resolve; });
-    await page.route('**/api/v1/collection/pages/*/preview', async route => { await waiting; await route.continue(); }, { times: 1 });
+    await page.route('**/api/v1/collection/pages/*/preview', async route => { await waiting; if (fails) await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '测试图片读取失败' }) }); else await route.continue(); }, { times: 1 });
     await page.getByRole('button', { name: '打开错题', exact: true }).click();
     await expect(page.getByRole('heading', { name: '小明的错题集', exact: true })).not.toBeVisible();
     const edit = page.getByRole('button', { name: '编辑资料', exact: true });
@@ -35,7 +35,8 @@ test('详情图片在按下编辑按钮期间加载完成，按钮不移位且�
     await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
     await page.mouse.down();
     release();
-    await expect(page.getByRole('img', { name: '已收集的题目区', exact: true }).locator('image')).toHaveAttribute('href', /^blob:/);
+    if (fails) await expect(page.getByRole('button', { name: '重试加载图片', exact: true })).toBeVisible();
+    else await expect(page.getByRole('img', { name: '已收集的题目区', exact: true }).locator('image')).toHaveAttribute('href', /^blob:/);
     const after = (await edit.boundingBox())!;
     expect.soft(Math.abs(after.y - before.y)).toBeLessThan(1);
     await page.mouse.up();

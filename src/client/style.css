@@ -103,8 +103,10 @@ footer { color: #788378; text-align: center; font-size: 12px; padding-top: 24px;
 .question-thumbnail { background: #f5f4ed; border-radius: 10px; padding: 8px; overflow: hidden; }
 .question-thumbnail .paper-image, .question-thumbnail .question-crop { height: 130px; width: 100%; object-fit: contain; }
 .paper-image, .question-crop { display: block; max-width: 100%; width: 100%; height: auto; }
-.question-image { position: relative; }
+.question-image { position: relative; min-height: 64px; }
 .material-loading { position: absolute; inset: 0; margin: 0; display: grid; place-items: center; color: #66766e; }
+.material-loading.error { display: block; overflow: auto; padding: 8px; color: #8c3028; }
+.material-loading button { margin: 4px 0 0; }
 .detail-material { max-width: 800px; margin: 24px auto; background: #fafaf5; border: 1px solid #e1e6dc; padding: 12px; }
 .original-material { margin-top: 32px; border-top: 1px solid #e1e6dc; padding-top: 12px; }
 .original-material .paper-image { max-width: 900px; margin: auto; }

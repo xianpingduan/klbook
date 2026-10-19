@@ -22,13 +22,13 @@ export function usePageImage(api: FamilyApi, pageId: string, variant: 'original'
 
 export function QuestionImage({ api, page, region, original = false, label = '已收集的题目区' }: { api: FamilyApi; page: OriginalPage; region?: Region | null; original?: boolean; label?: string }) {
   const image = usePageImage(api, page.id, original ? 'original' : 'preview');
-  if (image.error) return <p role="alert" className="message error">{image.error} <button className="quiet" onClick={image.retry}>重试加载图片</button></p>;
   return <div className="question-image">
     {!region || original ? <img className="paper-image" src={image.url || undefined} width={page.width} height={page.height} style={{ visibility: image.url ? undefined : 'hidden' }} alt={original ? '原始页（保留作答和批改）' : '原始页预览'} />
       : <svg className="question-crop" role="img" aria-label={label} aria-hidden={!image.url} width={region.width * page.width} height={region.height * page.height} viewBox={`${region.x * page.width} ${region.y * page.height} ${region.width * page.width} ${region.height * page.height}`}>
         {image.url && <image href={image.url} width={page.width} height={page.height} />}
       </svg>}
-    {!image.url && <p className="material-loading" role="status">正在读取材料…</p>}
+    {image.error ? <p className="material-loading error" role="alert">{image.error} <button className="quiet" onClick={image.retry}>重试加载图片</button></p>
+      : !image.url && <p className="material-loading">正在读取材料…</p>}
   </div>;
 }
 
