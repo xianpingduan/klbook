@@ -34,7 +34,7 @@ export class OcrService {
   private pendingCount = 0;
   private stopping = new AbortController();
   constructor(db: Database.Database, dataDir: string, collection: CollectionStore, now = Date.now, http?: VendorHttp) {
-    this.db = db; this.vault = new CredentialVault(dataDir); this.now = now;
+    this.db = db; this.vault = new CredentialVault(db, dataDir); this.now = now;
     this.collection = collection;
     this.vendors = { baidu: new BaiduOcr(http), xfyun: new XfyunOcr(http, now) };
     db.prepare('INSERT OR IGNORE INTO ocrSettings VALUES (1, 0, ?, NULL)').run(JSON.stringify(defaultOcrConfig));
@@ -138,8 +138,7 @@ export class OcrService {
       }
       const current = this.row();
       if (current.revision !== input.expectedRevision) throw new AccessError(409, '配置已在其他页面更新，请重新读取配置后核对');
-      const existingSecrets = !!this.db.prepare('SELECT 1 FROM ocrProviderCredentials LIMIT 1').get() || !!this.db.prepare('SELECT 1 FROM speechSettings WHERE credentials IS NOT NULL').get();
-      const sealed = credentials ? this.vault.seal(JSON.stringify(credentials), existingSecrets) : this.sealed(config.provider);
+      const sealed = credentials ? this.vault.seal(JSON.stringify(credentials)) : this.sealed(config.provider);
       if (config.enabled) {
         if (!sealed) throw new AccessError(422, '请先填写识别服务凭据');
         this.vault.open(sealed);

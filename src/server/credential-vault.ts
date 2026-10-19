@@ -1,13 +1,15 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type Database from 'better-sqlite3';
 import { AccessError } from './family-access.ts';
 
 /** The key belongs to this local installation, separately from the database. Never expose either via HTTP. */
 export class CredentialVault {
+  private db: Database.Database;
   private path: string;
   private context: string;
-  constructor(dataDir: string, capability: 'ocr' | 'speech' = 'ocr') { this.path = join(dataDir, 'service-credentials.key'); this.context = `klbook:${capability}:credentials:v1`; }
+  constructor(db: Database.Database, dataDir: string, capability: 'ocr' | 'speech' = 'ocr') { this.db = db; this.path = join(dataDir, 'service-credentials.key'); this.context = `klbook:${capability}:credentials:v1`; }
   private key(create: boolean) {
     try {
       if (create && !existsSync(this.path)) writeFileSync(this.path, randomBytes(32), { flag: 'wx', mode: 0o600 });
@@ -16,7 +18,10 @@ export class CredentialVault {
       return key;
     } catch { throw new AccessError(503, '本机服务凭据密钥无法读取，请恢复数据目录中的 service-credentials.key 后重试'); }
   }
-  seal(value: string, existing: boolean) {
+  seal(value: string) {
+    // Any saved ciphertext requires the original installation key, across capabilities.
+    const existing = !!this.db.prepare('SELECT 1 FROM ocrProviderCredentials LIMIT 1').get()
+      || !!this.db.prepare('SELECT 1 FROM speechSettings WHERE credentials IS NOT NULL').get();
     const key = this.key(!existing), iv = randomBytes(12);
     const cipher = createCipheriv('aes-256-gcm', key, iv);
     cipher.setAAD(Buffer.from(this.context));

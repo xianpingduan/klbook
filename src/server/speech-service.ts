@@ -17,7 +17,7 @@ export class SpeechService {
   private work?: Promise<void>;
   private stopping = new AbortController();
   constructor(db: Database.Database, dataDir: string, now = Date.now, socket?: SpeechSocketFactory) {
-    this.db = db; this.vault = new CredentialVault(dataDir, 'speech'); this.now = now;
+    this.db = db; this.vault = new CredentialVault(db, dataDir, 'speech'); this.now = now;
     this.vendor = new XfyunSpeech(socket, now);
     db.prepare('INSERT OR IGNORE INTO speechSettings VALUES (1, 0, ?, NULL)').run(JSON.stringify(defaultSpeechConfig));
     db.prepare("UPDATE speechTests SET status = 'interrupted', finishedAt = ?, message = ? WHERE status = 'running'").run(now(), '电脑服务曾中断，结果不确定；不会自动重新发送');
@@ -52,8 +52,7 @@ export class SpeechService {
       }
       const row = this.row();
       if (row.revision !== input.expectedRevision) throw new AccessError(409, '配置已在其他页面更新，请重新读取配置后核对');
-      const existing = !!row.credentials || !!this.db.prepare('SELECT 1 FROM ocrProviderCredentials LIMIT 1').get();
-      const sealed = credentials ? this.vault.seal(JSON.stringify(credentials), existing) : row.credentials;
+      const sealed = credentials ? this.vault.seal(JSON.stringify(credentials)) : row.credentials;
       if (config.enabled) {
         if (!sealed) throw new AccessError(422, '请先保存语音听写服务凭据');
         this.vault.open(sealed);
