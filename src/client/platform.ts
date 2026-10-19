@@ -19,6 +19,7 @@ export interface ClientPlatform {
     remove(target: string): Promise<void>;
   };
   drafts: {
+    keys(scope: DraftScope): Promise<string[]>;
     put(scope: DraftScope, id: string, value: Blob): Promise<void>;
     get(scope: DraftScope, id: string): Promise<Blob | undefined>;
     remove(scope: DraftScope, id: string): Promise<void>;

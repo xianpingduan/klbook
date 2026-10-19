@@ -16,6 +16,7 @@ import { LocalLibrary } from './local-library.ts';
 import { OfflineCaptures } from './offline-captures.ts';
 import { questionContent, questionFields } from './question-edit.ts';
 import { revisionedSave } from './revisioned-save.ts';
+import { pendingLocalWork } from './pending-local-work.ts';
 import { ApiError, ConnectionError } from './api-errors.ts';
 export { ApiError, ConnectionError } from './api-errors.ts';
 
@@ -37,14 +38,23 @@ export class FamilyApi {
   private get local() { return this.credential ? new LocalLibrary(this.platform, this.credential) : undefined; }
   private get captures() { return this.credential ? new OfflineCaptures(this.platform, this.credential) : undefined; }
   private syncing?: Promise<void>;
+  private paused = false;
+  private requests = new Set<AbortController>();
+  private assertActive() { if (this.paused) throw new Error('原连接已暂停，本机材料仍保留，请返回或登录所选资料库后继续'); }
+  pause() { this.paused = true; for (const request of this.requests) request.abort(); }
   private remoteId(id: string) { return this.captures?.remoteId(id) ?? id; }
-  private rememberQuestion(value: Question) { const question = this.captures?.question(value) ?? value; this.local?.question(question); return question; }
+  private rememberQuestion(value: Question) { this.assertActive(); const question = this.captures?.question(value) ?? value; this.local?.question(question); return question; }
   private remoteEdit(input: QuestionEdit): QuestionEdit { return { ...input, parts: input.parts?.map(part => ({ ...part, id: this.remoteId(part.id), pageId: this.remoteId(part.pageId) })) }; }
 
   private constructor(platform: ClientPlatform, target: string, credential: SavedCredential | null) {
     this.platform = platform; this.target = target; this.credential = credential;
   }
   get address() { return this.target; }
+  pendingWork() { return this.credential ? pendingLocalWork(this.platform, this.credential) : Promise.resolve({ images: 0, questions: 0 }); }
+  static async savedPendingWork(platform: ClientPlatform) {
+    const credential = await platform.credentials.read(await platform.target.read());
+    return credential ? pendingLocalWork(platform, credential) : { images: 0, questions: 0 };
+  }
   questionJournal(id: string) {
     if (!this.credential) throw new Error('请先登录资料库');
     return new QuestionJournal(this.platform, this.credential, id);
@@ -67,8 +77,7 @@ export class FamilyApi {
   static async probe(platform: ClientPlatform, address: string) {
     const target = serverOrigin(address);
     const api = new FamilyApi(platform, target, null);
-    const response = await api.send('/info');
-    const info: ServerInfo = await response.json().catch(() => { throw new Error('此服务与当前客户端不兼容，请确认填写的是错题集后端地址'); });
+    const info = await api.send<ServerInfo>('/info', {}, response => response.json().catch(() => { throw new Error('此服务与当前客户端不兼容，请确认填写的是错题集后端地址'); }));
     if (!info || info.app !== 'klbook' || info.apiVersion !== 1 || typeof info.initialized !== 'boolean') throw new Error('此服务与当前客户端不兼容');
     return { api, info };
   }
@@ -96,30 +105,38 @@ export class FamilyApi {
     await platform.target.write(connection.api.address);
     return connection;
   }
-  private async send(path: string, options: RequestInit = {}): Promise<Response> {
-    let response: Response;
+  private async send<T>(path: string, options: RequestInit, read: (response: Response) => Promise<T>): Promise<T> {
+    this.assertActive();
+    const controller = new AbortController();
+    this.requests.add(controller);
+    const timeout = setTimeout(() => controller.abort(), 30000);
     try {
-      response = await this.platform.request(`${this.target}/api/v1${path}`, {
-        ...options, headers: { ...options.headers, ...(this.credential ? { Authorization: `Bearer ${this.credential.token}` } : {}) },
-        credentials: 'omit', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(30000)
-      });
-    } catch { this.connection(true); throw new ConnectionError('无法连接家庭电脑，请确认电脑已开机且服务运行，再重试'); }
-    if (!response.ok) {
-      const detail = await response.json().catch(() => ({}));
-      const unavailable = response.status === 502 || response.status === 504;
-      if (unavailable) { this.connection(true); throw new ConnectionError('家庭电脑上的服务暂时不可达，请确认服务运行后重试'); }
-      throw new ApiError(response.status, typeof detail.message === 'string' ? detail.message : unavailable ? '家庭电脑上的服务暂时不可达，请确认服务运行后重试' : '请求失败，请重试', detail.conflict);
-    }
-    this.connection(false);
-    return response;
+      let response: Response;
+      try {
+        response = await this.platform.request(`${this.target}/api/v1${path}`, {
+          ...options, headers: { ...options.headers, ...(this.credential ? { Authorization: `Bearer ${this.credential.token}` } : {}) },
+          credentials: 'omit', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer', signal: controller.signal
+        });
+      } catch { this.assertActive(); this.connection(true); throw new ConnectionError('无法连接家庭电脑，请确认电脑已开机且服务运行，再重试'); }
+      this.assertActive();
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        this.assertActive();
+        if (response.status === 502 || response.status === 504) { this.connection(true); throw new ConnectionError('家庭电脑上的服务暂时不可达，请确认服务运行后重试'); }
+        throw new ApiError(response.status, typeof detail.message === 'string' ? detail.message : '请求失败，请重试', detail.conflict);
+      }
+      const result = await read(response);
+      this.assertActive();
+      this.connection(false);
+      return result;
+    } finally { clearTimeout(timeout); this.requests.delete(controller); }
   }
   private async request<T>(path: string, method = 'GET', body?: unknown, grant?: string): Promise<T> {
     try {
-      const response = await this.send(path, {
+      const value = await this.send<T>(path, {
       method, body: body === undefined ? undefined : JSON.stringify(body),
       headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(grant ? { 'X-Parent-Authorization': grant } : {}) }
-    });
-      const value: T = response.status === 204 ? undefined as T : await response.json();
+    }, async response => response.status === 204 ? undefined as T : response.json());
       if (method === 'GET' && !grant && path.startsWith('/collection/') && !path.includes('/recognition') && !path.startsWith('/collection/questions')) {
         try { this.local?.remember(path, value); } catch { /* Read remains available online; never claim this snapshot was prepared offline. */ }
       }
@@ -139,7 +156,7 @@ export class FamilyApi {
   ocrSettings(grant: string) { return this.request<OcrSettings>('/admin/ocr', 'GET', undefined, grant); }
   saveOcr(grant: string, input: OcrEdit) { return this.request<OcrSettings>('/admin/ocr', 'PUT', input, grant); }
   testOcr(grant: string, id: string, expectedRevision: number) { return this.request<OcrTest>(`/admin/ocr/tests/${encodeURIComponent(id)}`, 'PUT', { expectedRevision, sample: 'school-v1' }, grant); }
-  async ocrSample(grant: string) { return (await this.send('/admin/ocr/sample', { headers: { 'X-Parent-Authorization': grant } })).blob(); }
+  async ocrSample(grant: string) { return this.send('/admin/ocr/sample', { headers: { 'X-Parent-Authorization': grant } }, response => response.blob()); }
   addSubject(grant: string, id: string, name: string) { return this.request<Subject>(`/admin/subjects/${encodeURIComponent(id)}`, 'PUT', { name }, grant); }
   studySettings(grant?: string) { return this.request<StudySettings>(grant ? '/admin/study-settings' : '/collection/study-settings', 'GET', undefined, grant); }
   saveStudySettings(grant: string, input: StudySettingsEdit) { return this.request<StudySettings>('/admin/study-settings', 'PUT', input, grant); }
@@ -199,6 +216,7 @@ export class FamilyApi {
     }
   }
   deferQuestion(id: string, input: Omit<QuestionEdit, 'operationId' | 'expectedRevision'> & { expectedRevision?: number }) {
+      this.assertActive();
       const current = this.local?.read<Question>(`/collection/questions/${id}`);
       if (!current) throw new Error('本机尚未保留这道题，请恢复连接后重试');
       // The edit journal retains the exact operation and base revision for replay.
@@ -215,6 +233,7 @@ export class FamilyApi {
   }
   async createQuestion(pageId: string, input: QuestionCreate, grant?: string) { await this.syncCaptures(); return this.rememberQuestion(await this.request<Question>(`/collection/pages/${encodeURIComponent(this.remoteId(pageId))}/questions`, 'POST', { ...input, parts: input.parts?.map(part => ({ ...part, pageId: this.remoteId(part.pageId), id: this.remoteId(part.id) })) }, grant)); }
   async prepareQuestion(question: Question) {
+    this.assertActive();
     if (!this.captures || !this.local?.home()) throw new Error('请先连接家庭资料库');
     this.captures.remember({ operationId: question.id, kind: 'questions', page: question.originalPage, question, stage: question.studyStage });
     this.local.question(question);
@@ -224,15 +243,14 @@ export class FamilyApi {
   uploadImage(file: Blob, operationId: string, grant?: string, stage?: StudyStage) { return this.upload<Question>('drafts', file, operationId, grant, stage); }
   uploadPage(file: Blob, operationId: string, grant?: string) { return this.upload<OriginalPage>('pages', file, operationId, grant); }
   private async upload<T>(target: 'drafts' | 'pages', file: Blob, operationId: string, grant?: string, stage?: StudyStage): Promise<T> {
-    let response: Response;
-    try { response = await this.send(`/collection/${target}`, { method: 'POST', body: file, headers: { 'Content-Type': ['image/jpeg', 'image/png', 'image/webp'].includes(file.type) ? file.type : 'image/png', 'Idempotency-Key': operationId, ...(grant ? { 'X-Parent-Authorization': grant } : {}), ...(stage ? { 'X-Learning-Stage': encodeURIComponent(JSON.stringify(stage)) } : {}) } }); }
+    let result: T;
+    try { result = await this.send<T>(`/collection/${target}`, { method: 'POST', body: file, headers: { 'Content-Type': ['image/jpeg', 'image/png', 'image/webp'].includes(file.type) ? file.type : 'image/png', 'Idempotency-Key': operationId, ...(grant ? { 'X-Parent-Authorization': grant } : {}), ...(stage ? { 'X-Learning-Stage': encodeURIComponent(JSON.stringify(stage)) } : {}) } }, response => response.json()); }
     catch (failure) {
       const home = this.local?.home();
       if (!(failure instanceof ConnectionError) || grant || !home || !this.captures) throw failure;
       const saved = await this.captures.create(file, operationId, target, home, stage);
       return (target === 'drafts' ? saved.question! : saved.page) as T;
     }
-    const result: T = await response.json();
     const page = target === 'drafts' ? (result as Question).originalPage : result as OriginalPage;
     if (this.local) {
       await this.local.putImage(page.id, 'original', file);
@@ -247,7 +265,7 @@ export class FamilyApi {
       if (saved) return saved;
     }
     try {
-      const image = await (await this.send(`/collection/pages/${encodeURIComponent(this.remoteId(pageId))}/${variant}`)).blob();
+      const image = await this.send(`/collection/pages/${encodeURIComponent(this.remoteId(pageId))}/${variant}`, {}, response => response.blob());
       try { await this.local?.putImage(pageId, variant, image); } catch { /* Display online; offline retrieval only succeeds for stored bytes. */ }
       return image;
     } catch (failure) {
@@ -265,6 +283,7 @@ export class FamilyApi {
   revoke(grant: string, id: string) { return this.request<void>(`/admin/devices/${encodeURIComponent(id)}`, 'DELETE', undefined, grant); }
   rotateRecoveryCode(grant: string) { return this.request<{ recoveryCode: string }>('/admin/recovery-code', 'POST', undefined, grant); }
   async remember(result: SessionResult) {
+    this.assertActive();
     this.credential = { target: this.target, libraryId: result.library.id, accountId: result.account.id, token: result.token };
     try { await this.platform.credentials.write(this.credential); this.local?.remember('/home', { account: result.account, library: result.library, session: result.session }); return true; }
     catch { return false; }
@@ -299,8 +318,7 @@ export class FamilyApi {
       }
       const file = await this.local!.image(record.page.id, 'original');
       if (!file) throw new Error('本机原始图片未能读取，请保留材料后重试');
-      const response = await this.send(`/collection/${record.kind}`, { method: 'POST', body: file, headers: { 'Content-Type': file.type, 'Idempotency-Key': record.operationId, ...(record.kind === 'drafts' ? { 'X-Learning-Stage': encodeURIComponent(JSON.stringify(record.stage)) } : {}) } });
-      record.remote = await response.json();
+      record.remote = await this.send<OriginalPage | Question>(`/collection/${record.kind}`, { method: 'POST', body: file, headers: { 'Content-Type': file.type, 'Idempotency-Key': record.operationId, ...(record.kind === 'drafts' ? { 'X-Learning-Stage': encodeURIComponent(JSON.stringify(record.stage)) } : {}) } }, response => response.json());
       this.captures!.remember(record);
       if (record.question && !this.local!.read<Question>(`/collection/questions/${record.question.id}`)) this.rememberQuestion(record.remote as Question);
     }
@@ -342,6 +360,7 @@ export class FamilyApi {
     return this.syncing;
   }
   async forget() {
+    this.assertActive();
     this.credential = null;
     await this.platform.credentials.remove(this.target);
   }

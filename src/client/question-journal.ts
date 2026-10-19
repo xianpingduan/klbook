@@ -1,6 +1,7 @@
 import type { Question } from '../shared/collection.ts';
 import type { ClientPlatform, DraftScope } from './platform.ts';
-import type { QuestionFields, questionContent } from './question-edit.ts';
+import type { QuestionFields } from './question-edit.ts';
+import { questionContent, questionFields } from './question-edit.ts';
 
 export interface QuestionCheckpoint { current: Question; pending: (ReturnType<typeof questionContent> & { operationId: string; expectedRevision: number }) | null; intent?: ReturnType<typeof questionContent> }
 export interface QuestionProgress {
@@ -33,6 +34,15 @@ class StoredProgress {
  * two tabs never destroy each other's pending work; server revisions resolve merges.
  */
 export class QuestionJournal {
+  static pendingCount(platform: ClientPlatform, scope: DraftScope) {
+    const ids = new Set<string>();
+    for (const { value: { fields, checkpoint } } of this.entries(platform, scope)) {
+      const base = checkpoint.current;
+      if (checkpoint.pending || checkpoint.intent || base.syncState === 'pending' ||
+        JSON.stringify(questionContent(fields, base.state)) !== JSON.stringify(questionContent(questionFields(base), base.state))) ids.add(base.id);
+    }
+    return ids.size;
+  }
   private key: string;
   private platform: ClientPlatform;
   private scope: DraftScope;

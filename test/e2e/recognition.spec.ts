@@ -7,6 +7,7 @@ import sharp from 'sharp';
 import { randomUUID } from 'node:crypto';
 import { createApp } from '../../src/server/app.ts';
 import type { APIRequestContext } from '@playwright/test';
+import { startServer } from './server.ts';
 
 async function recognitionFixture(request: APIRequestContext, wait = async () => {}) {
   const dataDir = await mkdtemp(join(tmpdir(), 'klbook-recognition-browser-'));
@@ -150,4 +151,57 @@ test('识别迟到仍能立即保存，后台回执丢失后重试不重复调�
     expect(f.calls()).toBe(1);
   } finally { release();
     await f.close(); }
+});
+
+test('切换资料库后迟到识别仅留在原库，切回可查看且不覆盖题目', async ({ page, request }) => {
+  let release = () => {};
+  const waiting = new Promise<void>(resolve => { release = resolve; });
+  const f = await recognitionFixture(request, () => waiting);
+  const otherDir = await mkdtemp(join(tmpdir(), 'klbook-recognition-other-'));
+  const other = await startServer(otherDir, 0, [f.url]);
+  async function signIn() {
+    await page.getByLabel('家长账号').fill('parent');
+    await page.getByLabel('家长密码', { exact: true }).fill(f.password);
+    await page.getByRole('button', { name: '登录此设备', exact: true }).click();
+    await expect(page.getByRole('button', { name: '我的', exact: true })).toBeVisible();
+  }
+  async function switchTo(address: string) {
+    await page.getByRole('button', { name: '我的', exact: true }).click();
+    await page.getByRole('button', { name: '连接设置', exact: true }).click();
+    await page.getByLabel('后端服务地址', { exact: true }).fill(address);
+    await page.getByRole('button', { name: '测试连接', exact: true }).click();
+    await page.getByRole('button', { name: '使用此地址并登录', exact: true }).click();
+    await signIn();
+  }
+  try {
+    const setupCode = (await readFile(join(otherDir, 'setup-code.txt'), 'utf8')).trim();
+    const otherSession = await (await request.post(`${other.url}/api/v1/setup`, { data: { setupCode, username: 'parent', password: f.password, learnerName: '小明', deviceName: '另一个家庭' } })).json();
+    await page.goto(`${f.url}/learn/collect`); await signIn();
+    const bytes = await sharp(await readFile(new URL('../fixtures/paper.svg', import.meta.url))).png().toBuffer();
+    await page.getByLabel('选择题目图片').setInputFiles({ name: '原库识别.png', mimeType: 'image/png', buffer: bytes });
+    await reveal(page.getByRole('button', { name: '选择整页', includeHidden: true }));
+    await page.getByRole('button', { name: '选择整页' }).click();
+    await page.getByRole('button', { name: '下一步，选学科' }).click();
+    await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('science');
+    await expect.poll(f.calls).toBe(1);
+    await expect(page.getByText('草稿已同步到家庭电脑', { exact: true })).toBeVisible();
+    const draft = (await (await request.get(`${f.url}/api/v1/collection/questions?state=draft`, { headers: f.headers })).json()).items[0];
+    await page.getByRole('button', { name: '返回列表', exact: true }).click();
+    await switchTo(other.url);
+    release();
+    const results = `${f.url}/api/v1/collection/pages/${draft.originalPage.id}/recognitions`;
+    await expect.poll(async () => (await (await request.get(results, { headers: f.headers })).json()).runs[0].status).toBe('succeeded');
+    await page.getByRole('button', { name: '收集', exact: true }).click();
+    await expect(page.getByRole('button', { name: '继续整理', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '选用候选题 1', exact: true })).toHaveCount(0);
+    expect((await (await request.get(`${other.url}/api/v1/collection/questions?state=draft`, { headers: { Authorization: `Bearer ${otherSession.token}` } })).json()).total).toBe(0);
+    await switchTo(f.url);
+    await page.getByRole('button', { name: '收集', exact: true }).click();
+    await page.getByRole('button', { name: '继续整理', exact: true }).click();
+    await page.getByText('识别文字（选看）', { exact: false }).click();
+    await expect(page.getByRole('button', { name: '选用候选题 1', exact: true })).toBeVisible();
+    await expect(page.getByRole('combobox', { name: '学科', exact: true })).toHaveValue('science');
+    await expect(page.getByLabel('题干文字（选填，可更正）')).toHaveValue('');
+    expect(f.calls()).toBe(1);
+  } finally { release(); await other.stop(); await f.close(); await rm(otherDir, { recursive: true, force: true }); }
 });

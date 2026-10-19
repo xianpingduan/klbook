@@ -36,11 +36,12 @@ export function App({ platform }: { platform: ClientPlatform }) {
     setError(''); setScreen('loading');
     try {
       const connection = await FamilyApi.connect(platform);
-      if (version !== bootVersion.current) return;
+      if (version !== bootVersion.current) { connection.api.pause(); return; }
       setApi(connection.api);
       if (!connection.info.initialized) { setScreen('setup'); return; }
       try {
         const next = await connection.api.home();
+        if (version !== bootVersion.current) { connection.api.pause(); return; }
         if (!connection.api.offline) {
           try { await connection.api.syncProgress(); }
           catch (failure) { if (failure instanceof ApiError && failure.status === 401) throw failure; if (version === bootVersion.current) setNotice(`本机资料仍保留：${failure instanceof Error ? failure.message : '同步未完成，请核对后重试'}`); }
@@ -86,9 +87,9 @@ export function App({ platform }: { platform: ClientPlatform }) {
     });
   }
 
-  const openConnection = () => boundary.requestLeave(() => { bootVersion.current++; setConnectionOpen(true); });
-  if (connectionOpen) return <LeaveContext.Provider value={boundary}><SurfaceLayout path={path} navigate={navigate}><ConnectionSettings platform={platform}
-    onBack={() => { setConnectionOpen(false); if (screen === 'loading') void boot(); }}
+  const openConnection = () => boundary.requestLeave(() => { bootVersion.current++; api?.pause(); setConnectionOpen(true); });
+  if (connectionOpen) return <LeaveContext.Provider value={boundary}><SurfaceLayout path={path} navigate={navigate}><ConnectionSettings platform={platform} api={api}
+    onBack={() => { setConnectionOpen(false); void boot(); }}
     onConnected={({ api: next, info }) => { bootVersion.current++; setApi(next); setHome(undefined); setRecoveryCode(''); setError(''); setNotice('服务地址已更新，请由家长登录目标资料库。'); setScreen(info.initialized ? 'login' : 'setup'); setConnectionOpen(false); }} /></SurfaceLayout></LeaveContext.Provider>;
   if (screen === 'home' && home && api) return <LeaveContext.Provider value={boundary}><AuthenticatedWorkspace key={home.session.id} api={api} home={home} platform={platform} path={path} navigate={navigate} notice={notice} onConnection={openConnection} onSignedOut={signedOut} onRecoveryCode={code => { setRecoveryCode(code); setScreen('save-code'); }} /></LeaveContext.Provider>;
   return <LeaveContext.Provider value={boundary}><SurfaceLayout path={path} navigate={navigate}>

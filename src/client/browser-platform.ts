@@ -61,6 +61,10 @@ export function browserPlatform(): ClientPlatform {
       async remove(target) { localStorage.removeItem(`klbook.credential:${target}`); }
     },
     drafts: {
+      async keys(scope) {
+        const keys = await drafts('readonly', store => store.getAllKeys());
+        return keys.filter((key): key is string[] => Array.isArray(key) && key.length === 3 && key[0] === scope.libraryId && key[1] === scope.accountId && typeof key[2] === 'string').map(key => key[2]!);
+      },
       async put(scope, id, value) {
         // WebKit on Windows cannot persist Blob objects; keep bytes and MIME in one transaction.
         const stored = { bytes: await value.arrayBuffer(), type: value.type };
