@@ -61,15 +61,15 @@ export class XfyunAi {
         const error = businessErrors[codeValue]!;
         throw new AiFailure(`${error.message}（代码 ${codeValue}）`, !!error.retryable, !!error.uncertain, meter);
       }
+      if ((typeof codeValue === 'number' && codeValue !== 0) || (response.ok && body.error)) {
+        const code = typeof codeValue === 'number' && Number.isSafeInteger(codeValue) ? `（代码 ${codeValue}）` : '';
+        throw new AiFailure(`讯飞返回业务错误${code}，请稍后重试或核对控制台；本次费用不确定`, false, true, meter);
+      }
       if (!response.ok) {
         if ([401, 403].includes(response.status)) throw new AiFailure('讯飞鉴权或权限检查失败，请核对所选模型的 APIPassword 和开通情况', false, false, meter);
         if (response.status === 429) throw new AiFailure('讯飞调用频率或额度受限，请检查控制台额度后重试', true, false, meter);
         if (response.status >= 500) throw new AiFailure('讯飞服务暂时异常，本次结果和费用不确定', true, true, meter);
         throw new AiFailure('讯飞拒绝了测试请求，请核对模型权限和配置', false, false, meter);
-      }
-      if (body.error || (typeof body.code === 'number' && body.code !== 0)) {
-        const code = typeof body.code === 'number' && Number.isSafeInteger(body.code) ? `（代码 ${body.code}）` : '';
-        throw new AiFailure(`讯飞返回业务错误${code}，请稍后重试或核对控制台；本次费用不确定`, false, true, meter);
       }
       if (body.code !== undefined && body.code !== 0) throw new AiFailure('讯飞返回格式异常，本次结果和费用不确定', false, true, meter);
       const choice = object(Array.isArray(body.choices) ? body.choices[0] : undefined), message = object(choice.message);

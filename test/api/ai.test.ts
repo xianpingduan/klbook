@@ -14,8 +14,8 @@ const credentials = { apiPassword: 'test-spark-password:keep-private' };
 const prices = (input = 0, output = 0) => ({ lite: { inputCentsPerMillion: input, outputCentsPerMillion: output, confirmed: true }, '4.0Ultra': { inputCentsPerMillion: input, outputCentsPerMillion: output, confirmed: true } });
 
 test('已知 AI 内容审核和长度错误给出对应提示，非成功 HTTP 返回的有效计量也保留', async () => {
-  let code = 10013, status = 200;
-  const vendor = aiVendor(() => Response.json({ code, message: credentials.apiPassword, usage: { prompt_tokens: 28, completion_tokens: 19, total_tokens: 47 } }, { status }));
+  let code = 10013, status = 200, includeUsage = true;
+  const vendor = aiVendor(() => Response.json({ code, message: credentials.apiPassword, ...(includeUsage ? { usage: { prompt_tokens: 28, completion_tokens: 19, total_tokens: 47 } } : {}) }, { status }));
   const f = await familyFixture({ aiHttp: vendor.http });
   try {
     const { headers, data } = await configure(f, { modelPrices: prices(200, 600) });
@@ -31,6 +31,13 @@ test('已知 AI 内容审核和长度错误给出对应提示，非成功 HTTP �
     const result = await finishedAi(f, headers);
     assert.equal(result.tests[0]?.totalTokens, 47); assert.equal(result.usage.estimatedCents, 0.085);
     assert.equal(result.usage.reportedAttempts, 5);
+    code = 99999; status = 400; includeUsage = false;
+    assert.equal((await submit(f, headers, data.revision)).statusCode, 202);
+    const unknown = await finishedAi(f, headers);
+    assert.match(unknown.tests[0]!.message, /费用不确定/);
+    assert.equal(unknown.tests[0]?.reservedCents, 1.9456);
+    assert.equal(unknown.usage.estimatedCents, 2.0306);
+    assert.equal(JSON.stringify(unknown).includes(credentials.apiPassword), false);
   } finally { await f.close(); }
 });
 
