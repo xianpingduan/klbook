@@ -23,11 +23,13 @@ export function usePageImage(api: FamilyApi, pageId: string, variant: 'original'
 export function QuestionImage({ api, page, region, original = false, label = '已收集的题目区' }: { api: FamilyApi; page: OriginalPage; region?: Region | null; original?: boolean; label?: string }) {
   const image = usePageImage(api, page.id, original ? 'original' : 'preview');
   if (image.error) return <p role="alert" className="message error">{image.error} <button className="quiet" onClick={image.retry}>重试加载图片</button></p>;
-  if (!image.url) return <p>正在读取材料…</p>;
-  if (!region || original) return <img className="paper-image" src={image.url} alt={original ? '原始页（保留作答和批改）' : '原始页预览'} />;
-  return <svg className="question-crop" role="img" aria-label={label} viewBox={`${region.x * page.width} ${region.y * page.height} ${region.width * page.width} ${region.height * page.height}`}>
-    <image href={image.url} width={page.width} height={page.height} />
-  </svg>;
+  return <div className="question-image">
+    {!region || original ? <img className="paper-image" src={image.url || undefined} width={page.width} height={page.height} style={{ visibility: image.url ? undefined : 'hidden' }} alt={original ? '原始页（保留作答和批改）' : '原始页预览'} />
+      : <svg className="question-crop" role="img" aria-label={label} aria-hidden={!image.url} width={region.width * page.width} height={region.height * page.height} viewBox={`${region.x * page.width} ${region.y * page.height} ${region.width * page.width} ${region.height * page.height}`}>
+        {image.url && <image href={image.url} width={page.width} height={page.height} />}
+      </svg>}
+    {!image.url && <p className="material-loading" role="status">正在读取材料…</p>}
+  </div>;
 }
 
 export function CropSelector({ api, page, region, onChange, disabled, instruction = '一道可以独立作答的小题', label = '框选题目范围', compact = false, tools }: { api: FamilyApi; page: OriginalPage; region: Region | null; onChange(value: Region | null): void; disabled: boolean; instruction?: string; label?: string; compact?: boolean; tools?: ReactNode }) {
