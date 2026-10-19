@@ -8,7 +8,7 @@ import { startServer } from './server.ts';
 
 test.use({ hasTouch: true });
 
-test('相册多选逐张整理，取消单张后重开保留进度，另一设备能找回', async ({ page, browser, request }) => {
+for (const cancellation of ['queue', 'editor'] as const) test(`相册多选逐张整理，${cancellation === 'queue' ? '待上传列表' : '整理页'}取消后重开保留进度，另一设备能找回`, async ({ page, browser, request }) => {
   const dataDir = await mkdtemp(join(tmpdir(), 'klbook-batch-'));
   const server = await startServer(dataDir);
   const other = await browser.newContext();
@@ -34,11 +34,26 @@ test('相册多选逐张整理，取消单张后重开保留进度，另一设�
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('math');
     await page.getByRole('button', { name: '保存到错题集' }).click();
     await expect(page.getByRole('heading', { name: '错题详情' })).toBeVisible();
-    await page.getByRole('button', { name: '返回列表', exact: true }).click();
-    await page.getByRole('button', { name: '取消 取消这张.png', exact: true }).click();
-    await expect(page.getByText('已上传 1 / 3 张，已取消 1 张', { exact: true })).toBeVisible();
+    if (cancellation === 'queue') {
+      await page.getByRole('button', { name: '返回列表', exact: true }).click();
+      await page.getByRole('button', { name: '取消 取消这张.png', exact: true }).click();
+      await expect(page.getByText('还有 1 张图片等待上传', { exact: true })).toBeVisible();
+    } else {
+      await page.getByRole('button', { name: '继续下一张', exact: true }).click();
+      await reveal(page.getByRole('button', { name: '取消本次', exact: true, includeHidden: true }));
+      await page.getByRole('button', { name: '取消本次', exact: true }).click();
+      await expect(page.getByText('已取消本次收集，材料仍保留。', { exact: true })).toBeVisible();
+      await expect(page.getByRole('region', { name: '本机待上传图片' })).not.toContainText('已取消 0 张');
+    }
     await page.reload();
     await expect(page.getByText('还有 1 张图片等待上传', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '取消 取消这张.png', exact: true })).toHaveCount(0);
+    if (cancellation === 'editor') {
+      await page.locator('details.cancelled-collections > summary').click();
+      await expect(page.getByRole('button', { name: '撤销取消', exact: true })).toHaveCount(1);
+      await expect(page.getByRole('button', { name: '继续整理', exact: true })).toHaveCount(0);
+      await expect(page.getByRole('region', { name: '本机待上传图片' })).not.toContainText('已取消 0 张');
+    }
     await page.getByRole('button', { name: '继续上传 第三张.png', exact: true }).click();
     await expect(page.getByRole('heading', { name: '框住这道题' })).toBeVisible();
     await reveal(page.getByRole('button', { name: '选择整页', includeHidden: true }));
@@ -46,8 +61,11 @@ test('相册多选逐张整理，取消单张后重开保留进度，另一设�
     await page.getByRole('button', { name: '下一步，选学科' }).click();
     await page.getByRole('combobox', { name: '学科', exact: true }).selectOption('english');
     await page.getByRole('button', { name: '保存到错题集' }).click();
+    await expect(page.getByRole('heading', { name: '错题详情' })).toBeVisible();
     const second = await other.newPage();
     await login(second);
+    await expect(second.getByRole('button', { name: '打开错题' })).toHaveCount(2);
+    await second.reload();
     await expect(second.getByRole('button', { name: '打开错题' })).toHaveCount(2);
     await page.screenshot({ path: `test-results/batch-${test.info().project.name}.png`, fullPage: true });
   } finally { await other.close();

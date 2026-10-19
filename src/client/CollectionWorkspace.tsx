@@ -219,7 +219,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, navigate
     setState(next);
     setFilters(({ collectedFrom: _from, collectedBefore: _before, ...remaining }) => remaining);
   }
-  const continuation = pending && <div className="batch-next"><p>还有 {batch!.items.length} 张图片待处理 · 下一张：{pending.name}</p><button disabled={busy} onClick={() => requestLeave(() => { back(); void run(() => upload(pending)); })}>继续下一张</button><button className="quiet" disabled={busy} aria-label={`取消 ${pending.name}`} onClick={() => void run(() => cancel(pending))}>取消这张</button><button className="quiet" disabled={busy} onClick={() => requestLeave(back)}>稍后继续</button><p className="hint">已处理 {batch!.uploaded} / {batch!.total} 张，已取消 {batch!.cancelled} 张</p></div>;
+  const continuation = pending && <div className="batch-next"><p>还有 {batch!.items.length} 张图片待处理 · 下一张：{pending.name}</p><button disabled={busy} onClick={() => requestLeave(() => { back(); void run(() => upload(pending)); })}>继续下一张</button><button className="quiet" disabled={busy} aria-label={`取消 ${pending.name}`} onClick={() => void run(() => cancel(pending))}>取消这张</button><button className="quiet" disabled={busy} onClick={() => requestLeave(back)}>稍后继续</button></div>;
   return <div className="collection-workspace">
     {error && <p role="alert" className="message error">{error}</p>}
     {notice && <p role="status" className="message">{notice}</p>}

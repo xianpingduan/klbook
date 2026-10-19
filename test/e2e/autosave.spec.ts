@@ -137,6 +137,17 @@ test('A 布局默认折叠选填项，每步一个主操作，手机平板电脑
     for (const width of [390, 820, 1440]) {
       await page.setViewportSize({ width, height: 844 });
       await page.evaluate(() => scrollTo(0, 0));
+      const material = page.getByRole('region', { name: '题目与原始页' });
+      const adjust = page.getByRole('button', { name: '调整题目范围', exact: true });
+      await expect(material.getByRole('img', { name: '已收集的题目区' })).toBeVisible();
+      const materialBounds = (await material.boundingBox())!;
+      const adjustBounds = (await adjust.boundingBox())!;
+      expect(adjustBounds.width, '调整范围按钮不能被挤成竖排').toBeGreaterThan(120);
+      expect(adjustBounds.x + adjustBounds.width).toBeLessThanOrEqual(materialBounds.x + materialBounds.width);
+      if (width <= 720) {
+        const subjectBounds = (await page.getByRole('combobox', { name: '学科', exact: true }).boundingBox())!;
+        expect(subjectBounds.y, '手机确认页学科应排列在题目预览之后').toBeGreaterThanOrEqual(materialBounds.y + materialBounds.height);
+      }
       await page.screenshot({ path: info.outputPath(`confirm-${width}.png`) });
       await optional(page);
       await page.getByLabel('备注（选填）').fill('选填内容展开后主操作仍可达');
@@ -153,6 +164,30 @@ test('A 布局默认折叠选填项，每步一个主操作，手机平板电脑
     await expect(page.getByRole('button', { name: '补充纸质答案', includeHidden: true })).toHaveCount(0);
     await page.getByRole('button', { name: '完成，回到首页', exact: true }).click();
     await expect(page.getByRole('button', { name: '打开错题', exact: true })).toHaveCount(1);
+  } finally { await f.close(); }
+});
+
+test('不支持媒体查询范围语法时，手机确认页仍纵向排列且调整按钮不挤成竖排', async ({ page, request }, info) => {
+  const f = await fixture(request);
+  try {
+    // Safari before 16.4 ignores range queries. Exercise the shipped CSS under
+    // that constraint; this does not emulate other differences in old Safari.
+    await page.route('**/assets/*.css', async route => {
+      const response = await route.fetch();
+      const body = (await response.text()).replace(/@media\s*([^{}]+)\{/g, (rule, query: string) => /[<>]/.test(query) ? '@media not all{' : rule);
+      await route.fulfill({ response, body });
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await startQuestion(page, f);
+    await page.locator('details.optional-info').first().locator('summary').click();
+    await page.evaluate(() => scrollTo(0, 0));
+    await page.screenshot({ path: info.outputPath('legacy-safari-confirm.png') });
+    const material = (await page.getByRole('region', { name: '题目与原始页' }).boundingBox())!;
+    const adjust = (await page.getByRole('button', { name: '调整题目范围', exact: true }).boundingBox())!;
+    const subject = (await page.getByRole('combobox', { name: '学科', exact: true }).boundingBox())!;
+    expect(adjust.width, '调整范围按钮不能被挤成竖排').toBeGreaterThan(120);
+    expect(subject.y, '学科应排列在题目预览之后').toBeGreaterThanOrEqual(material.y + material.height);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   } finally { await f.close(); }
 });
 
