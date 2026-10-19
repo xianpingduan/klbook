@@ -7,7 +7,7 @@ import { LocalLibrary } from './local-library.ts';
 
 export interface OfflineCapture {
   operationId: string; kind: 'drafts' | 'pages' | 'questions'; page: OriginalPage;
-  question?: Question; remote?: OriginalPage | Question; stage: StudyStage;
+  question?: Question; remote?: OriginalPage | Question; stage: StudyStage; blocked?: string;
 }
 
 /** Stable local identities stay stable while the upload receipt supplies the

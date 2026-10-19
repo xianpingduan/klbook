@@ -4,6 +4,7 @@ export const pages = {
   '/learn/mine': { surface: 'learn', label: '我的' },
   '/admin': { surface: 'admin', label: '管理概览' },
   '/admin/materials': { surface: 'admin', label: '错题资料' },
+  '/admin/trash': { surface: 'admin', label: '回收站' },
   '/admin/sources': { surface: 'admin', label: '来源管理' },
   '/admin/study': { surface: 'admin', label: '学科与学习阶段' },
   '/admin/services/ocr': { surface: 'admin', label: '图片识别服务' },

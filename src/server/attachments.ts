@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { mkdir, open, readFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, open, readFile, rm, lstat } from 'node:fs/promises';
+import { join, resolve, dirname } from 'node:path';
 import sharp from 'sharp';
 import { AccessError } from './family-access.ts';
 import type { OriginalPage } from '../shared/collection.ts';
@@ -54,4 +54,11 @@ export class Attachments {
   }
 
   async discard(id: string) { await rm(join(this.root, id), { recursive: true, force: true }).catch(() => {}); }
+  async remove(id: string) {
+    const target = resolve(this.root, id);
+    if (!/^[0-9a-f-]{36}$/i.test(id) || dirname(target) !== resolve(this.root)) throw new Error('Invalid attachment directory');
+    // force:true can hide ENOTDIR on Windows. An unavailable storage root is not a successful deletion.
+    if (!(await lstat(this.root)).isDirectory()) throw new Error('Attachment storage unavailable');
+    await rm(target, { recursive: true, force: true });
+  }
 }

@@ -26,6 +26,7 @@ export class CollectionStore {
   }
   subjects(): Subject[] { return this.db.prepare<[], Subject>('SELECT id, name FROM subjects ORDER BY position').all(); }
   private page(libraryId: string, id: string) {
+    if (this.db.prepare('SELECT 1 FROM retiredPages WHERE libraryId = ? AND id = ?').get(libraryId, id)) throw new AccessError(410, '原始材料已永久删除，请保留需要的本机材料；旧上传不会重新建立已删记录');
     const page = this.db.prepare<[string, string], StoredPage>('SELECT * FROM originalPages WHERE libraryId = ? AND id = ?').get(libraryId, id);
     if (!page) throw new AccessError(404, '找不到原始页');
     return page;
@@ -41,7 +42,8 @@ export class CollectionStore {
   private async verifyQuestion(question: Question) {
     for (const pageId of new Set([...question.parts, ...question.answerParts, ...(question.readingMaterial?.parts ?? [])].map(part => part.originalPage.id))) await this.verifyPage(question.libraryId, pageId);
   }
-  get(libraryId: string, id: string): Question {
+  get(libraryId: string, id: string, includeTrashed = false): Question {
+    if (!includeTrashed && this.db.prepare('SELECT 1 FROM questionDeletions WHERE libraryId = ? AND id = ?').get(libraryId, id)) throw new AccessError(410, '这道题已被家长删除，请到回收站核对或恢复；本机未同步修改不会自动恢复已删题目');
     const row = this.db.prepare<[string, string], QuestionRow>('SELECT * FROM questions WHERE libraryId = ? AND id = ?').get(libraryId, id);
     if (!row) throw new AccessError(404, '找不到这道题');
     if (row.cancelledAt !== null) throw new AccessError(409, '本次收集已取消，请到收集页撤销取消后继续');
@@ -54,11 +56,11 @@ export class CollectionStore {
     return { ...rest, studyStage: { schoolYear, grade, term }, source: rest.sourceId ? this.sources.get(rest.sourceId).name : rest.source, region: region ? JSON.parse(region) as Region : null, originalPage: this.publicPage(libraryId, originalPageId), parts, answerParts, readingMaterial: reading ? this.readings.get(libraryId, reading.materialId) : null, syncState: 'synced' };
   }
   filterOptions(libraryId: string): FilterOptions {
-    const values = (column: 'schoolYear' | 'grade') => this.db.prepare<[string], { value: string }>(`SELECT DISTINCT ${column} AS value FROM questions WHERE libraryId = ? AND cancelledAt IS NULL AND ${column} IS NOT NULL ORDER BY ${column} DESC`).all(libraryId).map(row => row.value);
+    const values = (column: 'schoolYear' | 'grade') => this.db.prepare<[string], { value: string }>(`SELECT DISTINCT ${column} AS value FROM questions WHERE libraryId = ? AND cancelledAt IS NULL AND NOT EXISTS (SELECT 1 FROM questionDeletions WHERE id = questions.id) AND ${column} IS NOT NULL ORDER BY ${column} DESC`).all(libraryId).map(row => row.value);
     return { schoolYears: values('schoolYear'), grades: values('grade'), sources: this.sources.list(true) };
   }
   list(libraryId: string, state: 'draft' | 'collected', offset: number, filters: QuestionFilters = {}): QuestionList {
-    const clauses = ['libraryId = ?', 'state = ?', 'cancelledAt IS NULL'];
+    const clauses = ['libraryId = ?', 'state = ?', 'cancelledAt IS NULL', 'NOT EXISTS (SELECT 1 FROM questionDeletions WHERE id = questions.id)'];
     const values: (string | number)[] = [libraryId, state];
     for (const key of ['subjectId', 'schoolYear', 'grade', 'term', 'sourceId'] as const) {
       if (!filters[key]) continue;
@@ -74,11 +76,12 @@ export class CollectionStore {
     return { items: ids.map(row => this.get(libraryId, row.id)), total, offset, limit: 50 };
   }
   cancelledDrafts(libraryId: string): DraftCancellation[] {
-    return this.db.prepare<[string], DraftCancellation>('SELECT id, revision, cancelledAt FROM questions WHERE libraryId = ? AND cancelledAt IS NOT NULL ORDER BY cancelledAt DESC, id').all(libraryId);
+    return this.db.prepare<[string], DraftCancellation>('SELECT id, revision, cancelledAt FROM questions WHERE libraryId = ? AND cancelledAt IS NOT NULL AND NOT EXISTS (SELECT 1 FROM questionDeletions WHERE id = questions.id) ORDER BY cancelledAt DESC, id').all(libraryId);
   }
   cancelDraft(authorize: () => Home, id: string, input: DraftCancellationEdit): DraftCancellation {
     return this.db.transaction(() => {
       const home = authorize();
+      if (this.db.prepare('SELECT 1 FROM questionDeletions WHERE libraryId = ? AND id = ?').get(home.library.id, id)) throw new AccessError(410, '题目已被家长删除，请到回收站核对或恢复');
       const requestHash = fileHash(Buffer.from(JSON.stringify({ id, expectedRevision: input.expectedRevision, cancelled: input.cancelled })));
       const previous = this.db.prepare<[string, string, string], { requestHash: string; receipt: string }>('SELECT requestHash, receipt FROM draftCancellationOperations WHERE libraryId = ? AND accountId = ? AND operationId = ?').get(home.library.id, home.account.id, input.operationId);
       if (previous) {
@@ -102,7 +105,7 @@ export class CollectionStore {
     return this.get(home.library.id, operation.questionId);
   }
   answerPages(libraryId: string, offset: number): AnswerPageList {
-    const selection = 'FROM originalPages WHERE libraryId = ? AND EXISTS (SELECT 1 FROM answerParts WHERE pageId = originalPages.id)';
+    const selection = 'FROM originalPages WHERE libraryId = ? AND EXISTS (SELECT 1 FROM answerParts WHERE pageId = originalPages.id AND NOT EXISTS (SELECT 1 FROM questionDeletions WHERE id = answerParts.questionId))';
     const ids = this.db.prepare<[string, number], { id: string }>(`SELECT id ${selection} ORDER BY id LIMIT 50 OFFSET ?`).all(libraryId, offset);
     const total = this.db.prepare<[string], { count: number }>(`SELECT COUNT(*) AS count ${selection}`).get(libraryId)!.count;
     return { items: ids.map(row => this.publicPage(libraryId, row.id)), total, offset, limit: 50 };
@@ -121,6 +124,7 @@ export class CollectionStore {
       if (duplicate) return duplicate;
       const latest = this.get(home.library.id, id);
       if (latest.revision !== input.expectedRevision) throw new AccessError(409, '这道题已在其他页面更新，请核对双方内容；当前解答区仍保留', { entity: 'question', id });
+      for (const part of parts) this.page(home.library.id, part.pageId);
       this.db.prepare('DELETE FROM answerParts WHERE questionId = ?').run(id);
       const add = this.db.prepare('INSERT INTO answerParts VALUES (?, ?, ?, ?, ?)');
       parts.forEach((part, position) => add.run(id, part.id, part.pageId, position, JSON.stringify(part.region)));
@@ -234,6 +238,7 @@ export class CollectionStore {
       }
       if (selectedSource && !selectedSource.active && selectedSource.id !== latest?.sourceId) throw new AccessError(422, '此来源已停用，请选择其他来源或留空');
       const questionId = id ?? randomUUID();
+      for (const part of parts) this.page(home.library.id, part.pageId);
       if (!id) this.db.prepare("INSERT INTO questions (id, libraryId, learnerId, originalPageId, revision, state, createdAt, updatedAt) VALUES (?, ?, ?, ?, 1, 'draft', ?, ?)").run(questionId, home.library.id, home.library.learnerId, parts[0]!.pageId, this.now(), this.now());
       this.db.prepare(`UPDATE questions SET revision = @revision, state = @state, subjectId = @subjectId, region = @region, originalPageId = @originalPageId,
         sourceId = @sourceId, source = @source, pageNumber = @pageNumber, questionNumber = @questionNumber, note = @note, updatedAt = @updatedAt, collectedAt = @collectedAt,

@@ -62,6 +62,8 @@ export function CollectionWorkspace({ api, home, platform, path, grant, navigate
   const [originalOpen, setOriginalOpen] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [cancelled, setCancelled] = useState<DraftCancellation[]>([]);
+  const [deletedProgress, setDeletedProgress] = useState<ReturnType<FamilyApi['deletedProgress']>>([]);
+  const [blockedUploads, setBlockedUploads] = useState<ReturnType<FamilyApi['blockedUploads']>>([]);
   const undoOperations = useRef(new Map<string, string>());
   const listState = mode === 'home' ? 'collected' : mode === 'collect' ? 'draft' : state;
   const admin = mode === 'workspace';
@@ -83,10 +85,11 @@ export function CollectionWorkspace({ api, home, platform, path, grant, navigate
     if (!active) return;
     let current = true;
     setLoading(true); setReadError(''); setList({ items: [], total: 0, offset: 0, limit: 50 });
-    void Promise.all([api.subjects(), api.questions(listState, 0, managementGrant, mode === 'collect' ? {} : filters), api.sources(), api.filterOptions(managementGrant), api.studySettings(), mode === 'home' ? Promise.resolve([]) : api.cancelledDrafts(managementGrant)]).then(([subjects, list, sources, options, settings, cancelled]) => {
+    void Promise.all([api.subjects(), api.questions(listState, 0, managementGrant, mode === 'collect' ? {} : filters), api.sources(), api.filterOptions(managementGrant), api.studySettings(), mode === 'home' ? Promise.resolve([]) : api.cancelledDrafts(managementGrant), api.deletedQuestions(managementGrant)]).then(([subjects, list, sources, options, settings, cancelled]) => {
       if (!current) return;
       setSubjects(subjects); setList(list); setSources(sources); setFilterOptions(options); setDefaultStage(settings.stage);
       setCancelled(cancelled);
+      setDeletedProgress(api.deletedProgress()); setBlockedUploads(api.blockedUploads());
     }).catch(async failure => {
       if (!current) return;
       if (failure instanceof ApiError && [401, 403].includes(failure.status)) { await onAccessError(failure); return; }
@@ -223,6 +226,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, navigate
   return <div className="collection-workspace">
     {error && <p role="alert" className="message error">{error}</p>}
     {notice && <p role="status" className="message">{notice}</p>}
+    {screen === 'list' && mode === 'collect' && (deletedProgress.length > 0 || blockedUploads.length > 0) && <details className="card" open><summary>已删除题目的本机内容</summary><p>补传已暂停，不会重新建立已删题目。请由家长到回收站核对；恢复后打开题目合并需要的修改。</p>{deletedProgress.map(item => <section key={item.key}><p>{item.message}</p><p>页码 / 题号：{item.fields.pageNumber || '未填写'} / {item.fields.questionNumber || '未填写'}</p><label>本机保留的备注<textarea readOnly value={item.fields.note} /></label>{item.fields.parts.filter(part => part.transcription).map(part => <label key={part.id}>本机保留的题干<textarea readOnly value={part.transcription ?? ''} /></label>)}</section>)}{blockedUploads.map(item => <p key={item.id}>{item.message} 上传图片仍保留在本机。</p>)}</details>}
     {screen === 'list' && mode === 'collect' && <section className="collection-entry" aria-label="收集新材料"><h1>收集</h1><p className="intro">先把材料留下来，再慢慢整理。</p><CaptureChoices busy={busy || cacheLoading || !!pending} onChoose={choose} onNotice={setNotice} />{pending && <p className="hint">先继续或取消本机待上传图片，再选择新的材料。</p>}</section>}
     {screen === 'list' && mode !== 'home' && batch && <CaptureQueue batch={batch} busy={busy} onUpload={item => void run(() => upload(item))} onCancel={item => void run(() => cancel(item))} />}
     {screen === 'list' && mode !== 'home' && cancelled.length > 0 && <details className="card cancelled-collections" open={notice === '已取消本次收集，材料仍保留。'}><summary>已取消的收集</summary>{cancelled.map(item => <div className="material-actions" key={item.id}><span>{date(item.cancelledAt!)}</span>{!admin && api.hasQuestionProgress(item.id) && <p className="hint">本机还有整理进度；撤销后可核对保留。</p>}<button className="quiet" disabled={busy || !active} onClick={() => void run(() => undo(item))}>撤销取消</button></div>)}</details>}
@@ -241,7 +245,7 @@ export function CollectionWorkspace({ api, home, platform, path, grant, navigate
       </article>)}</div>}
       {list.items.length < list.total && <button className="quiet" disabled={busy || cacheLoading || loading} onClick={() => void run(async () => { const more = await api.questions(listState, list.items.length, managementGrant, mode === 'collect' ? {} : filters); setList(current => ({ ...more, items: [...current.items, ...more.items] })); })}>加载更多</button>}
     </section>}
-    {screen === 'edit' && selected && <QuestionEditor key={selected.id} api={api} question={selected} proposedReading={proposedReading} subjects={subjects} sources={sources} active={active} externalBusy={busy} admin={admin} creating={creating} grant={managementGrant} pageCache={pageCache} onBack={back} onCancelled={() => { back(); setNotice('已取消本次收集，材料仍保留。'); if (!admin) navigate('/learn/collect'); }} onNewFromPage={newFromPage} onReading={openReading} onAnswers={openAnswers} onAccessError={onAccessError} onCurrent={setSelected} onSaved={question => { setSelected(question); setProposedReading(undefined); setCreating(false); setRefresh(value => value + 1); if (!admin && question.state === 'collected') setScreen('detail'); }} />}
+    {screen === 'edit' && selected && <QuestionEditor key={selected.id} api={api} question={selected} proposedReading={proposedReading} subjects={subjects} sources={sources} active={active} externalBusy={busy} admin={admin} creating={creating} grant={managementGrant} pageCache={pageCache} onBack={back} onDeleted={() => { back(); setNotice('已移入回收站，30 天内可由家长恢复。'); }} onCancelled={() => { back(); setNotice('已取消本次收集，材料仍保留。'); if (!admin) navigate('/learn/collect'); }} onNewFromPage={newFromPage} onReading={openReading} onAnswers={openAnswers} onAccessError={onAccessError} onCurrent={setSelected} onSaved={question => { setSelected(question); setProposedReading(undefined); setCreating(false); setRefresh(value => value + 1); if (!admin && question.state === 'collected') setScreen('detail'); }} />}
     {screen === 'answers' && selected && <AnswerEditor key={selected.id} api={api} question={selected} subjects={subjects} sources={sources} cache={answerCache} grant={managementGrant} active={active} onBack={() => setScreen(answerReturn.current)} onCurrent={setSelected} onSaved={question => { if (!admin) api.advanceQuestionProgress(selected, question); setSelected(question); setScreen(answerReturn.current); setRefresh(value => value + 1); }} onAccessError={onAccessError} />}
     {screen === 'reading' && reading && <ReadingMaterialEditor key={reading.id} api={api} material={reading} cache={readingCache} grant={managementGrant} active={active} onBack={() => { setReading(undefined); setScreen('edit'); }} onSaved={readingSaved} onAccessError={onAccessError} />}
     {screen === 'reading-conflict' && reading && selected && <ReadingLinkConflict api={api} question={selected} material={reading} subjects={subjects} sources={sources} grant={managementGrant} active={active} onAccessError={onAccessError}

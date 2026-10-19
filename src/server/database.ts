@@ -166,7 +166,32 @@ const migrations = [
       CASE WHEN a.status IN ('running', 'unknown') THEN 'reserved' WHEN a.status = 'succeeded' THEN 'local-call' ELSE 'none' END,
       a.audioMs, NULL, NULL, NULL, a.message FROM speechAttempts a
     UNION ALL SELECT 'ai', id, testId, month, 'xfyun', model, startedAt, finishedAt, status, estimatedMicros, costBasis,
-      NULL, promptTokens, completionTokens, totalTokens, message FROM aiAttempts;`
+      NULL, promptTokens, completionTokens, totalTokens, message FROM aiAttempts;`,
+  `CREATE TABLE questionDeletions (
+    id TEXT PRIMARY KEY, libraryId TEXT NOT NULL, revision INTEGER NOT NULL,
+    deletedAt INTEGER NOT NULL, expiresAt INTEGER NOT NULL, purgedAt INTEGER
+  );
+  CREATE INDEX deletionsByExpiry ON questionDeletions(purgedAt, expiresAt);
+  CREATE TABLE trashOperations (
+    libraryId TEXT NOT NULL, accountId TEXT NOT NULL, operationId TEXT NOT NULL,
+    requestHash TEXT NOT NULL, receipt TEXT NOT NULL, PRIMARY KEY(libraryId, accountId, operationId)
+  );
+  CREATE TABLE retiredPages (id TEXT PRIMARY KEY, libraryId TEXT NOT NULL, deletedAt INTEGER NOT NULL);
+  CREATE TABLE retiredReadings (id TEXT PRIMARY KEY, libraryId TEXT NOT NULL, deletedAt INTEGER NOT NULL);
+  CREATE TABLE pageCleanup (pageId TEXT PRIMARY KEY, libraryId TEXT NOT NULL, queuedAt INTEGER NOT NULL, lastError TEXT NOT NULL DEFAULT '');
+  -- Operation receipts outlive their content, so retries cannot recreate deleted records.
+  CREATE TABLE collectionOperationsNew (libraryId TEXT NOT NULL, accountId TEXT NOT NULL, operationId TEXT NOT NULL, requestHash TEXT NOT NULL, questionId TEXT NOT NULL, PRIMARY KEY(libraryId, accountId, operationId));
+  INSERT INTO collectionOperationsNew SELECT * FROM collectionOperations;
+  DROP TABLE collectionOperations;
+  ALTER TABLE collectionOperationsNew RENAME TO collectionOperations;
+  CREATE TABLE pageOperationsNew (libraryId TEXT NOT NULL, accountId TEXT NOT NULL, operationId TEXT NOT NULL, requestHash TEXT NOT NULL, pageId TEXT NOT NULL, PRIMARY KEY(libraryId, accountId, operationId));
+  INSERT INTO pageOperationsNew SELECT * FROM pageOperations;
+  DROP TABLE pageOperations;
+  ALTER TABLE pageOperationsNew RENAME TO pageOperations;
+  CREATE TABLE readingOperationsNew (libraryId TEXT NOT NULL, accountId TEXT NOT NULL, operationId TEXT NOT NULL, requestHash TEXT NOT NULL, materialId TEXT NOT NULL, PRIMARY KEY(libraryId, accountId, operationId));
+  INSERT INTO readingOperationsNew SELECT * FROM readingOperations;
+  DROP TABLE readingOperations;
+  ALTER TABLE readingOperationsNew RENAME TO readingOperations;`
 ];
 
 export function openDatabase(dataDir: string) {

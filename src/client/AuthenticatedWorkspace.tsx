@@ -15,6 +15,7 @@ import { OcrManager } from './OcrManager.tsx';
 import { SpeechManager } from './SpeechManager.tsx';
 import { AiManager } from './AiManager.tsx';
 import { ServiceUsageManager } from './ServiceUsageManager.tsx';
+import { TrashManager } from './TrashManager.tsx';
 import { LeaveContext } from './navigation.ts';
 import { OfflinePreparation } from './OfflinePreparation.tsx';
 
@@ -47,6 +48,7 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
   const [speechStarted, setSpeechStarted] = useState(false);
   const [aiStarted, setAiStarted] = useState(false);
   const [usageStarted, setUsageStarted] = useState(false);
+  const [trashStarted, setTrashStarted] = useState(false);
 
   useEffect(() => {
     if (collectionVisible) setCollectionStarted(true);
@@ -56,6 +58,7 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
     if (path === '/admin/services/speech' && grant) setSpeechStarted(true);
     if (path === '/admin/services/ai' && grant) setAiStarted(true);
     if (path === '/admin/services/usage' && grant) setUsageStarted(true);
+    if (path === '/admin/trash' && grant) setTrashStarted(true);
   }, [collectionVisible, path, grant]);
   useEffect(() => {
     if (!grant) return;
@@ -107,6 +110,9 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
     </div>
     <div hidden={path !== '/admin/study' || !grant} inert={path !== '/admin/study' || !grant}>
       {studyStarted && <StudyManager api={api} grant={grant?.token} active={path === '/admin/study'} onAccessError={accessError} />}
+    </div>
+    <div hidden={path !== '/admin/trash' || !grant} inert={path !== '/admin/trash' || !grant}>
+      {trashStarted && <TrashManager api={api} grant={grant?.token} active={path === '/admin/trash'} onAccessError={accessError} />}
     </div>
     {path === '/admin/devices' && grant && <DeviceManager api={api} grant={grant.token} onAccessError={accessError} onSignedOut={deviceSignedOut} onRecoveryCode={recoveryCodeReady} />}
     <div hidden={path !== '/admin/services/ocr' || !grant} inert={path !== '/admin/services/ocr' || !grant}>

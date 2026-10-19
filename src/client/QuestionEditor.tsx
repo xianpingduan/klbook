@@ -23,12 +23,14 @@ import { RecognitionPanel } from './RecognitionPanel.tsx';
 import { recognitionScope, useCropRecognition } from './useCropRecognition.ts';
 import type { QuestionCheckpoint } from './question-journal.ts';
 import { CollectionFooter } from './CollectionFooter.tsx';
+import type { TrashChange } from '../shared/trash.ts';
 
-export function QuestionEditor({ api, question: initialQuestion, proposedReading, subjects, sources, active, admin = false, creating = false, externalBusy = false, grant, pageCache, onSaved, onCurrent, onBack, onCancelled, onAccessError, onNewFromPage, onReading, onAnswers }: {
+export function QuestionEditor({ api, question: initialQuestion, proposedReading, subjects, sources, active, admin = false, creating = false, externalBusy = false, grant, pageCache, onSaved, onCurrent, onBack, onCancelled, onDeleted, onAccessError, onNewFromPage, onReading, onAnswers }: {
   api: FamilyApi; question: Question; subjects: Subject[]; sources: Source[]; active: boolean; admin?: boolean; creating?: boolean; grant?: string; pageCache: CaptureCache; onSaved(question: Question): void; onBack(): void; onNewFromPage(page: OriginalPage): void; onAccessError(error: ApiError): Promise<void>;
   onReading(id: string | null): void;
   onAnswers(): void;
   onCancelled(): void;
+  onDeleted(): void;
   externalBusy?: boolean;
   onCurrent(question: Question): void;
   proposedReading?: ReadingMaterial;
@@ -42,6 +44,10 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
   const recordId = useRef(initialQuestion.id);
   const [fields, setFields] = useState(() => ({ ...(restored?.fields ?? editable(question)), ...(proposedReading ? { readingMaterialId: proposedReading.id } : {}) }));
   const [busy, setBusy] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const deleteDialog = useRef<HTMLDialogElement>(null);
+  const deleteOperation = useRef<TrashChange | undefined>(undefined);
+  useLayoutEffect(() => { if (deleteConfirm && active && grant) deleteDialog.current?.showModal(); else deleteDialog.current?.close(); }, [deleteConfirm, active, grant]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [step, setStep] = useState<'crop' | 'confirm'>(restored?.step ?? (question.region ? 'confirm' : 'crop'));
@@ -83,7 +89,7 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
     defer: (value, desired) => api.deferQuestion(value.id, desired),
     conflictMessage: '这道题已在其他页面更新，请核对双方内容', conflictTarget: { entity: 'question', id: recordId.current } });
   const working = externalBusy || busy || append.busy || append.loading || conflict.loading;
-  const editingLocked = working || !!cancelOperation.current;
+  const editingLocked = working || !!cancelOperation.current || deleteConfirm || !!deleteOperation.current;
   const baseline = useRef(JSON.stringify(editable(question)));
   const dirty = JSON.stringify(fields) !== baseline.current;
   const leave = useEditorLeave({
@@ -167,6 +173,20 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
       if (failure instanceof ApiError && failure.status === 409) { cancelOperation.current = undefined; paused.current = false; await conflict.show(); }
     } finally { setBusy(false); }
   }
+  async function deleteCurrent() {
+    if (working || !active || !grant || dirty || conflict.open) return;
+    setBusy(true); setError('');
+    try {
+      await saver.idle();
+      deleteOperation.current ??= { operationId: crypto.randomUUID(), expectedRevision: saver.snapshot().current.revision, action: 'trash' };
+      await api.changeTrash(grant, recordId.current, deleteOperation.current);
+      setDeleteConfirm(false); leave.complete(onDeleted);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : '删除未完成，请重试或返回列表核对');
+      if (failure instanceof ApiError && [401, 403].includes(failure.status)) await onAccessError(failure);
+      if (failure instanceof ApiError && failure.status === 409) { deleteOperation.current = undefined; setDeleteConfirm(false); await conflict.show(); }
+    } finally { setBusy(false); }
+  }
   function resolveConflict(keep: boolean) {
     const latest = conflict.current;
     if (!latest || editingLocked || !active) return;
@@ -234,6 +254,12 @@ export function QuestionEditor({ api, question: initialQuestion, proposedReading
     {local.journal && progress && !localError && <p role="status" className="draft-progress">{progress}</p>}
     {notice && !dirty && <p role="status" className="message">{notice}</p>}
     {admin && cancelMenu}
+    {admin && !creating && <details className="optional-info"><summary>删除资料</summary><p className="hint">移入回收站后保留 30 天，家长可以恢复。{dirty && '请先保存当前修改，再删除。'}</p><button className="quiet" disabled={working || !active || dirty || conflict.open} onClick={() => setDeleteConfirm(true)}>移入回收站</button></details>}
+    <dialog ref={deleteDialog} className="leave-dialog" aria-label="移入回收站" onCancel={event => { event.preventDefault(); if (!busy) setDeleteConfirm(false); }}>
+      <h2>移入回收站</h2><p>这道题将从错题集隐藏，30 天内可由家长恢复。共用材料仍会保留。</p>
+      {error && <p role="alert" className="message error">{error}</p>}
+      <div className="leave-actions"><button autoFocus className="quiet" disabled={busy} onClick={() => setDeleteConfirm(false)}>暂不删除</button><button disabled={busy || !active || !grant} onClick={() => void deleteCurrent()}>确认移入回收站</button></div>
+    </dialog>
     {leave.dialog}
     {conflict.open && <SaveConflict current={conflict.current && <ConflictQuestionView api={api} question={conflict.current} subjects={subjects} sources={sources} />}
       local={<ConflictQuestionView api={api} question={question} fields={fields} subjects={subjects} sources={sources} />}

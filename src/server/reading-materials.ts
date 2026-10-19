@@ -15,6 +15,7 @@ export class ReadingMaterials {
   private now: () => number;
   constructor(db: Database.Database, pages: Pages, now = Date.now) { this.db = db; this.pages = pages; this.now = now; }
   get(libraryId: string, id: string): ReadingMaterial {
+    this.assertAvailable(libraryId, id);
     const row = this.db.prepare<[string, string], ReadingRow>('SELECT * FROM readingMaterials WHERE libraryId = ? AND id = ?').get(libraryId, id);
     if (!row) throw new AccessError(404, '找不到共享阅读材料');
     const parts = this.db.prepare<[string], { id: string; pageId: string; region: string }>('SELECT id, pageId, region FROM readingParts WHERE materialId = ? ORDER BY position').all(id)
@@ -37,6 +38,7 @@ export class ReadingMaterials {
   }
   async save(authorize: () => Home, id: string, input: ReadingMaterialEdit) {
     const home = authorize();
+    this.assertAvailable(home.library.id, id);
     const title = input.title.trim();
     if (!title || title.length > 120) throw new AccessError(422, '请填写 1～120 字的阅读材料名称');
     if (!input.parts.length || input.parts.length > 50 || new Set(input.parts.map(part => part.id)).size !== input.parts.length
@@ -46,6 +48,8 @@ export class ReadingMaterials {
     for (const pageId of new Set(parts.map(part => part.pageId))) await this.pages.verify(home.library.id, pageId);
     const saved = this.db.transaction(() => {
       authorize();
+      this.assertAvailable(home.library.id, id);
+      for (const part of parts) this.pages.get(home.library.id, part.pageId);
       const previous = this.db.prepare<[string, string, string], { requestHash: string; materialId: string }>('SELECT requestHash, materialId FROM readingOperations WHERE libraryId = ? AND accountId = ? AND operationId = ?').get(home.library.id, home.account.id, input.operationId);
       if (previous) {
         if (previous.requestHash !== requestHash) throw new AccessError(409, '此次重试内容已改变，请重新确认后保存');
@@ -67,5 +71,8 @@ export class ReadingMaterials {
       authorize();
     }
     return saved;
+  }
+  private assertAvailable(libraryId: string, id: string) {
+    if (this.db.prepare('SELECT 1 FROM retiredReadings WHERE libraryId = ? AND id = ?').get(libraryId, id)) throw new AccessError(410, '共享阅读材料已永久删除，旧修改不会重新建立已删记录；请保留本机内容');
   }
 }

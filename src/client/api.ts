@@ -14,6 +14,7 @@ import type { ServiceBudgetEdit, ServiceUsage, UsageQuery } from '../shared/serv
 import type { PageRecognition, PageRecognitions, PageRecognitionRequest } from '../shared/ocr.ts';
 import type { DraftCancellation, DraftCancellationEdit } from '../shared/collection.ts';
 import type { Region } from '../shared/collection.ts';
+import type { Deletion, TrashChange, TrashList, TrashReceipt } from '../shared/trash.ts';
 import { QuestionJournal } from './question-journal.ts';
 import { LocalLibrary } from './local-library.ts';
 import { OfflineCaptures } from './offline-captures.ts';
@@ -170,6 +171,13 @@ export class FamilyApi {
     return this.request<ServiceUsage>(`/admin/service-usage?${params}`, 'GET', undefined, grant);
   }
   saveServiceBudget(grant: string, input: ServiceBudgetEdit) { return this.request<ServiceUsage>('/admin/service-usage', 'PUT', input, grant); }
+  trash(grant: string, offset = 0) { return this.request<TrashList>(`/admin/trash?offset=${offset}`, 'GET', undefined, grant); }
+  cleanupTrash(grant: string) { return this.request<TrashList>('/admin/trash/cleanup', 'POST', undefined, grant); }
+  async changeTrash(grant: string, id: string, input: TrashChange) {
+    const receipt = await this.request<TrashReceipt>(`/admin/trash/${encodeURIComponent(this.remoteId(id))}`, 'PUT', input, grant);
+    if (input.action !== 'restore') this.local?.removeQuestion(id);
+    return receipt;
+  }
   saveAi(grant: string, input: AiEdit) { return this.request<AiSettings>('/admin/ai', 'PUT', input, grant); }
   testAi(grant: string, id: string, expectedRevision: number, prompt: string) { return this.request<AiTest>(`/admin/ai/tests/${encodeURIComponent(id)}`, 'PUT', { expectedRevision, prompt }, grant); }
   saveSpeech(grant: string, input: SpeechEdit) { return this.request<SpeechSettings>('/admin/speech', 'PUT', input, grant); }
@@ -202,8 +210,20 @@ export class FamilyApi {
   }
   async question(id: string, grant?: string) {
     try { return this.rememberQuestion(await this.request<Question>(`/collection/questions/${encodeURIComponent(this.remoteId(id))}`, 'GET', undefined, grant)); }
-    catch (failure) { if (failure instanceof ConnectionError && !grant) { const saved = this.local?.read<Question>(`/collection/questions/${id}`); if (saved) return saved; } throw failure; }
+    catch (failure) { if (failure instanceof ApiError && failure.status === 410) this.local?.deleted(id, failure.message); if (failure instanceof ConnectionError && !grant) { const saved = this.local?.read<Question>(`/collection/questions/${id}`); if (saved) return saved; } throw failure; }
   }
+  async deletedQuestions(grant?: string) {
+    const items = await this.request<Deletion[]>('/collection/deleted-questions', 'GET', undefined, grant);
+    const result = items.map(item => ({ ...item, id: this.captures?.localId(item.id) ?? item.id }));
+    for (const item of result) this.local?.deleted(item.id, item.purgedAt === null ? '已被家长移入回收站，请由家长恢复后再核对本机修改。' : '已永久删除，不能恢复；本机文字仍保留，可复制需要的内容。');
+    return result;
+  }
+  deletedProgress() {
+    if (!this.credential) return [];
+    const entries = QuestionJournal.entries(this.platform, this.credential);
+    return (this.local?.deletions() ?? []).flatMap(item => entries.filter(entry => entry.value.checkpoint.current.id === item.id).map(entry => ({ ...item, key: entry.key, fields: entry.value.fields })));
+  }
+  blockedUploads() { return (this.captures?.records() ?? []).filter(record => record.blocked).map(record => ({ id: record.operationId, message: record.blocked! })); }
   async cancelledDrafts(grant?: string) {
     const items = await this.request<DraftCancellation[]>('/collection/cancelled-drafts', 'GET', undefined, grant);
     const result = items.map(item => ({ ...item, id: this.captures?.localId(item.id) ?? item.id }));
@@ -231,8 +251,11 @@ export class FamilyApi {
     try {
       await this.verifiedHome();
       await this.syncCaptures();
+      const blocked = this.captures?.records().find(record => record.question?.id === id && record.blocked);
+      if (blocked) throw new ApiError(410, blocked.blocked!);
       return this.rememberQuestion(await this.request<Question>(`/collection/questions/${encodeURIComponent(this.remoteId(id))}`, 'PUT', this.remoteEdit(input), grant));
     } catch (failure) {
+      if (failure instanceof ApiError && failure.status === 410) this.local?.deleted(id, failure.message);
       if (!(failure instanceof ConnectionError) || grant || !allowDeferred) throw failure;
       return this.deferQuestion(id, input);
     }
@@ -331,18 +354,26 @@ export class FamilyApi {
     if (!records.length) return;
     await this.verifiedHome();
     for (const record of records) {
+      try {
       if (record.kind === 'questions') {
         const content = questionContent(questionFields(record.question!), 'draft');
         const { expectedRevision: _revision, ...input } = this.remoteEdit({ ...content, expectedRevision: 0, operationId: record.operationId });
         record.remote = await this.request<Question>(`/collection/pages/${encodeURIComponent(this.remoteId(record.page.id))}/questions`, 'POST', input);
+        delete record.blocked;
         this.captures!.remember(record);
         continue;
       }
       const file = await this.local!.image(record.page.id, 'original');
       if (!file) throw new Error('本机原始图片未能读取，请保留材料后重试');
       record.remote = await this.send<OriginalPage | Question>(`/collection/${record.kind}`, { method: 'POST', body: file, headers: { 'Content-Type': file.type, 'Idempotency-Key': record.operationId, ...(record.kind === 'drafts' ? { 'X-Learning-Stage': encodeURIComponent(JSON.stringify(record.stage)) } : {}) } }, response => response.json());
+      delete record.blocked;
       this.captures!.remember(record);
       if (record.question && !this.local!.read<Question>(`/collection/questions/${record.question.id}`)) this.rememberQuestion(record.remote as Question);
+      } catch (failure) {
+        if (!(failure instanceof ApiError && failure.status === 410)) throw failure;
+        record.blocked = failure.message; this.captures!.remember(record);
+        if (record.question) this.local?.deleted(record.question.id, failure.message);
+      }
     }
   }
   syncProgress() {
@@ -353,11 +384,14 @@ export class FamilyApi {
       await this.verifiedHome();
       await this.syncCaptures();
       const cancelled = new Set((await this.cancelledDrafts()).map(item => item.id));
+      const deleted = new Set((await this.deletedQuestions()).map(item => item.id));
+      for (const record of this.captures?.records() ?? []) if (record.blocked && record.question) deleted.add(record.question.id);
       for (const entry of QuestionJournal.entries(this.platform, scope)) {
         const progress = entry.value;
         const base = progress.checkpoint.current;
         // Cancellation is never undone by automatic replay; preserve divergent edits for explicit undo and comparison.
-        if (cancelled.has(base.id) || !entry.unchanged()) continue;
+        if (cancelled.has(base.id) || deleted.has(base.id) || !entry.unchanged()) continue;
+        try {
         const confirmed = progress.checkpoint.intent ?? progress.checkpoint.pending;
         if (base.state === 'collected' && !confirmed) continue;
         const contentOf = (value: Question) => questionContent(questionFields(value), value.state);
@@ -377,7 +411,12 @@ export class FamilyApi {
         if (current.syncState !== 'synced' || !entry.unchanged()) continue;
         if (current.state === 'collected' && JSON.stringify(questionContent(progress.fields, 'collected')) === JSON.stringify(desired)) entry.remove();
         // Otherwise keep the newer unsubmitted fields with their now-acknowledged base.
+        } catch (failure) {
+          if (!(failure instanceof ApiError && failure.status === 410)) throw failure;
+          this.local?.deleted(base.id, failure.message);
+        }
       }
+      if (this.deletedProgress().length || this.blockedUploads().length) throw new ApiError(410, '部分题目已删除，已暂停这些题目的补传。请到收集页查看保留的本机内容，再由家长到回收站处理。');
     })().finally(() => { this.syncing = undefined; });
     return this.syncing;
   }

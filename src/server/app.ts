@@ -21,6 +21,8 @@ import { speechRoutes } from './speech-routes.ts';
 import type { SpeechSocketFactory } from './xfyun-speech.ts';
 import { AiService } from './ai-service.ts';
 import { aiRoutes } from './ai-routes.ts';
+import { TrashStore } from './trash.ts';
+import { trashRoutes } from './trash-routes.ts';
 import type { AiHttp } from './xfyun-ai.ts';
 
 export function createApp(options: { dataDir: string; now?: () => number; allowedOrigins?: string[]; staticDir?: string; ocrHttp?: VendorHttp; speechSocket?: SpeechSocketFactory; aiHttp?: AiHttp }) {
@@ -46,7 +48,14 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
   const ocr = new OcrService(db, options.dataDir, collection, usage, options.now, options.ocrHttp);
   const speech = new SpeechService(db, options.dataDir, usage, options.now, options.speechSocket);
   const ai = new AiService(db, options.dataDir, usage, options.now, options.aiHttp);
-  app.addHook('onClose', async () => { await Promise.all([ocr.close(), speech.close(), ai.close()]); db.close(); });
+  const trash = new TrashStore(db, collection, options.dataDir, options.now);
+  let cleanupTimer: ReturnType<typeof setInterval> | undefined;
+  app.addHook('onReady', async () => {
+    await trash.sweep();
+    cleanupTimer = setInterval(() => { void trash.sweep().catch(() => {}); }, 60_000);
+    cleanupTimer.unref();
+  });
+  app.addHook('onClose', async () => { clearInterval(cleanupTimer); await Promise.all([ocr.close(), speech.close(), ai.close(), trash.close()]); db.close(); });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof AccessError) return reply.code(error.statusCode).send({ message: error.message, ...(error.conflict ? { conflict: error.conflict } : {}) });
     if (error instanceof Error && 'validation' in error) return reply.code(400).send({ message: '请检查填写内容' });
@@ -93,6 +102,7 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
   speechRoutes(app, access, speech);
   aiRoutes(app, access, ai);
   serviceUsageRoutes(app, access, usage);
+  trashRoutes(app, access, trash);
   if (options.staticDir) {
     app.register(staticFiles, { root: options.staticDir, index: 'index.html' });
     for (const path of Object.keys(pages)) app.get(path, async (_request, reply) => reply.sendFile('index.html'));

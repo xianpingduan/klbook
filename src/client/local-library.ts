@@ -18,7 +18,12 @@ export class LocalLibrary {
     if (!home || home.library.id !== this.scope.libraryId || home.account.id !== this.scope.accountId || home.session.expiresAt <= Date.now()) return;
     return home;
   }
-  question(question: Question) { this.remember(`/collection/questions/${question.id}`, question); }
+  question(question: Question) { this.platform.journal.remove(this.scope, `deleted:${question.id}`); this.remember(`/collection/questions/${question.id}`, question); }
+  deleted(id: string, message: string) {
+    this.platform.journal.write(this.scope, `deleted:${id}`, message);
+    this.removeQuestion(id);
+  }
+  deletions() { return this.platform.journal.entries(this.scope).filter(([key]) => key.startsWith('deleted:')).map(([key, message]) => ({ id: key.slice(8), message })); }
   list(state: 'draft' | 'collected', offset: number, filters: QuestionFilters): QuestionList {
     const questions = this.platform.journal.entries(this.scope)
       .filter(([key]) => /^cache:\/collection\/questions\/[a-f0-9-]+$/i.test(key))
