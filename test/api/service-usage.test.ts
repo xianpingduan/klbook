@@ -67,16 +67,19 @@ for (const capability of ['ocr', 'speech', 'ai'] as const) test(`${capability} �
 
 test('AI 异常计量保留预留并跨重启保留，预算耗尽仍可手动收集、查看和按零单价主动调用', async () => {
   const ai = aiVendor(() => Response.json({ choices: [{ message: { role: 'assistant', content: '示例提示' } }], usage: { prompt_tokens: -1, completion_tokens: 2, total_tokens: 1 } }));
-  const voice = speechVendor(), f = await familyFixture({ aiHttp: ai.http, speechSocket: voice.connect });
+  let ocrRequests = 0;
+  const voice = speechVendor(), f = await familyFixture({ aiHttp: ai.http, speechSocket: voice.connect, ocrHttp: async () => { ocrRequests++; throw new Error('OCR should be blocked'); } });
   try {
     const headers = await ocrParent(f); await configure(f, headers, 'ai');
     const id = randomUUID(), input = { method: 'PUT' as const, url: `/api/v1/admin/ai/tests/${id}`, headers, payload: { expectedRevision: 1, prompt: '示例' } };
     assert.equal((await f.app.inject(input)).statusCode, 202); await finishedAi(f, headers);
     const state = (await f.app.inject({ url: path, headers })).json();
     assert.equal(state.totals.reservedMicros, 8192); assert.equal(state.categories[2].reportedAttempts, 0); assert.equal(state.records[0].totalTokens, null);
-    await budget(f, headers, 0);
+    await configure(f, headers, 'ocr'); await budget(f, headers, 0);
     const bytes = await sharp({ create: { width: 80, height: 80, channels: 3, background: 'white' } }).png().toBuffer();
     const draft = (await f.app.inject({ method: 'POST', url: '/api/v1/collection/drafts', headers: { ...auth(f.first.token), 'content-type': 'image/png', 'idempotency-key': randomUUID() }, payload: bytes })).json();
+    const recognition = await f.app.inject({ method: 'PUT', url: `/api/v1/collection/pages/${draft.originalPage.id}/recognitions/${randomUUID()}`, headers: auth(f.first.token), payload: { automatic: true, region: { x: 0, y: 0, width: 1, height: 1 } } });
+    assert.equal(recognition.statusCode, 422); assert.match(recognition.body, /总预算/); assert.equal(ocrRequests, 0);
     const saved = await f.app.inject({ method: 'PUT', url: `/api/v1/collection/questions/${draft.id}`, headers: auth(f.first.token), payload: { operationId: randomUUID(), expectedRevision: 1, state: 'collected', subjectId: 'math', region: { x: 0, y: 0, width: 1, height: 1 }, sourceId: null, pageNumber: '', questionNumber: '', note: '' } });
     assert.equal(saved.statusCode, 200, saved.body);
     assert.equal((await f.app.inject({ url: `/api/v1/collection/questions/${draft.id}`, headers: auth(f.first.token) })).json().state, 'collected');

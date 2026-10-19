@@ -17,14 +17,17 @@ export class ServiceUsageStore {
   }
   private row() { return this.db.prepare<[], Settings>('SELECT revision, config FROM serviceBudget WHERE singleton = 1').get()!; }
   private month() { return new Date(this.now() + 8 * 3600_000).toISOString().slice(0, 7); }
+  private remainingMicros(month: string) {
+    const used = this.db.prepare<[string], { micros: number }>('SELECT COALESCE(SUM(estimatedMicros), 0) AS micros FROM serviceUsageAttempts WHERE month = ?').get(month)!.micros;
+    const config: ServiceBudget = JSON.parse(this.row().config);
+    return config.monthlyBudgetCents * 10000 - used;
+  }
   // Called inside the same short SQLite transaction that records a new attempt.
   // Reservations remain in the three existing ledgers, including after a restart.
   checkReservation(micros: number) {
     if (!this.db.inTransaction) throw new Error('Budget checks must share the attempt transaction');
     if (micros <= 0) return;
-    const used = this.db.prepare<[string], { micros: number }>('SELECT COALESCE(SUM(estimatedMicros), 0) AS micros FROM serviceUsageAttempts WHERE month = ?').get(this.month())!.micros;
-    const config: ServiceBudget = JSON.parse(this.row().config);
-    if (used + micros > config.monthlyBudgetCents * 10000) throw new AccessError(422, '本次调用会超过三类服务的本月总预算；可以继续手动收集和查看资料');
+    if (micros > this.remainingMicros(this.month())) throw new AccessError(422, '本次调用会超过三类服务的本月总预算；可以继续手动收集和查看资料');
   }
   // OCR may await a free authentication request before dispatching its paid request.
   // Recheck a lowered budget against the existing reservation without adding it twice.
@@ -32,9 +35,7 @@ export class ServiceUsageStore {
     this.db.transaction(() => {
       const attempt = this.db.prepare<[string, number], { month: string; estimatedMicros: number }>('SELECT month, estimatedMicros FROM serviceUsageAttempts WHERE capability = ? AND id = ?').get(capability, id);
       if (!attempt || attempt.estimatedMicros <= 0) return;
-      const used = this.db.prepare<[string], { micros: number }>('SELECT COALESCE(SUM(estimatedMicros), 0) AS micros FROM serviceUsageAttempts WHERE month = ?').get(attempt.month)!.micros;
-      const config: ServiceBudget = JSON.parse(this.row().config);
-      if (used > config.monthlyBudgetCents * 10000) throw new AccessError(422, '总预算已调整，尚未发送的付费调用已停止；可以继续手动收集');
+      if (this.remainingMicros(attempt.month) < 0) throw new AccessError(422, '总预算已调整，尚未发送的付费调用已停止；可以继续手动收集');
     })();
   }
   read(query: UsageQuery = {}): ServiceUsage {
