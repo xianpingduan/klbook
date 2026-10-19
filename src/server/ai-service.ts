@@ -6,6 +6,7 @@ import { CredentialVault } from './credential-vault.ts';
 import { digest } from './secrets.ts';
 import { AiFailure, XfyunAi, type AiHttp, type AiMeter } from './xfyun-ai.ts';
 import { setTimeout as pause } from 'node:timers/promises';
+import type { ServiceUsageStore } from './service-usage.ts';
 
 type SettingsRow = { revision: number; config: string };
 const testFields = `id, revision, model, prompt, status, createdAt, finishedAt, durationMs, attempts, message, text, promptTokens, completionTokens, totalTokens,
@@ -22,11 +23,13 @@ export class AiService {
   private vault: CredentialVault;
   private now: () => number;
   private vendor: XfyunAi;
+  private budget: ServiceUsageStore;
   private work?: Promise<void>;
   private stopping = new AbortController();
-  constructor(db: Database.Database, dataDir: string, now = Date.now, http?: AiHttp) {
+  constructor(db: Database.Database, dataDir: string, budget: ServiceUsageStore, now = Date.now, http?: AiHttp) {
     this.db = db; this.vault = new CredentialVault(db, dataDir, 'ai'); this.now = now;
     this.vendor = new XfyunAi(http);
+    this.budget = budget;
     db.prepare('INSERT OR IGNORE INTO aiSettings VALUES (1, 0, ?)').run(JSON.stringify(defaultAiConfig));
     db.prepare("UPDATE aiTests SET status = 'interrupted', finishedAt = ?, message = ? WHERE status = 'running'").run(now(), '电脑服务曾中断，结果不确定；不会自动重新发送');
     db.prepare("UPDATE aiAttempts SET status = 'unknown', finishedAt = ?, message = ? WHERE status = 'running'").run(now(), '服务中断，保留估算费用');
@@ -113,6 +116,7 @@ export class AiService {
     if (!config.modelPrices[config.model].confirmed) throw new AccessError(422, '请先核对所选模型的计费单价');
     if (usage.attempts >= config.monthlyLimit) throw new AccessError(422, '已达到 AI 学习本月次数上限');
     if (Math.round(usage.estimatedCents * 10000) + reservedMicros(config) > config.monthlyBudgetCents * 10000) throw new AccessError(422, '本次预留会超过 AI 学习本月估算预算');
+    this.budget.checkReservation(reservedMicros(config));
   }
   private settleAttempt(id: number, config: AiConfig, status: string, message: string, meter: AiMeter, retainReservation: boolean) {
     const reported = meter.promptTokens !== null && meter.completionTokens !== null;

@@ -13,6 +13,8 @@ import { Study } from './study.ts';
 import { studyRoutes } from './study-routes.ts';
 import { OcrService } from './ocr-service.ts';
 import { ocrRoutes } from './ocr-routes.ts';
+import { ServiceUsageStore } from './service-usage.ts';
+import { serviceUsageRoutes } from './service-usage-routes.ts';
 import type { VendorHttp } from './ocr-provider.ts';
 import { SpeechService } from './speech-service.ts';
 import { speechRoutes } from './speech-routes.ts';
@@ -40,9 +42,10 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
       access.limitAttempt(request.routeOptions.url!, request.ip);
     }
   });
-  const ocr = new OcrService(db, options.dataDir, collection, options.now, options.ocrHttp);
-  const speech = new SpeechService(db, options.dataDir, options.now, options.speechSocket);
-  const ai = new AiService(db, options.dataDir, options.now, options.aiHttp);
+  const usage = new ServiceUsageStore(db, options.now);
+  const ocr = new OcrService(db, options.dataDir, collection, usage, options.now, options.ocrHttp);
+  const speech = new SpeechService(db, options.dataDir, usage, options.now, options.speechSocket);
+  const ai = new AiService(db, options.dataDir, usage, options.now, options.aiHttp);
   app.addHook('onClose', async () => { await Promise.all([ocr.close(), speech.close(), ai.close()]); db.close(); });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof AccessError) return reply.code(error.statusCode).send({ message: error.message, ...(error.conflict ? { conflict: error.conflict } : {}) });
@@ -89,6 +92,7 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
   ocrRoutes(app, access, ocr);
   speechRoutes(app, access, speech);
   aiRoutes(app, access, ai);
+  serviceUsageRoutes(app, access, usage);
   if (options.staticDir) {
     app.register(staticFiles, { root: options.staticDir, index: 'index.html' });
     for (const path of Object.keys(pages)) app.get(path, async (_request, reply) => reply.sendFile('index.html'));

@@ -7,6 +7,7 @@ import { digest } from './secrets.ts';
 import { speechAudio, type SpeechAudio } from './speech-audio.ts';
 import { XfyunSpeech, SpeechFailure, type SpeechSocketFactory } from './xfyun-speech.ts';
 import { setTimeout as pause } from 'node:timers/promises';
+import type { ServiceUsageStore } from './service-usage.ts';
 
 type SettingsRow = { revision: number; config: string; credentials: string | null };
 export class SpeechService {
@@ -14,11 +15,13 @@ export class SpeechService {
   private vault: CredentialVault;
   private now: () => number;
   private vendor: XfyunSpeech;
+  private budget: ServiceUsageStore;
   private work?: Promise<void>;
   private stopping = new AbortController();
-  constructor(db: Database.Database, dataDir: string, now = Date.now, socket?: SpeechSocketFactory) {
+  constructor(db: Database.Database, dataDir: string, budget: ServiceUsageStore, now = Date.now, socket?: SpeechSocketFactory) {
     this.db = db; this.vault = new CredentialVault(db, dataDir, 'speech'); this.now = now;
     this.vendor = new XfyunSpeech(socket, now);
+    this.budget = budget;
     db.prepare('INSERT OR IGNORE INTO speechSettings VALUES (1, 0, ?, NULL)').run(JSON.stringify(defaultSpeechConfig));
     db.prepare("UPDATE speechTests SET status = 'interrupted', finishedAt = ?, message = ? WHERE status = 'running'").run(now(), '电脑服务曾中断，结果不确定；不会自动重新发送');
     db.prepare("UPDATE speechAttempts SET status = 'unknown', finishedAt = ?, message = ? WHERE status = 'running'").run(now(), '服务中断，保留估算费用');
@@ -95,6 +98,7 @@ export class SpeechService {
     const usage = this.usage();
     if (usage.attempts >= config.monthlyLimit) throw new AccessError(422, '已达到语音转写本月次数上限');
     if (Math.round(usage.estimatedCents * 10) + Math.round(config.priceCents * 10) > config.monthlyBudgetCents * 10) throw new AccessError(422, '本次调用会超过语音转写本月估算预算');
+    this.budget.checkReservation(Math.round(config.priceCents * 10000));
   }
   private async run(id: string, row: SettingsRow, credentials: SpeechCredentials, audio: SpeechAudio, authorize: () => Home) {
     const started = performance.now(), config: SpeechConfig = JSON.parse(row.config);

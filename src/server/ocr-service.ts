@@ -14,6 +14,7 @@ import { validQuestionRegion, type Region } from '../shared/collection.ts';
 import { recognitionImage } from './recognition-image.ts';
 import type { CollectionStore } from './collection-store.ts';
 import { recognitionCandidates } from './recognition-candidates.ts';
+import type { ServiceUsageStore } from './service-usage.ts';
 
 type SettingsRow = { revision: number; config: string };
 type RecognitionRow = Omit<PageRecognition, 'lines' | 'candidates' | 'inputRegion'> & { lines: string; candidates: string; inputRegion: string | null };
@@ -30,12 +31,14 @@ export class OcrService {
   private now: () => number;
   private vendors: Record<OcrProvider, BaiduOcr | XfyunOcr>;
   private collection: CollectionStore;
+  private budget: ServiceUsageStore;
   private work?: Promise<void>;
   private pendingCount = 0;
   private stopping = new AbortController();
-  constructor(db: Database.Database, dataDir: string, collection: CollectionStore, now = Date.now, http?: VendorHttp) {
+  constructor(db: Database.Database, dataDir: string, collection: CollectionStore, budget: ServiceUsageStore, now = Date.now, http?: VendorHttp) {
     this.db = db; this.vault = new CredentialVault(db, dataDir); this.now = now;
     this.collection = collection;
+    this.budget = budget;
     this.vendors = { baidu: new BaiduOcr(http), xfyun: new XfyunOcr(http, now) };
     db.prepare('INSERT OR IGNORE INTO ocrSettings VALUES (1, 0, ?, NULL)').run(JSON.stringify(defaultOcrConfig));
     db.prepare('UPDATE ocrTests SET status = \'interrupted\', finishedAt = ?, message = ? WHERE status = \'running\'').run(now(), '电脑服务曾中断，结果不确定；不会自动重新发送');
@@ -178,6 +181,7 @@ export class OcrService {
     const usage = this.usage();
     if (usage.attempts >= config.monthlyLimit) throw new AccessError(422, '已达到图片识别本月次数上限');
     if (Math.round(usage.estimatedCents * 10) + Math.round(config.priceCents * 10) > config.monthlyBudgetCents * 10) throw new AccessError(422, '本次调用会超过图片识别本月估算预算');
+    this.budget.checkReservation(Math.round(config.priceCents * 10000));
   }
   private permit(revision: number, authorize?: () => Home) {
     if (this.stopping.signal.aborted || this.row().revision !== revision) throw new OcrFailure('配置已更改或服务已停用，尚未发送的调用已停止');
@@ -209,7 +213,11 @@ export class OcrService {
         })();
       } catch (error) { failure = new OcrFailure(error instanceof AccessError || error instanceof OcrFailure ? error.message : '本地调用记录无法保存'); break; }
       try {
-        const { lines, warning } = await this.vendors[config.provider].recognize(credentials, config, image, this.stopping.signal, () => this.permit(row.revision, page?.authorize));
+        const { lines, warning } = await this.vendors[config.provider].recognize(credentials, config, image, this.stopping.signal, () => {
+          this.permit(row.revision, page?.authorize);
+          try { this.budget.checkDispatch('ocr', attemptId); }
+          catch (error) { if (error instanceof AccessError) throw new OcrFailure(error.message); throw error; }
+        });
         this.db.transaction(() => {
           this.db.prepare('UPDATE serviceAttempts SET status = \'succeeded\', finishedAt = ?, message = \'识别成功\' WHERE id = ?').run(this.now(), attemptId);
           this.db.prepare('UPDATE ocrTests SET status = \'succeeded\', finishedAt = ?, durationMs = ?, message = ?, lines = ? WHERE id = ?').run(this.now(), Math.round(performance.now() - started), warning ?? '测试成功，请核对识别文字', JSON.stringify(lines), id);

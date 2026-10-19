@@ -155,7 +155,18 @@ const migrations = [
     promptTokens INTEGER, completionTokens INTEGER, totalTokens INTEGER);
   CREATE TABLE aiAttempts (id INTEGER PRIMARY KEY, testId TEXT NOT NULL REFERENCES aiTests(id), model TEXT NOT NULL, month TEXT NOT NULL, startedAt INTEGER NOT NULL, finishedAt INTEGER,
     status TEXT NOT NULL, estimatedMicros INTEGER NOT NULL, costBasis TEXT NOT NULL DEFAULT 'reserved', promptTokens INTEGER, completionTokens INTEGER, totalTokens INTEGER, message TEXT NOT NULL DEFAULT '');
-  CREATE INDEX aiAttemptsByMonth ON aiAttempts(month);`
+  CREATE INDEX aiAttemptsByMonth ON aiAttempts(month);`,
+  `CREATE TABLE serviceBudget (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), revision INTEGER NOT NULL, config TEXT NOT NULL);
+  CREATE VIEW serviceUsageAttempts AS
+    SELECT 'ocr' AS capability, a.id, testId, month, t.provider, '' AS model, startedAt, a.finishedAt, a.status,
+      estimatedMills * 1000 AS estimatedMicros, CASE WHEN a.status IN ('running', 'unknown') THEN 'reserved' WHEN a.status = 'succeeded' THEN 'local-call' ELSE 'none' END AS costBasis,
+      NULL AS audioMs, NULL AS promptTokens, NULL AS completionTokens, NULL AS totalTokens, a.message
+    FROM serviceAttempts a JOIN ocrTests t ON t.id = a.testId WHERE capability = 'ocr'
+    UNION ALL SELECT 'speech', a.id, testId, month, 'xfyun', 'iat', startedAt, a.finishedAt, a.status, estimatedMills * 1000,
+      CASE WHEN a.status IN ('running', 'unknown') THEN 'reserved' WHEN a.status = 'succeeded' THEN 'local-call' ELSE 'none' END,
+      a.audioMs, NULL, NULL, NULL, a.message FROM speechAttempts a
+    UNION ALL SELECT 'ai', id, testId, month, 'xfyun', model, startedAt, finishedAt, status, estimatedMicros, costBasis,
+      NULL, promptTokens, completionTokens, totalTokens, message FROM aiAttempts;`
 ];
 
 export function openDatabase(dataDir: string) {

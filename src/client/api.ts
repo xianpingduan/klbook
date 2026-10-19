@@ -10,6 +10,7 @@ import type { ConflictTarget } from '../shared/conflicts.ts';
 import type { OcrEdit, OcrSettings, OcrTest } from '../shared/ocr.ts';
 import type { SpeechEdit, SpeechSettings, SpeechTest } from '../shared/speech.ts';
 import type { AiEdit, AiSettings, AiTest } from '../shared/ai.ts';
+import type { ServiceBudgetEdit, ServiceUsage, UsageQuery } from '../shared/service-usage.ts';
 import type { PageRecognition, PageRecognitions, PageRecognitionRequest } from '../shared/ocr.ts';
 import type { DraftCancellation, DraftCancellationEdit } from '../shared/collection.ts';
 import type { Region } from '../shared/collection.ts';
@@ -161,6 +162,14 @@ export class FamilyApi {
   ocrSettings(grant: string) { return this.request<OcrSettings>('/admin/ocr', 'GET', undefined, grant); }
   speechSettings(grant: string) { return this.request<SpeechSettings>('/admin/speech', 'GET', undefined, grant); }
   aiSettings(grant: string) { return this.request<AiSettings>('/admin/ai', 'GET', undefined, grant); }
+  serviceUsage(grant: string, query: UsageQuery = {}) {
+    const params = new URLSearchParams();
+    if (query.month) params.set('month', query.month);
+    if (query.capability) params.set('capability', query.capability);
+    if (query.offset) params.set('offset', String(query.offset));
+    return this.request<ServiceUsage>(`/admin/service-usage?${params}`, 'GET', undefined, grant);
+  }
+  saveServiceBudget(grant: string, input: ServiceBudgetEdit) { return this.request<ServiceUsage>('/admin/service-usage', 'PUT', input, grant); }
   saveAi(grant: string, input: AiEdit) { return this.request<AiSettings>('/admin/ai', 'PUT', input, grant); }
   testAi(grant: string, id: string, expectedRevision: number, prompt: string) { return this.request<AiTest>(`/admin/ai/tests/${encodeURIComponent(id)}`, 'PUT', { expectedRevision, prompt }, grant); }
   saveSpeech(grant: string, input: SpeechEdit) { return this.request<SpeechSettings>('/admin/speech', 'PUT', input, grant); }
