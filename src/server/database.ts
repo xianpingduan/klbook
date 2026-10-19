@@ -147,7 +147,15 @@ const migrations = [
     audioMs INTEGER NOT NULL, audioBytes INTEGER NOT NULL, sampleRate INTEGER NOT NULL, message TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '');
   CREATE TABLE speechAttempts (id INTEGER PRIMARY KEY, testId TEXT NOT NULL REFERENCES speechTests(id), month TEXT NOT NULL,
     startedAt INTEGER NOT NULL, finishedAt INTEGER, status TEXT NOT NULL, audioMs INTEGER NOT NULL, estimatedMills INTEGER NOT NULL, message TEXT NOT NULL DEFAULT '');
-  CREATE INDEX speechAttemptsByMonth ON speechAttempts(month);`
+  CREATE INDEX speechAttemptsByMonth ON speechAttempts(month);`,
+  `CREATE TABLE aiSettings (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), revision INTEGER NOT NULL, config TEXT NOT NULL);
+  CREATE TABLE aiModelCredentials (model TEXT PRIMARY KEY CHECK(model IN ('lite', '4.0Ultra')), credentials TEXT NOT NULL);
+  CREATE TABLE aiTests (id TEXT PRIMARY KEY, accountId TEXT NOT NULL, requestHash TEXT NOT NULL, revision INTEGER NOT NULL, model TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL,
+    createdAt INTEGER NOT NULL, finishedAt INTEGER, durationMs INTEGER, attempts INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '',
+    promptTokens INTEGER, completionTokens INTEGER, totalTokens INTEGER);
+  CREATE TABLE aiAttempts (id INTEGER PRIMARY KEY, testId TEXT NOT NULL REFERENCES aiTests(id), model TEXT NOT NULL, month TEXT NOT NULL, startedAt INTEGER NOT NULL, finishedAt INTEGER,
+    status TEXT NOT NULL, estimatedMills INTEGER NOT NULL, promptTokens INTEGER, completionTokens INTEGER, totalTokens INTEGER, message TEXT NOT NULL DEFAULT '');
+  CREATE INDEX aiAttemptsByMonth ON aiAttempts(month);`
 ];
 
 export function openDatabase(dataDir: string) {

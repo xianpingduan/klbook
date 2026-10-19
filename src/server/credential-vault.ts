@@ -9,7 +9,7 @@ export class CredentialVault {
   private db: Database.Database;
   private path: string;
   private context: string;
-  constructor(db: Database.Database, dataDir: string, capability: 'ocr' | 'speech' = 'ocr') { this.db = db; this.path = join(dataDir, 'service-credentials.key'); this.context = `klbook:${capability}:credentials:v1`; }
+  constructor(db: Database.Database, dataDir: string, capability: 'ocr' | 'speech' | 'ai' = 'ocr') { this.db = db; this.path = join(dataDir, 'service-credentials.key'); this.context = `klbook:${capability}:credentials:v1`; }
   private key(create: boolean) {
     try {
       if (create && !existsSync(this.path)) writeFileSync(this.path, randomBytes(32), { flag: 'wx', mode: 0o600 });
@@ -21,7 +21,8 @@ export class CredentialVault {
   seal(value: string) {
     // Any saved ciphertext requires the original installation key, across capabilities.
     const existing = !!this.db.prepare('SELECT 1 FROM ocrProviderCredentials LIMIT 1').get()
-      || !!this.db.prepare('SELECT 1 FROM speechSettings WHERE credentials IS NOT NULL').get();
+      || !!this.db.prepare('SELECT 1 FROM speechSettings WHERE credentials IS NOT NULL').get()
+      || !!this.db.prepare('SELECT 1 FROM aiModelCredentials LIMIT 1').get();
     const key = this.key(!existing), iv = randomBytes(12);
     const cipher = createCipheriv('aes-256-gcm', key, iv);
     cipher.setAAD(Buffer.from(this.context));

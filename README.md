@@ -65,7 +65,7 @@ npm.cmd start
 
 不要将设置码、恢复码、密码或数据目录内容提交到 Git 或议题。
 
-家长管理侧栏提供独立的[图片识别](docs/ocr-service.md)和[语音转写](docs/speech-service.md)服务配置。语音转写目前用于家长主动上传 WAV 样例测试，默认关闭，不自动读取孩子材料；孩子端录音与语音总结后续实现。
+家长管理侧栏提供独立的[图片识别](docs/ocr-service.md)、[语音转写](docs/speech-service.md)和 [AI 学习](docs/ai-service.md)服务配置。语音转写用于家长主动上传 WAV 测试，AI 学习用于发送明确文字测试；两者默认关闭，不自动读取孩子材料。孩子端录音、语音总结与 AI 学习流程后续实现。
 
 ## 开发和验证
 

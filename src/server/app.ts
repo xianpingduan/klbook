@@ -17,8 +17,11 @@ import type { VendorHttp } from './ocr-provider.ts';
 import { SpeechService } from './speech-service.ts';
 import { speechRoutes } from './speech-routes.ts';
 import type { SpeechSocketFactory } from './xfyun-speech.ts';
+import { AiService } from './ai-service.ts';
+import { aiRoutes } from './ai-routes.ts';
+import type { AiHttp } from './xfyun-ai.ts';
 
-export function createApp(options: { dataDir: string; now?: () => number; allowedOrigins?: string[]; staticDir?: string; ocrHttp?: VendorHttp; speechSocket?: SpeechSocketFactory }) {
+export function createApp(options: { dataDir: string; now?: () => number; allowedOrigins?: string[]; staticDir?: string; ocrHttp?: VendorHttp; speechSocket?: SpeechSocketFactory; aiHttp?: AiHttp }) {
   const db = openDatabase(options.dataDir);
   const access = new FamilyAccess(db, options.dataDir, options.now);
   const collection = new CollectionStore(db, options.dataDir, options.now);
@@ -39,7 +42,8 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
   });
   const ocr = new OcrService(db, options.dataDir, collection, options.now, options.ocrHttp);
   const speech = new SpeechService(db, options.dataDir, options.now, options.speechSocket);
-  app.addHook('onClose', async () => { await Promise.all([ocr.close(), speech.close()]); db.close(); });
+  const ai = new AiService(db, options.dataDir, options.now, options.aiHttp);
+  app.addHook('onClose', async () => { await Promise.all([ocr.close(), speech.close(), ai.close()]); db.close(); });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof AccessError) return reply.code(error.statusCode).send({ message: error.message, ...(error.conflict ? { conflict: error.conflict } : {}) });
     if (error instanceof Error && 'validation' in error) return reply.code(400).send({ message: '请检查填写内容' });
@@ -84,6 +88,7 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
   studyRoutes(app, access, new Study(db));
   ocrRoutes(app, access, ocr);
   speechRoutes(app, access, speech);
+  aiRoutes(app, access, ai);
   if (options.staticDir) {
     app.register(staticFiles, { root: options.staticDir, index: 'index.html' });
     for (const path of Object.keys(pages)) app.get(path, async (_request, reply) => reply.sendFile('index.html'));

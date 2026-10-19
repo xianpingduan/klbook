@@ -9,6 +9,7 @@ import type { FilterOptions, QuestionFilters } from '../shared/collection.ts';
 import type { ConflictTarget } from '../shared/conflicts.ts';
 import type { OcrEdit, OcrSettings, OcrTest } from '../shared/ocr.ts';
 import type { SpeechEdit, SpeechSettings, SpeechTest } from '../shared/speech.ts';
+import type { AiEdit, AiSettings, AiTest } from '../shared/ai.ts';
 import type { PageRecognition, PageRecognitions, PageRecognitionRequest } from '../shared/ocr.ts';
 import type { DraftCancellation, DraftCancellationEdit } from '../shared/collection.ts';
 import type { Region } from '../shared/collection.ts';
@@ -159,6 +160,9 @@ export class FamilyApi {
   async recognizePage(pageId: string, id: string, grant?: string, input?: PageRecognitionRequest) { await this.syncCaptures(); return this.request<PageRecognition>(`/collection/pages/${encodeURIComponent(this.remoteId(pageId))}/recognitions/${encodeURIComponent(id)}`, 'PUT', input, grant); }
   ocrSettings(grant: string) { return this.request<OcrSettings>('/admin/ocr', 'GET', undefined, grant); }
   speechSettings(grant: string) { return this.request<SpeechSettings>('/admin/speech', 'GET', undefined, grant); }
+  aiSettings(grant: string) { return this.request<AiSettings>('/admin/ai', 'GET', undefined, grant); }
+  saveAi(grant: string, input: AiEdit) { return this.request<AiSettings>('/admin/ai', 'PUT', input, grant); }
+  testAi(grant: string, id: string, expectedRevision: number, prompt: string) { return this.request<AiTest>(`/admin/ai/tests/${encodeURIComponent(id)}`, 'PUT', { expectedRevision, prompt }, grant); }
   saveSpeech(grant: string, input: SpeechEdit) { return this.request<SpeechSettings>('/admin/speech', 'PUT', input, grant); }
   testSpeech(grant: string, id: string, revision: number, audio: File) {
     return this.send<SpeechTest>(`/admin/speech/tests/${encodeURIComponent(id)}?revision=${revision}`, { method: 'PUT', headers: { 'Content-Type': 'audio/wav', 'X-Parent-Authorization': grant }, body: audio }, response => response.json());

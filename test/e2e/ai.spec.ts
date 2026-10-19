@@ -1,0 +1,72 @@
+import { expect, test } from '@playwright/test';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { createApp } from '../../src/server/app.ts';
+import { aiVendor } from '../api/ai-fixture.ts';
+
+test('后台 AI 独立配置、预览测试内容、模型凭据隔离、丢失响应重试与管理到期保护', async ({ page, request }) => {
+  const dir = await mkdtemp(join(tmpdir(), 'klbook-ai-browser-')), vendor = aiVendor();
+  let offset = 0;
+  const port = 49152 + Math.floor(Math.random() * 15000), url = `http://127.0.0.1:${port}`;
+  const app = createApp({ dataDir: dir, staticDir: resolve('dist/client'), allowedOrigins: [url], now: () => Date.now() + offset, aiHttp: vendor.http });
+  await app.listen({ host: '127.0.0.1', port });
+  try {
+    await page.clock.install();
+    const setupCode = (await readFile(join(dir, 'setup-code.txt'), 'utf8')).trim();
+    await request.post(`${url}/api/v1/setup`, { data: { setupCode, username: 'parent', password: 'family password 123', learnerName: '小明', deviceName: '电脑' } });
+    await page.goto(`${url}/admin`);
+    await page.getByLabel('家长账号').fill('parent'); await page.getByLabel('家长密码', { exact: true }).fill('family password 123');
+    await page.getByRole('button', { name: '登录此设备', exact: true }).click();
+    const unlock = async () => { await page.getByLabel('家长密码', { exact: true }).fill('family password 123'); await page.getByRole('button', { name: '验证并进入管理', exact: true }).click(); };
+    await unlock();
+    await page.getByRole('button', { name: 'AI 学习服务', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'AI 学习服务', exact: true })).toBeVisible();
+    const password = page.getByLabel('APIPassword', { exact: true });
+    await password.fill('browser-lite:secret');
+    await page.getByRole('button', { name: '保存配置', exact: true }).click();
+    await expect(page.getByRole('status').filter({ hasText: '配置已保存' })).toBeVisible();
+    expect(vendor.calls).toHaveLength(0); await expect(password).toHaveValue('');
+    const prompt = page.getByLabel('本次发送的测试内容', { exact: true }), submit = page.getByRole('button', { name: '发送以上文字并测试', exact: true });
+    await prompt.fill('请给出一个计算长方形周长的提示。');
+    await expect(submit).toBeDisabled();
+    await page.getByLabel('启用 AI 学习服务', { exact: true }).check();
+    await page.getByRole('button', { name: '保存配置', exact: true }).click();
+    await expect(submit).toBeEnabled();
+    await page.route('**/api/v1/admin/ai/tests/*', async route => { const response = await route.fetch(); expect(response.status()).toBe(202); await route.abort(); }, { times: 1 });
+    await submit.click();
+    await expect(page.getByRole('alert')).toContainText('无法连接');
+    await expect(prompt).toHaveValue('请给出一个计算长方形周长的提示。');
+    await page.getByRole('button', { name: '重试提交同一次测试', exact: true }).click();
+    await expect(page.getByText('先想想长方形有几条长边和几条短边。', { exact: true })).toBeVisible();
+    expect(vendor.calls).toHaveLength(1);
+    expect(JSON.parse(String(vendor.calls[0]!.init.body)).messages).toEqual([{ role: 'user', content: '请给出一个计算长方形周长的提示。' }]);
+    await page.reload(); await unlock();
+    await expect(page.getByText('先想想长方形有几条长边和几条短边。', { exact: true })).toBeVisible();
+    await expect(password).toHaveValue('');
+    await page.getByRole('combobox', { name: '模型', exact: true }).selectOption('4.0Ultra');
+    await expect(page.getByLabel('启用 AI 学习服务', { exact: true })).not.toBeChecked();
+    await expect(page.getByText('所选模型尚未配置凭据。', { exact: true })).toBeVisible();
+    await password.fill('browser-ultra:secret');
+    await page.getByLabel('启用 AI 学习服务', { exact: true }).check();
+    await page.getByRole('button', { name: '保存配置', exact: true }).click();
+    await expect(submit).toBeEnabled(); await submit.click();
+    await expect(page.getByText('先想想长方形有几条长边和几条短边。', { exact: true })).toHaveCount(2);
+    expect(vendor.calls).toHaveLength(2);
+    expect(new Headers(vendor.calls[1]!.init.headers).get('authorization')).toBe('Bearer browser-ultra:secret');
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+      await page.screenshot({ path: test.info().outputPath(`ai-${width}.png`), fullPage: true });
+    }
+    await page.getByLabel('服务名称', { exact: true }).fill('未保存的 AI 名称');
+    await page.getByRole('button', { name: '语音转写服务', exact: true }).click();
+    await expect(page.getByRole('dialog')).toBeVisible(); await page.getByRole('button', { name: '继续编辑', exact: true }).click();
+    await password.fill('unsaved-private-password');
+    offset = 5 * 60000 + 1000; await page.clock.fastForward(offset);
+    await expect(page.getByRole('heading', { name: '验证家长身份', exact: true })).toBeVisible();
+    await unlock(); await expect(password).toHaveValue('');
+    await expect(page.getByLabel('服务名称', { exact: true })).toHaveValue('未保存的 AI 名称');
+    expect(vendor.calls).toHaveLength(2);
+  } finally { await app.close(); await rm(dir, { recursive: true, force: true }); }
+});

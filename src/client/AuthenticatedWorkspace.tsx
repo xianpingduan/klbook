@@ -13,6 +13,7 @@ import { DeviceManager } from './DeviceManager.tsx';
 import { StudyManager } from './StudyManager.tsx';
 import { OcrManager } from './OcrManager.tsx';
 import { SpeechManager } from './SpeechManager.tsx';
+import { AiManager } from './AiManager.tsx';
 import { LeaveContext } from './navigation.ts';
 import { OfflinePreparation } from './OfflinePreparation.tsx';
 
@@ -43,6 +44,7 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
   const [studyStarted, setStudyStarted] = useState(false);
   const [ocrStarted, setOcrStarted] = useState(false);
   const [speechStarted, setSpeechStarted] = useState(false);
+  const [aiStarted, setAiStarted] = useState(false);
 
   useEffect(() => {
     if (collectionVisible) setCollectionStarted(true);
@@ -50,6 +52,7 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
     if (path === '/admin/study' && grant) setStudyStarted(true);
     if (path === '/admin/services/ocr' && grant) setOcrStarted(true);
     if (path === '/admin/services/speech' && grant) setSpeechStarted(true);
+    if (path === '/admin/services/ai' && grant) setAiStarted(true);
   }, [collectionVisible, path, grant]);
   useEffect(() => {
     if (!grant) return;
@@ -108,6 +111,9 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
     </div>
     <div hidden={path !== '/admin/services/speech' || !grant} inert={path !== '/admin/services/speech' || !grant}>
       {speechStarted && <SpeechManager api={api} grant={grant?.token} active={path === '/admin/services/speech'} onAccessError={accessError} />}
+    </div>
+    <div hidden={path !== '/admin/services/ai' || !grant} inert={path !== '/admin/services/ai' || !grant}>
+      {aiStarted && <AiManager api={api} grant={grant?.token} active={path === '/admin/services/ai'} onAccessError={accessError} />}
     </div>
     {path === '/learn/mine' && <section className="card"><h1>我的</h1><p role="status">{connection}</p><dl><div><dt>学习者</dt><dd>{home.library.learnerName}</dd></div><div><dt>家长账号</dt><dd>{home.account.username}</dd></div><div><dt>当前设备</dt><dd>{home.session.deviceName}</dd></div></dl><details open><summary>资料库身份</summary><code data-testid="library-id">{home.library.id}</code></details><button className="quiet" disabled={busy} onClick={onConnection}>连接设置</button><button onClick={() => { setError(''); navigate('/admin'); }}>家长管理</button><button className="quiet" disabled={busy} onClick={() => void run(async () => { await api.logout(); await onSignedOut(); })}>退出此设备</button></section>}
     {path === '/learn/mine' && <OfflinePreparation />}
