@@ -133,7 +133,10 @@ test('上传回执丢失后服务器已删草稿，不重复建回且不阻塞�
     const image = await sharp({ create: { width: 160, height: 200, channels: 3, background: 'white' } }).png().toBuffer();
     let deletedId = '';
     await page.route('**/api/v1/collection/drafts', async route => {
-      const response = await route.fetch(), draft = await response.json();
+      // WebKit interception does not expose Blob bytes; forward the selected fixture.
+      const response = await route.fetch({ postData: image });
+      expect(response.status()).toBe(201);
+      const draft = await response.json();
       deletedId = draft.id;
       expect((await request.put(`${f.url}/api/v1/admin/trash/${draft.id}`, { headers: f.parent, data: { operationId: crypto.randomUUID(), expectedRevision: draft.revision, action: 'trash' } })).status()).toBe(200);
       await route.abort();
