@@ -191,7 +191,9 @@ const migrations = [
   CREATE TABLE readingOperationsNew (libraryId TEXT NOT NULL, accountId TEXT NOT NULL, operationId TEXT NOT NULL, requestHash TEXT NOT NULL, materialId TEXT NOT NULL, PRIMARY KEY(libraryId, accountId, operationId));
   INSERT INTO readingOperationsNew SELECT * FROM readingOperations;
   DROP TABLE readingOperations;
-  ALTER TABLE readingOperationsNew RENAME TO readingOperations;`
+  ALTER TABLE readingOperationsNew RENAME TO readingOperations;`,
+  `CREATE TABLE exportPagePins (exportId TEXT NOT NULL, pageId TEXT NOT NULL REFERENCES originalPages(id), PRIMARY KEY(exportId, pageId));
+  CREATE INDEX exportsByPage ON exportPagePins(pageId);`
 ];
 
 export function openDatabase(dataDir: string) {

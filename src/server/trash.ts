@@ -95,6 +95,7 @@ export class TrashStore {
             UNION ALL SELECT 1 FROM answerParts WHERE pageId = ? UNION ALL SELECT 1 FROM readingParts WHERE pageId = ? LIMIT 1`).get(id, id, id, id);
           if (referenced) { this.db.prepare('DELETE FROM pageCleanup WHERE pageId = ?').run(id); return false; }
           if (this.db.prepare("SELECT 1 FROM ocrTests WHERE pageId = ? AND status = 'running'").get(id)) return false;
+          if (this.db.prepare('SELECT 1 FROM exportPagePins WHERE pageId = ?').get(id)) return false;
           this.db.prepare('INSERT OR IGNORE INTO retiredPages VALUES (?, ?, ?)').run(id, job.libraryId, this.now());
           this.db.prepare('DELETE FROM initialPageRecognition WHERE pageId = ?').run(id);
           this.db.prepare('DELETE FROM automaticRegionRecognitions WHERE pageId = ?').run(id);

@@ -15,6 +15,7 @@ import type { PageRecognition, PageRecognitions, PageRecognitionRequest } from '
 import type { DraftCancellation, DraftCancellationEdit } from '../shared/collection.ts';
 import type { Region } from '../shared/collection.ts';
 import type { Deletion, TrashChange, TrashList, TrashReceipt } from '../shared/trash.ts';
+import type { ExportPreview, ExportJob } from '../shared/learning-package.ts';
 import { QuestionJournal } from './question-journal.ts';
 import { LocalLibrary } from './local-library.ts';
 import { OfflineCaptures } from './offline-captures.ts';
@@ -112,11 +113,11 @@ export class FamilyApi {
     await platform.target.write(connection.api.address);
     return connection;
   }
-  private async send<T>(path: string, options: RequestInit, read: (response: Response) => Promise<T>): Promise<T> {
+  private async send<T>(path: string, options: RequestInit, read: (response: Response) => Promise<T>, timeoutMs = 30000): Promise<T> {
     this.assertActive();
     const controller = new AbortController();
     this.requests.add(controller);
-    const timeout = setTimeout(() => controller.abort(), 30000);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       let response: Response;
       try {
@@ -172,6 +173,10 @@ export class FamilyApi {
   }
   saveServiceBudget(grant: string, input: ServiceBudgetEdit) { return this.request<ServiceUsage>('/admin/service-usage', 'PUT', input, grant); }
   trash(grant: string, offset = 0) { return this.request<TrashList>(`/admin/trash?offset=${offset}`, 'GET', undefined, grant); }
+  exportPreview(grant: string) { return this.request<ExportPreview>('/admin/exports', 'GET', undefined, grant); }
+  startExport(grant: string, id: string, previewToken: string) { return this.request<ExportJob>(`/admin/exports/${encodeURIComponent(id)}`, 'PUT', { previewToken }, grant); }
+  exportStatus(grant: string, id: string) { return this.request<ExportJob>(`/admin/exports/${encodeURIComponent(id)}`, 'GET', undefined, grant); }
+  exportFile(grant: string, id: string) { return this.send(`/admin/exports/${encodeURIComponent(id)}/file`, { headers: { 'X-Parent-Authorization': grant } }, response => response.blob(), 300000); }
   cleanupTrash(grant: string) { return this.request<TrashList>('/admin/trash/cleanup', 'POST', undefined, grant); }
   async changeTrash(grant: string, id: string, input: TrashChange) {
     const receipt = await this.request<TrashReceipt>(`/admin/trash/${encodeURIComponent(this.remoteId(id))}`, 'PUT', input, grant);

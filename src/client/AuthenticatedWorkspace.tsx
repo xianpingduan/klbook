@@ -16,6 +16,7 @@ import { SpeechManager } from './SpeechManager.tsx';
 import { AiManager } from './AiManager.tsx';
 import { ServiceUsageManager } from './ServiceUsageManager.tsx';
 import { TrashManager } from './TrashManager.tsx';
+import { ExportManager } from './ExportManager.tsx';
 import { LeaveContext } from './navigation.ts';
 import { OfflinePreparation } from './OfflinePreparation.tsx';
 
@@ -49,6 +50,7 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
   const [aiStarted, setAiStarted] = useState(false);
   const [usageStarted, setUsageStarted] = useState(false);
   const [trashStarted, setTrashStarted] = useState(false);
+  const [exportsStarted, setExportsStarted] = useState(false);
 
   useEffect(() => {
     if (collectionVisible) setCollectionStarted(true);
@@ -59,6 +61,7 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
     if (path === '/admin/services/ai' && grant) setAiStarted(true);
     if (path === '/admin/services/usage' && grant) setUsageStarted(true);
     if (path === '/admin/trash' && grant) setTrashStarted(true);
+    if (path === '/admin/exports' && grant) setExportsStarted(true);
   }, [collectionVisible, path, grant]);
   useEffect(() => {
     if (!grant) return;
@@ -115,6 +118,9 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
       {trashStarted && <TrashManager api={api} grant={grant?.token} active={path === '/admin/trash'} onAccessError={accessError} />}
     </div>
     {path === '/admin/devices' && grant && <DeviceManager api={api} grant={grant.token} onAccessError={accessError} onSignedOut={deviceSignedOut} onRecoveryCode={recoveryCodeReady} />}
+    <div hidden={path !== '/admin/exports' || !grant} inert={path !== '/admin/exports' || !grant}>
+      {exportsStarted && <ExportManager api={api} grant={grant?.token} active={path === '/admin/exports'} onAccessError={accessError} />}
+    </div>
     <div hidden={path !== '/admin/services/ocr' || !grant} inert={path !== '/admin/services/ocr' || !grant}>
       {ocrStarted && <OcrManager api={api} grant={grant?.token} active={path === '/admin/services/ocr'} onAccessError={accessError} />}
     </div>
