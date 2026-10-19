@@ -23,6 +23,11 @@ async function settings(page: Page) {
   await page.getByRole('button', { name: '我的', exact: true }).click();
   await page.getByRole('button', { name: '连接设置', exact: true }).click();
 }
+async function selectImages(page: Page, bytes: Buffer, names: string[]) {
+  const input = page.getByLabel('从相册选择（可多选）');
+  await expect(input).toBeEnabled();
+  await input.setInputFiles(names.map(name => ({ name, mimeType: 'image/png', buffer: bytes })));
+}
 async function select(page: Page, address: string) {
   await page.getByLabel('后端服务地址', { exact: true }).fill(address);
   await page.getByRole('button', { name: '测试连接', exact: true }).click();
@@ -40,7 +45,7 @@ test('切换前显示本机待处理数量，不同库隔离材料，同库别�
     const b = await setup(request, second.url, join(root, 'b'));
     const bytes = await sharp(await readFile('test/fixtures/paper.svg')).png().toBuffer();
     await page.goto(`${first.url}/learn/collect`); await login(page);
-    await page.getByLabel('从相册选择（可多选）').setInputFiles(['一.png', '二.png', '三.png'].map(name => ({ name, mimeType: 'image/png', buffer: bytes })));
+    await selectImages(page, bytes, ['一.png', '二.png', '三.png']);
     await reveal(page.getByRole('button', { name: '选择整页', includeHidden: true }));
     await page.getByRole('button', { name: '选择整页' }).click();
     await page.getByRole('button', { name: '下一步，选学科' }).click();
@@ -100,7 +105,7 @@ test('连接设置打开后停止旧连接补传，迟到的登录态读取不�
     await page.goto(`${first.url}/learn/collect`); await login(page);
     const bytes = await sharp(await readFile('test/fixtures/paper.svg')).png().toBuffer();
     await page.route(`${first.url}/api/v1/collection/drafts`, route => route.abort());
-    await page.getByLabel('从相册选择（可多选）').setInputFiles({ name: '旧库离线材料.png', mimeType: 'image/png', buffer: bytes });
+    await selectImages(page, bytes, ['旧库离线材料.png']);
     await expect(page.getByRole('heading', { name: '框住这道题' })).toBeVisible();
     await page.getByRole('button', { name: '返回列表', exact: true }).click();
     await page.unroute(`${first.url}/api/v1/collection/drafts`);
@@ -145,7 +150,7 @@ test.describe('准备好的网页入口保持不变', () => {
       await first.stop();
       await page.reload();
       const bytes = await sharp(await readFile('test/fixtures/paper.svg')).png().toBuffer();
-      await page.getByLabel('从相册选择（可多选）').setInputFiles({ name: '离线收集.png', mimeType: 'image/png', buffer: bytes });
+      await selectImages(page, bytes, ['离线收集.png']);
       await reveal(page.getByRole('button', { name: '选择整页', includeHidden: true }));
       await page.getByRole('button', { name: '选择整页' }).click();
       await page.getByRole('button', { name: '下一步，选学科' }).click();
@@ -189,17 +194,20 @@ for (const delayed of ['身份检查', '上传回执']) {
       await page.goto(`${first.url}/learn/collect`); await login(page);
       const bytes = await sharp(await readFile('test/fixtures/paper.svg')).png().toBuffer();
       await page.route(`${first.url}/api/v1/collection/drafts`, route => route.abort());
-      await page.getByLabel('从相册选择（可多选）').setInputFiles({ name: '保留的材料.png', mimeType: 'image/png', buffer: bytes });
+      await selectImages(page, bytes, ['保留的材料.png']);
       await expect(page.getByRole('heading', { name: '框住这道题' })).toBeVisible();
       await page.getByRole('button', { name: '返回列表', exact: true }).click();
       await page.unroute(`${first.url}/api/v1/collection/drafts`);
       let waiting = false;
       const endpoint = delayed === '身份检查' ? '/api/v1/info' : '/api/v1/collection/drafts';
       await page.route(`${first.url}${endpoint}`, async route => {
-        const response = await route.fetch();
+        // Windows WebKit's intercepted Blob request does not reliably expose its
+        // binary body to route.fetch; send the exact selected fixture bytes.
+        const response = await route.fetch(delayed === '上传回执' ? { postData: bytes } : {});
+        expect(response.ok()).toBe(true);
         if (!waiting) { waiting = true; await held; }
         await route.fulfill({ response }).catch(() => {});
-      });
+      }, { times: 1 });
       await page.reload();
       await expect.poll(() => waiting).toBe(true);
       await page.getByRole('button', { name: '连接设置', exact: true }).click();
@@ -213,13 +221,18 @@ for (const delayed of ['身份检查', '上传回执']) {
       const bList = await (await request.get(`${second.url}/api/v1/collection/questions?state=draft`, { headers: { Authorization: `Bearer ${b.token}` } })).json();
       expect(bList.total).toBe(0);
       expect(secondTokens).not.toContain(`Bearer ${a.token}`);
+      const replay = page.waitForResponse(response => response.url() === `${first.url}/api/v1/collection/drafts` && response.request().method() === 'POST');
       await settings(page); await select(page, first.url); await login(page);
+      expect((await replay).ok()).toBe(true);
       await page.getByRole('button', { name: '收集', exact: true }).click();
       await expect(page.getByRole('button', { name: '继续整理', exact: true })).toHaveCount(1);
       await page.reload();
       await expect(page.getByRole('button', { name: '继续整理', exact: true })).toHaveCount(1);
       const aList = await (await request.get(`${first.url}/api/v1/collection/questions?state=draft`, { headers: { Authorization: `Bearer ${a.token}` } })).json();
       expect(aList.total).toBe(1);
+      const original = await request.get(`${first.url}/api/v1/collection/pages/${aList.items[0].originalPage.id}/original`, { headers: { Authorization: `Bearer ${a.token}` } });
+      expect(original.ok()).toBe(true);
+      expect(await original.body()).toEqual(bytes);
     } finally { release(); await second.stop(); await first.stop(); await rm(root, { recursive: true, force: true }); }
   });
 }
@@ -234,7 +247,7 @@ test('会话撤销后重开仍显示原库待处理数量，重新登录才继�
     await page.goto(`${first.url}/learn/collect`); await login(page);
     const bytes = await sharp(await readFile('test/fixtures/paper.svg')).png().toBuffer();
     await page.route(`${first.url}/api/v1/collection/drafts`, route => route.abort());
-    await page.getByLabel('从相册选择（可多选）').setInputFiles({ name: '撤销后仍保留.png', mimeType: 'image/png', buffer: bytes });
+    await selectImages(page, bytes, ['撤销后仍保留.png']);
     await expect(page.getByRole('heading', { name: '框住这道题' })).toBeVisible();
     await page.getByRole('button', { name: '返回列表', exact: true }).click();
     await settings(page);

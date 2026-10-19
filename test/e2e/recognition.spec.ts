@@ -178,6 +178,7 @@ test('切换资料库后迟到识别仅留在原库，切回可查看且不覆�
     const otherSession = await (await request.post(`${other.url}/api/v1/setup`, { data: { setupCode, username: 'parent', password: f.password, learnerName: '小明', deviceName: '另一个家庭' } })).json();
     await page.goto(`${f.url}/learn/collect`); await signIn();
     const bytes = await sharp(await readFile(new URL('../fixtures/paper.svg', import.meta.url))).png().toBuffer();
+    await expect(page.getByLabel('选择题目图片')).toBeEnabled();
     await page.getByLabel('选择题目图片').setInputFiles({ name: '原库识别.png', mimeType: 'image/png', buffer: bytes });
     await reveal(page.getByRole('button', { name: '选择整页', includeHidden: true }));
     await page.getByRole('button', { name: '选择整页' }).click();
