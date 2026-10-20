@@ -19,6 +19,8 @@
 
 维护工具同时检查两个 Windows 服务、当前进程、后端接口和严格验证证书的 HTTPS 请求；只有全部就绪才显示可用，不能把端口监听或 SCM 的 Running 单独当作业务就绪。
 
+维护探测也按 UTF-8 解码 Node 返回的 JSON，避免中文状态消息在 Windows PowerShell 的本地代码页下破坏 JSON 并误判服务失败。`test/windows/service-probe.ps1 -ServiceDir '<ServiceDir>'` 使用真实且可用的 HTTP/HTTPS 验证代码页 936 与 UTF-8；仅有接口可达不会把未安装的 Windows 服务报告为就绪。
+
 启停命令会等待最多 40 秒观察业务状态。此时若当前进程仍在校验资料，返回“正在校验”并保留服务继续运行，窗口自动刷新；不因资料较多就卸载服务，也不提前标为就绪。已确认的启动失败仍显示原因。
 
 ## 准备与安装

@@ -23,10 +23,14 @@ function Get-KlbookStatus($Config) {
     $state = $null
     try { $state = Get-Content -LiteralPath (Join-Path $Config.serviceDir 'logs\startup.json') -Raw -Encoding UTF8 | ConvertFrom-Json } catch { }
     $probe = @{ app=$false; gateway=$false; message='应用尚未就绪' }
+    $probeEncoding = [Console]::OutputEncoding
     try {
+        # The Node CLI emits UTF-8 JSON, including Chinese status messages.
+        [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
         $raw = & (Join-Path $Config.serviceDir 'bin\node.exe') (Join-Path $Config.serviceDir 'app\dist\node\server\maintenance-cli.js') probe (Join-Path $Config.serviceDir 'deployment.json') 2>$null
         if ($LASTEXITCODE -eq 0) { $probe = $raw | ConvertFrom-Json }
     } catch { $probe.message='维护探测程序无法运行，请检查运行时文件' }
+    finally { [Console]::OutputEncoding = $probeEncoding }
     $processMatches = $false
     if ($state -and $state.phase -in @('checking','ready')) {
         $process = Get-Process -Id $state.pid -ErrorAction SilentlyContinue
