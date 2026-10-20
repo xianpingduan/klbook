@@ -38,6 +38,8 @@ npm.cmd run build
 
 WinSW 使用官方 [2.12.0 发布](https://github.com/winsw/winsw/releases/tag/v2.12.0)的 `WinSW.NET461.exe`，SHA-256 为 `b5066b7bbdfba1293e5d15cda3caaea88fbeab35bd5b38c41c913d492aadfc4f`。该摘要是首次从官方 HTTPS 发布获取后固定的文件摘要，不冒称发布方签名；本机文件版本 2.12.0.0，Windows .NET Framework Release 值 534296。Node 与 Caddy 实际版本记录于准备目录的 `deployment.json`。
 
+准备工具会按 UTF-8 读取 npm 输出的依赖路径，再恢复原控制台编码，兼容 Windows PowerShell 5.1 的中文代码页及中文项目目录。完整准备回归入口为 `test/windows/prepare-service.ps1`，参数与准备工具一致；应提供隔离且已初始化的资料副本及新的独立目标。回归只生成并校验运行副本，不注册服务。
+
 核对生成的 `deployment.json`、两个 XML、`Caddyfile` 和维护脚本。先在旧服务仍运行时检查存储：
 
 ```powershell

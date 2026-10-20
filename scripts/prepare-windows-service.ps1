@@ -41,9 +41,18 @@ if ($CertificatePort -in @($settings.backendPort, $settings.port)) { throw 'Cert
 $rootCertificate = Join-Path $gateway 'state\pki\authorities\local\root.crt'
 $rootHash = (Get-FileHash -LiteralPath $rootCertificate).Hash
 $npm = Join-Path (Split-Path $node) 'npm.cmd'
+$dependencyEncoding = [Console]::OutputEncoding
 Push-Location $workspace
-try { $dependencies = @(& $npm ls --omit=dev --all --parseable); if ($LASTEXITCODE -ne 0) { throw 'Production dependencies are incomplete.' } }
-finally { Pop-Location }
+try {
+    # npm emits UTF-8 even when Windows PowerShell uses a Chinese console code page.
+    [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+    $dependencies = @(& $npm ls --omit=dev --all --parseable)
+    if ($LASTEXITCODE -ne 0) { throw 'Production dependencies are incomplete.' }
+}
+finally {
+    [Console]::OutputEncoding = $dependencyEncoding
+    Pop-Location
+}
 $moduleRoot = Join-Path $workspace 'node_modules'
 $topModules = @($dependencies | Where-Object { $_ -ne $workspace } | ForEach-Object {
     $full = [IO.Path]::GetFullPath($_)
