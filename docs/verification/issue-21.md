@@ -1,6 +1,6 @@
 # #21 导入冲突、重复与学科对应
 
-任务：[处理导入冲突、重复与学科对应](https://github.com/xianpingduan/klbook/issues/21)。本项开始时的提交为 `53bb717`；已询问用户比较基线，尚未收到回复时按该起点进行只读审查，不记作用户已确认。
+任务：[处理导入冲突、重复与学科对应](https://github.com/xianpingduan/klbook/issues/21)。用户已确认以本项开始时的提交 `53bb717` 为审查基线。
 
 ## 实现与专项证据
 

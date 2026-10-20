@@ -65,14 +65,25 @@ export function importPlan(db: Database.Database, collection: CollectionStore, h
     let value = { ...incoming } as Entity;
     if (kind === 'recognitions') { const r = value as PackageRecognition; r.pageId = dependency('pages', r.pageId); r.candidates = r.candidates.map(c => ({ ...c, subjectId: c.subjectId && incomingById.subjects.has(c.subjectId) ? dependency('subjects', c.subjectId) : c.subjectId })); }
     if (kind === 'readings') { const r = value as PackageReading; r.parts = r.parts.map(part); }
-    if (kind === 'questions') { const q = value as PackageQuestion; value = { ...q, learnerId: home.library.learnerId, subjectId: dependency('subjects', q.subjectId!), sourceId: q.sourceId ? dependency('sources', q.sourceId) : null, parts: q.parts.map(part), answerParts: q.answerParts.map(part), readingMaterialId: q.readingMaterialId ? dependency('readings', q.readingMaterialId) : null }; }
+    if (kind === 'questions') {
+      const q = value as PackageQuestion, subjectId = dependency('subjects', q.subjectId!);
+      const sourceId = q.sourceId ? dependency('sources', q.sourceId) : null;
+      value = { ...q, learnerId: home.library.learnerId, subjectId, sourceId,
+        source: q.sourceId ? (resolved.get(key('sources', q.sourceId))!.value as Source).name : q.source,
+        parts: q.parts.map(part), answerParts: q.answerParts.map(part), readingMaterialId: q.readingMaterialId ? dependency('readings', q.readingMaterialId) : null };
+    }
     const sourceHash = fingerprint(incoming), versionHash = fingerprint({ incoming, dependencies: dependencies.map(e => [e.kind, e.sourceId, e.versionHash]) });
     const identity = identityMap.get(cacheKey), version = versionMap.get(`${cacheKey}:${versionHash}`);
     let targetId = version?.targetId ?? identity?.targetId ?? (data.library.id === home.library.id ? incoming.id : undefined), variant = !!version;
     if (!targetId && kind === 'subjects' && ['chinese', 'math', 'english', 'science'].includes(incoming.id)) targetId = incoming.id;
     if (kind === 'sources') {
-      const matching = current.sources.find(s => s.name.toLocaleLowerCase() === (incoming as Source).name.toLocaleLowerCase());
-      if (matching && matching.id !== targetId) { targetId = matching.id; variant = !!identity || !!version; }
+      // Use the database's name collation, exactly as source management does.
+      const matchId = db.prepare<[string], { id: string }>('SELECT id FROM sources WHERE name = ?').get((incoming as Source).name)?.id;
+      const matching = matchId ? local.sources.get(matchId) : undefined;
+      if (matching) {
+        if (matching.id !== targetId) { targetId = matching.id; variant = !!identity || !!version; }
+        value = matching;
+      }
     }
     const existing = targetId ? local[kind].get(targetId) : undefined;
     const converted = (newId: string) => {
@@ -140,8 +151,7 @@ export function importPlan(db: Database.Database, collection: CollectionStore, h
       if (!targetId) targetId = freshId(kind, incoming.id, versionHash);
     } else if (kind !== 'subjects' && existing && !same) {
       // Never rewrite a shared dependency used by local questions. Import its version into a new identity.
-      if (kind === 'sources' && (existing as Source).name === (incoming as Source).name) { value = existing; }
-      else { targetId = freshId(kind, incoming.id, versionHash); variant = true; }
+      targetId = freshId(kind, incoming.id, versionHash); variant = true;
     } else if (kind !== 'subjects' && targetId && !existing && (identity || version || db.prepare(`SELECT 1 FROM ${table[kind]} WHERE id = ?`).get(targetId))) { targetId = freshId(kind, incoming.id, versionHash); variant = true; }
     if (!targetId) targetId = freshId(kind, incoming.id, versionHash);
     value = converted(targetId);
@@ -160,7 +170,10 @@ export function importPlan(db: Database.Database, collection: CollectionStore, h
   }
   const count = (action: ImportQuestionChoice['action']) => questions.filter(q => q.action === action).length;
   const entities = [...published];
-  const token = fingerprint({ packageHash: prepared.packageHash, accountId: home.account.id, contextToken, decisions, entities, blockers, questions });
+  // Content hashes already include each value and dependency version. Avoid serializing shared
+  // OCR/reading payloads again through every question's recursive dependencies.
+  const changes = entities.map(({ value: _value, dependencies: _dependencies, ...identityAndState }) => identityAndState);
+  const token = fingerprint({ packageHash: prepared.packageHash, accountId: home.account.id, contextToken, decisions, changes, blockers, questions });
   return { entities, contextToken, preview: { id, status: 'preview', token, sourceLearner: data.library.learnerName, targetLearner: home.library.learnerName,
     added: count('add'), skipped: count('skip'), kept: count('keep'), copied: count('copy'), restored: count('restore'), conflicts: questions.filter(q => q.status === 'conflict').length, trashed: questions.filter(q => q.status === 'trash' || q.status === 'deleted').length,
     total: data.questions.length, pageCount: data.pages.length, readingCount: data.readings.length, subjects, availableSubjects: current.subjects, questions, decisions,

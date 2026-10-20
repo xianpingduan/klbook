@@ -414,6 +414,30 @@ test('选择回执丢失可安全重试，另一会话更新后旧选择失效�
   } finally { await source.close(); await target.close(); }
 });
 
+test('来源大小写不同时复用本机来源名称与停用状态，重复导入不产生假冲突', async () => {
+  const source = await familyFixture(), target = await familyFixture();
+  try {
+    const sourceParent = await parent(source), headers = await parent(target), sourceId = randomUUID(), targetId = randomUUID();
+    for (const [f, grant, id, name, active] of [[source, sourceParent, sourceId, 'Workbook', true], [target, headers, targetId, 'workbook', false]] as const) {
+      const result = await f.app.inject({ method: 'PUT', url: `/api/v1/admin/sources/${id}`, headers: grant, payload: { operationId: randomUUID(), expectedRevision: 0, name, active } });
+      assert.equal(result.statusCode, 200, result.body);
+    }
+    const { question: q } = await sample(source);
+    assert.equal((await source.app.inject({ method: 'PUT', url: `/api/v1/collection/questions/${q.id}`, headers: auth(source.first.token), payload: { operationId: randomUUID(), expectedRevision: q.revision, state: q.state, subjectId: q.subjectId, sourceId, region: q.region, pageNumber: q.pageNumber, questionNumber: q.questionNumber, note: q.note } })).statusCode, 200);
+    const pack = await exported(source, sourceParent), id = randomUUID();
+    const preview = (await upload(target, headers, id, pack)).json();
+    assert.deepEqual(preview.blockers, []); assert.equal(preview.added, 1);
+    const applied = await confirm(target, headers, id, preview.token); assert.equal(applied.statusCode, 200, applied.body);
+    const items = (await target.app.inject({ url: '/api/v1/collection/questions?state=collected', headers: auth(target.first.token) })).json();
+    assert.equal(items.total, 1); assert.equal(items.items[0].sourceId, targetId); assert.equal(items.items[0].source, 'workbook');
+    const options = (await target.app.inject({ url: '/api/v1/admin/sources', headers })).json();
+    assert.deepEqual(options.filter((s: any) => s.name.toLowerCase() === 'workbook'), [{ id: targetId, name: 'workbook', active: false, revision: 1 }]);
+    const againId = randomUUID(), again = (await upload(target, headers, againId, pack)).json();
+    assert.equal(again.skipped, 1); assert.equal(again.conflicts, 0);
+    assert.equal((await confirm(target, headers, againId, again.token)).statusCode, 200);
+  } finally { await source.close(); await target.close(); }
+});
+
 test('恢复选择在 30 天期限跨过后失效，永久删除的同源记录不会重建', async () => {
   const source = await familyFixture(), target = await familyFixture();
   try {
