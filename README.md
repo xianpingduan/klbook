@@ -4,7 +4,7 @@
 
 ## 本机启动
 
-**本机现已安装 Windows 自动服务（2026-10-20）**：运行目录为 `C:\ProgramData\klbook\service`，当前资料位于 `C:\ProgramData\klbook\data`。从开始菜单打开“错题集电脑维护”查看或启停，手机入口为 `https://192.168.3.208:8443/learn`。无需再运行下述前台启动命令；原 AppData 加密资料已保留为历史副本。安装及服务启停已验证，电脑重启后自动启动与手机读取仍待[实机验收](docs/verification/issue-22.md)。
+**本机现已安装 Windows 自动服务（2026-10-20）**：运行目录为 `C:\ProgramData\klbook\service`，当前资料位于 `C:\ProgramData\klbook\data`。从开始菜单打开“错题集电脑维护”查看或启停，手机入口为 `https://192.168.3.208:8443/learn`。无需再运行下述前台启动命令；原 AppData 加密资料已保留为历史副本。安装、服务启停、真实电脑重启后的自动启动及手机读取均已通过[实机验收](docs/verification/issue-22.md)。本次开机约 2 分 22 秒后服务自动启动，请给延迟启动留出时间。
 
 以下用于新环境的手动部署或独立开发环境：
 
