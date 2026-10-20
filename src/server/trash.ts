@@ -91,6 +91,9 @@ export class TrashStore {
       try {
         const ready = this.db.transaction(() => {
           const id = job.pageId;
+          // An online database snapshot may refer to any committed page. Keep
+          // its files until backup verification finishes, including new pages.
+          if (this.db.prepare("SELECT 1 FROM backupJobs WHERE status = 'running' LIMIT 1").get()) return false;
           const referenced = this.db.prepare(`SELECT 1 FROM questions WHERE originalPageId = ? UNION ALL SELECT 1 FROM questionParts WHERE pageId = ?
             UNION ALL SELECT 1 FROM answerParts WHERE pageId = ? UNION ALL SELECT 1 FROM readingParts WHERE pageId = ? LIMIT 1`).get(id, id, id, id);
           if (referenced) { this.db.prepare('DELETE FROM pageCleanup WHERE pageId = ?').run(id); return false; }

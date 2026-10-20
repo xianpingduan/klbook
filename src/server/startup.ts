@@ -17,13 +17,13 @@ export class StartupStatus {
   }
 }
 
-export async function checkExistingData(dataDir: string, expectedLibraryId?: string) {
+export async function checkExistingData(dataDir: string, expectedLibraryId?: string, options: { readOnly?: boolean } = {}) {
   if (!isAbsolute(dataDir)) throw new Error('数据目录必须是绝对路径');
   if (!(await stat(dataDir).catch(() => null))?.isDirectory()) throw new Error('数据目录不存在或无法读取，请恢复原目录后重新启动');
   const databasePath = join(dataDir, 'family.sqlite'), attachments = join(dataDir, 'attachments');
   if (!(await stat(databasePath).catch(() => null))?.isFile()) throw new Error('原家庭数据库不存在或无法读取，不会新建空库');
   if (!(await stat(attachments).catch(() => null))?.isDirectory()) throw new Error('附件目录不存在或无法读取，请恢复原目录');
-  for (const directory of [dataDir, attachments]) {
+  for (const directory of options.readOnly ? [] : [dataDir, attachments]) {
     const probe = join(directory, `.startup-${randomUUID()}`);
     let created = false;
     try { const file = await open(probe, 'wx'); created = true; try { await file.writeFile('klbook'); await file.sync(); } finally { await file.close(); } }

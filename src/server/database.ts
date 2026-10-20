@@ -202,7 +202,10 @@ const migrations = [
   `CREATE TABLE importVersions (sourceLibraryId TEXT NOT NULL, kind TEXT NOT NULL, sourceId TEXT NOT NULL, versionHash TEXT NOT NULL,
     targetId TEXT NOT NULL, sourceHash TEXT NOT NULL, localHash TEXT NOT NULL, PRIMARY KEY(sourceLibraryId, kind, sourceId, versionHash));
   CREATE TABLE questionImportOrigins (questionId TEXT PRIMARY KEY REFERENCES questions(id) ON DELETE CASCADE,
-    sourceLibraryId TEXT NOT NULL, sourceId TEXT NOT NULL, sourceRevision INTEGER NOT NULL, learnerName TEXT NOT NULL, isCopy INTEGER NOT NULL);`
+    sourceLibraryId TEXT NOT NULL, sourceId TEXT NOT NULL, sourceRevision INTEGER NOT NULL, learnerName TEXT NOT NULL, isCopy INTEGER NOT NULL);`,
+  `CREATE TABLE backupSettings (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), directory TEXT NOT NULL, revision INTEGER NOT NULL);
+  INSERT INTO backupSettings VALUES (1, '', 0);
+  CREATE TABLE backupJobs (id TEXT PRIMARY KEY, status TEXT NOT NULL, createdAt INTEGER NOT NULL, finishedAt INTEGER, path TEXT NOT NULL, message TEXT NOT NULL, byteLength INTEGER);`
 ];
 
 export function openDatabase(dataDir: string) {

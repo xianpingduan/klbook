@@ -17,6 +17,7 @@ import type { Region } from '../shared/collection.ts';
 import type { Deletion, TrashChange, TrashList, TrashReceipt } from '../shared/trash.ts';
 import type { ExportPreview, ExportJob } from '../shared/learning-package.ts';
 import type { ImportBatch, ImportReceipt, ImportDecisions, ImportPreview } from '../shared/imports.ts';
+import type { BackupJob, BackupSettings } from '../shared/backups.ts';
 import { QuestionJournal } from './question-journal.ts';
 import { LocalLibrary } from './local-library.ts';
 import { OfflineCaptures } from './offline-captures.ts';
@@ -175,6 +176,9 @@ export class FamilyApi {
   saveServiceBudget(grant: string, input: ServiceBudgetEdit) { return this.request<ServiceUsage>('/admin/service-usage', 'PUT', input, grant); }
   trash(grant: string, offset = 0) { return this.request<TrashList>(`/admin/trash?offset=${offset}`, 'GET', undefined, grant); }
   exportPreview(grant: string) { return this.request<ExportPreview>('/admin/exports', 'GET', undefined, grant); }
+  backups(grant: string) { return this.request<BackupSettings>('/admin/backups', 'GET', undefined, grant); }
+  saveBackupDirectory(grant: string, directory: string, expectedRevision: number) { return this.request<BackupSettings>('/admin/backups/settings', 'PUT', { directory, expectedRevision }, grant); }
+  startBackup(grant: string, id: string, expectedRevision: number) { return this.request<BackupJob>(`/admin/backups/runs/${encodeURIComponent(id)}`, 'PUT', { expectedRevision }, grant); }
   uploadImport(grant: string, id: string, file: Blob) { return this.send<ImportBatch>(`/admin/imports/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/zip', 'X-Parent-Authorization': grant }, body: file }, response => response.json(), 300000); }
   importStatus(grant: string, id: string) { return this.request<ImportBatch>(`/admin/imports/${encodeURIComponent(id)}`, 'GET', undefined, grant); }
   decideImport(grant: string, id: string, previewToken: string, decisions: ImportDecisions) { return this.request<ImportPreview>(`/admin/imports/${encodeURIComponent(id)}/decisions`, 'PUT', { previewToken, decisions }, grant); }

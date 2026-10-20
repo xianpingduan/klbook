@@ -18,6 +18,7 @@ import { ServiceUsageManager } from './ServiceUsageManager.tsx';
 import { TrashManager } from './TrashManager.tsx';
 import { ExportManager } from './ExportManager.tsx';
 import { ImportManager } from './ImportManager.tsx';
+import { BackupManager } from './BackupManager.tsx';
 import { LeaveContext } from './navigation.ts';
 import { OfflinePreparation } from './OfflinePreparation.tsx';
 
@@ -38,6 +39,7 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
   const { requestLeave } = useContext(LeaveContext);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [backupsStarted, setBackupsStarted] = useState(false);
   const [collecting, setCollecting] = useState(false);
   const [connection, setConnection] = useState('正在检查连接…');
   const admin = pages[path].surface === 'admin';
@@ -66,6 +68,10 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
     if (path === '/admin/exports' && grant) setExportsStarted(true);
     if (path === '/admin/imports' && grant) setImportsStarted(true);
   }, [collectionVisible, path, grant]);
+  useEffect(() => {
+    if (!grant) return;
+    if (path === '/admin/backups') setBackupsStarted(true);
+  }, [path, grant]);
   useEffect(() => {
     if (!grant) return;
     const timer = window.setTimeout(() => { setGrant(undefined); setError('管理验证已到期，请重新验证。当前未提交内容仍保留。'); }, Math.max(0, grant.expiresAt - Date.now()));
@@ -121,6 +127,9 @@ export function AuthenticatedWorkspace({ api, home, platform, path, navigate, on
       {trashStarted && <TrashManager api={api} grant={grant?.token} active={path === '/admin/trash'} onAccessError={accessError} />}
     </div>
     {path === '/admin/devices' && grant && <DeviceManager api={api} grant={grant.token} onAccessError={accessError} onSignedOut={deviceSignedOut} onRecoveryCode={recoveryCodeReady} />}
+    <div hidden={path !== '/admin/backups' || !grant} inert={path !== '/admin/backups' || !grant}>
+      {backupsStarted && <BackupManager api={api} grant={grant?.token} active={path === '/admin/backups'} onAccessError={accessError} />}
+    </div>
     <div hidden={path !== '/admin/exports' || !grant} inert={path !== '/admin/exports' || !grant}>
       {exportsStarted && <ExportManager api={api} grant={grant?.token} active={path === '/admin/exports'} onAccessError={accessError} />}
     </div>

@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 import { createApp } from './app.ts';
 import { checkExistingData, StartupStatus } from './startup.ts';
 
@@ -19,7 +20,9 @@ try {
     const { access } = await import('node:fs/promises');
     await access(join(staticDir, 'index.html')).catch(() => { throw new Error('网页构建文件缺失，请重新部署完整版本'); });
   }
-  app = createApp({ dataDir, allowedOrigins: origins, staticDir });
+  const serviceCandidate = process.env.KLBOOK_STARTUP_STATE ? dirname(dirname(process.env.KLBOOK_STARTUP_STATE)) : undefined;
+  const serviceDir = serviceCandidate && existsSync(join(serviceCandidate, 'deployment.json')) ? serviceCandidate : undefined;
+  app = createApp({ dataDir, allowedOrigins: origins, staticDir, serviceDir });
   const address = await app.listen({ host: '127.0.0.1', port });
   origins.push(address, address.replace('127.0.0.1', 'localhost'));
   await startup.report('ready', '应用已就绪');

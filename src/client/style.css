@@ -341,3 +341,4 @@ select:focus-visible, textarea:focus-visible { outline: 3px solid #ceac53; outli
 .import-comparison h5 { font-size: 1rem; margin: 0 0 .5rem; }
 .import-outcome { margin-block: 1.3rem; }
 @media (max-width: 600px) { .import-comparison { grid-template-columns: minmax(0, 1fr); } }
+.backup-path { overflow-wrap: anywhere; word-break: break-word; }
