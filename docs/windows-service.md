@@ -13,7 +13,7 @@
 
 ## 启动检查
 
-正式服务固定原数据目录及资料库身份，并启用 `KLBOOK_REQUIRE_EXISTING=1`。启动时先核对数据库、附件目录、写入权限、SQLite 完整性及外键、所有已登记原图和预览的 SHA-256，以及网页构建入口；通过后才开始监听业务端口。
+正式服务固定已校验的资料目录及资料库身份，并启用 `KLBOOK_REQUIRE_EXISTING=1`。启动时先核对数据库、附件目录、写入权限、SQLite 完整性及外键、所有已登记原图和预览的 SHA-256，以及网页构建入口；通过后才开始监听业务端口。
 
 目录丢失、附件损坏或接错资料库会退出并写明原因，不新建空资料库。修复后可在维护工具中重新启动。`logs/startup.json` 记录 checking/ready/failed/stopped、时间和进程；不包含密码、服务密钥或题目内容。未启用常驻模式的首次手动启动仍支持原有家庭初始化流程。
 
@@ -80,6 +80,12 @@ WinSW 使用官方 [2.12.0 发布](https://github.com/winsw/winsw/releases/tag/v
 迁移方案：服务程序使用 `C:\ProgramData\klbook\service`，资料使用 `C:\ProgramData\klbook\data`；先停服制作一致备份，再创建受限目录并复制，逐表逐附件核对后切换。新副本不使用用户专属 EFS 加密，以 Windows 目录权限限制为原用户、管理员、SYSTEM 与 LocalService；服务账号对程序只读，对专用资料目录可写。原加密目录和备份保留。该方案改变新副本的静态存储保护方式，必须取得用户同意，不能因用户允许安装服务就自动解密或迁移。当前用户已于 2026-10-20 明确同意此方案，实际执行结果见[验收记录](verification/issue-22.md)。
 
 如果用户希望继续保留原 EFS 保护，应保持现有手动运行方式，另行明确是否接受“登录 Windows 后启动”的需求调整。
+
+### 管理员终端找不到旧目录时
+
+同一 Windows 用户下，打包应用启动的进程与外部管理员终端可能看到不同的 `AppData` 文件视图。Windows 可以把写入重定向到应用的 `LocalCache`，因此仅把当前环境中的绝对路径交给系统服务，仍可能报告路径不存在。[微软打包应用文件系统说明](https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-behind-the-scenes)。
+
+本机已通过 Windows 文件句柄的实际路径确认这一情况。迁移时使用核实后的物理源路径，并在停服前核对原家庭资料库身份、附件和凭据文件可读性；备份及失败恢复也使用同一物理源。原 `deployment.json` 内的逻辑路径仅作为原安装身份记录，不直接传给外部服务。目标仍为已批准的 `C:\ProgramData\klbook`，不修改 Windows 的应用虚拟化策略、不删除原加密资料。
 
 ## 实机验收
 
