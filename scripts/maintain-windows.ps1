@@ -1,8 +1,9 @@
-﻿param([Parameter(Mandatory=$true)][string]$ServiceDir, [ValidateSet('Window','Status','Start','Stop','Restart')][string]$Action='Window')
+﻿param([Parameter(Mandatory=$true)][string]$ServiceDir, [ValidateSet('Window','Status','CheckStorage','Start','Stop','Restart')][string]$Action='Window')
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'windows-service.psm1') -Force
 $config = Read-KlbookDeployment $ServiceDir
 $maintenancePath = $PSCommandPath
+if ($Action -eq 'CheckStorage') { Assert-KlbookServiceStorage $config; Write-Output '目录检查通过，未发现 EFS 加密文件'; exit 0 }
 if ($Action -eq 'Status') { Get-KlbookStatus $config | ConvertTo-Json -Depth 5; exit 0 }
 if ($Action -ne 'Window') { Invoke-KlbookControl $config $Action | ConvertTo-Json -Depth 5; exit 0 }
 Add-Type -AssemblyName System.Windows.Forms

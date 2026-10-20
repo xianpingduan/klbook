@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'windows-service.psm1') -Force
 Assert-KlbookAdmin
 $config = Read-KlbookDeployment $ServiceDir
+Assert-KlbookServiceStorage $config
 if (@(Get-Service -Name KlbookApp,KlbookGateway -ErrorAction SilentlyContinue).Count) { throw '服务已存在，未覆盖。请先核对原安装。' }
 if (@(Get-NetTCPConnection -State Listen -LocalPort $config.backendPort,$config.port,$config.certificatePort -ErrorAction SilentlyContinue).Count) { throw '应用或网关端口仍占用，请先停止原临时进程。' }
 if ((Get-FileHash -LiteralPath $config.rootCertificate).Hash -ne $config.rootSha256) { throw '根证书与准备记录不符。' }

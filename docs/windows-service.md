@@ -38,7 +38,13 @@ npm.cmd run build
 
 WinSW 使用官方 [2.12.0 发布](https://github.com/winsw/winsw/releases/tag/v2.12.0)的 `WinSW.NET461.exe`，SHA-256 为 `b5066b7bbdfba1293e5d15cda3caaea88fbeab35bd5b38c41c913d492aadfc4f`。该摘要是首次从官方 HTTPS 发布获取后固定的文件摘要，不冒称发布方签名；本机文件版本 2.12.0.0，Windows .NET Framework Release 值 534296。Node 与 Caddy 实际版本记录于准备目录的 `deployment.json`。
 
-核对生成的 `deployment.json`、两个 XML、`Caddyfile` 和维护脚本，停止已确认身份的旧临时应用及网关进程，再在管理员 PowerShell 执行：
+核对生成的 `deployment.json`、两个 XML、`Caddyfile` 和维护脚本。先在旧服务仍运行时检查存储：
+
+```powershell
+& '<ServiceDir>\scripts\maintain-windows.ps1' -ServiceDir '<ServiceDir>' -Action CheckStorage
+```
+
+若目录或其中任何文件使用用户专属 EFS 加密，准备/安装工具会拒绝继续。目录 ACL 放行不等于服务账号获得了解密密钥；工具不自动解密原资料。通过后才停止已确认身份的旧临时应用及网关进程，再在管理员 PowerShell 执行：
 
 ```powershell
 & '<ServiceDir>\scripts\install-windows-service.ps1' -ServiceDir '<ServiceDir>'
@@ -66,6 +72,14 @@ WinSW 使用官方 [2.12.0 发布](https://github.com/winsw/winsw/releases/tag/v
 证书下载保留在 `http://<家庭电脑IP>:8080`（准备参数 `CertificatePort` 可调整）。HTTP 仅允许入口说明和公开根证书，其余路径返回 404，账号和题目仍只能通过 HTTPS 访问。安装前请在电脑上核对根证书，不能只信任下载页面自身显示的摘要。
 
 资料、服务凭据密钥仍保留在原 data 目录；程序文件和资料分开。停止服务不是删除资料。升级前停止两个服务并备份一致的 SQLite、附件、密钥及网关状态，换入经过验证的完整构建后再启动；不要把源码的 `dist` 更新当作独立运行副本已自动更新。完整备份/恢复及每天备份分别由 #23/#24 实施。
+
+### 原目录采用 EFS 时
+
+本机已发现用户 `AppData` 及其服务程序、家庭数据库采用 EFS。LocalService 与当前 Windows 用户身份不同，不能仅靠增加目录权限访问用户专属加密文件。[微软 EFS 说明](https://learn.microsoft.com/en-us/windows/win32/fileio/file-encryption)。
+
+待用户确认的迁移方案：服务程序使用 `C:\ProgramData\klbook\service`，资料使用 `C:\ProgramData\klbook\data`；先停服制作一致备份，再创建受限目录并复制，逐表逐附件核对后切换。新副本不使用用户专属 EFS 加密，以 Windows 目录权限限制为原用户、管理员、SYSTEM 与 LocalService；服务账号对程序只读，对专用资料目录可写。原加密目录和备份保留。该方案改变新副本的静态存储保护方式，必须取得用户同意，不能因用户允许安装服务就自动解密或迁移。
+
+如果用户希望继续保留原 EFS 保护，应保持现有手动运行方式，另行明确是否接受“登录 Windows 后启动”的需求调整。
 
 ## 实机验收
 

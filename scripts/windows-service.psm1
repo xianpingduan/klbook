@@ -52,6 +52,18 @@ function Assert-KlbookAdmin {
     $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
     if (!$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw '安装和启停 Windows 服务需要管理员权限，请使用“以管理员身份运行”。' }
 }
+function Assert-KlbookServiceStorage($Config) {
+    foreach ($root in @($Config.serviceDir, $Config.dataDir) | Select-Object -Unique) {
+        $directory = Get-Item -LiteralPath $root -Force
+        if (!$directory.PSIsContainer) { throw '服务与资料路径必须是现有本地目录。' }
+        $encrypted = [bool]($directory.Attributes -band [IO.FileAttributes]::Encrypted)
+        if (!$encrypted) {
+            $encrypted = [bool](Get-ChildItem -LiteralPath $root -Recurse -Force |
+                Where-Object { $_.Attributes -band [IO.FileAttributes]::Encrypted } | Select-Object -First 1)
+        }
+        if ($encrypted) { throw "目录或文件使用了用户专属 EFS 加密，LocalService 不能直接使用：$root。请先确认专用服务目录方案；工具不会自动解密原资料。" }
+    }
+}
 function Invoke-KlbookControl($Config, [string]$Action) {
     Assert-KlbookAdmin
     $services = @(Get-KlbookServices $Config)
@@ -78,4 +90,4 @@ function Invoke-KlbookControl($Config, [string]$Action) {
     }
     return Get-KlbookStatus $Config
 }
-Export-ModuleMember -Function Read-KlbookDeployment,Get-KlbookServices,Get-KlbookStatus,Assert-KlbookAdmin,Invoke-KlbookControl
+Export-ModuleMember -Function Read-KlbookDeployment,Get-KlbookServices,Get-KlbookStatus,Assert-KlbookAdmin,Assert-KlbookServiceStorage,Invoke-KlbookControl

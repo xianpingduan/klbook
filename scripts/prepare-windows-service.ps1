@@ -150,4 +150,6 @@ if ($LASTEXITCODE -ne 0) { throw 'Prepared runtime failed. No system services we
 if ($LASTEXITCODE -ne 0) { throw 'Prepared gateway failed validation. No services installed.' }
 $maintenanceCmd = '@powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0scripts\maintain-windows.ps1" -ServiceDir "%~dp0."'
 [IO.File]::WriteAllText((Join-Path $destination 'maintenance.cmd'), $maintenanceCmd, [Text.Encoding]::ASCII)
+Import-Module (Join-Path $PSScriptRoot 'windows-service.psm1') -Force
+Assert-KlbookServiceStorage $manifest
 Write-Output "PREPARED=$destination"
