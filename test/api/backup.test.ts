@@ -293,3 +293,49 @@ test('快照完成后永久删除源题目，清理仍保护这次备份引用�
     assert.deepEqual((await restored.inject({ url: `/api/v1/collection/pages/${last!.originalPage.id}/original`, headers })).rawPayload, bytes);
   } finally { await restored?.close(); await f.close(); await rm(directory, { recursive: true, force: true }); }
 });
+
+test('正式服务配置和网关证书单独备份，恢复后供核对而不覆盖正在使用的运行目录', async () => {
+  const f = await familyFixture(), directory = await mkdtemp(join(tmpdir(), 'klbook-backup-runtime-'));
+  let running: ReturnType<typeof createApp> | undefined;
+  try {
+    const headers = await parent(f), serviceDir = join(directory, 'service'), backupsDir = join(directory, 'backups');
+    await mkdir(join(serviceDir, 'gateway-state', 'pki', 'authorities', 'local'), { recursive: true });
+    await mkdir(backupsDir);
+    const ownerSid = process.platform === 'win32'
+      ? (await exec('whoami.exe', ['/user', '/fo', 'csv', '/nh'], { windowsHide: true })).stdout.match(/S-1-(?:\d+-)*\d+/)![0]
+      : undefined;
+    const configFiles = {
+      'deployment.json': JSON.stringify({ dataDir: f.dataDir, serviceDir, ownerSid, libraryId: f.first.library.id }),
+      Caddyfile: 'localhost:8443 { tls internal }\n',
+      'KlbookApp.xml': '<service><id>KlbookApp</id></service>',
+      'KlbookGateway.xml': '<service><id>KlbookGateway</id></service>',
+      'gateway-state/pki/authorities/local/root.crt': 'synthetic certificate',
+      'gateway-state/pki/authorities/local/root.key': 'synthetic certificate key'
+    };
+    for (const [path, content] of Object.entries(configFiles)) await writeFile(join(serviceDir, path), content);
+    await writeFile(join(serviceDir, 'unrelated.log'), 'not part of runtime configuration');
+    await f.app.close();
+    running = createApp({ dataDir: f.dataDir, serviceDir });
+    assert.equal((await running.inject({ method: 'PUT', url: `${root}/settings`, headers, payload: { directory: serviceDir, expectedRevision: 0 } })).statusCode, 422);
+    assert.equal((await running.inject({ method: 'PUT', url: `${root}/settings`, headers, payload: { directory: backupsDir, expectedRevision: 0 } })).statusCode, 200);
+    const make = async () => {
+      const id = randomUUID();
+      assert.equal((await running!.inject({ method: 'PUT', url: `${root}/runs/${id}`, headers, payload: { expectedRevision: 1 } })).statusCode, 202);
+      return finished({ ...f, app: running! }, headers, id);
+    };
+    const job = await make(); assert.equal(job.status, 'succeeded', job.message);
+    const target = join(directory, 'restored');
+    await assert.rejects(exec(process.execPath, [resolve('src/server/backup-cli.ts'), 'restore', '--source', job.path, '--target', target]), /with-system/);
+    await exec(process.execPath, [resolve('src/server/backup-cli.ts'), 'restore', '--source', job.path, '--target', target, '--with-system']);
+    for (const [path, content] of Object.entries(configFiles)) {
+      assert.equal(await readFile(join(target, 'system-restore/runtime', path), 'utf8'), content);
+      assert.equal(await readFile(join(serviceDir, path), 'utf8'), content);
+    }
+    assert.equal(await stat(join(target, 'deployment.json')).then(() => true, () => false), false);
+    assert.equal(await stat(join(target, 'system-restore/runtime/unrelated.log')).then(() => true, () => false), false);
+    await rename(join(serviceDir, 'KlbookGateway.xml'), join(serviceDir, 'KlbookGateway.unavailable'));
+    assert.equal((await make()).status, 'failed');
+    assert.equal((await running.inject({ url: root, headers })).json().lastSuccess.id, job.id);
+    assert.equal(JSON.parse((await exec(process.execPath, [resolve('src/server/backup-cli.ts'), 'verify', '--source', job.path])).stdout).status, 'verified');
+  } finally { await running?.close(); await f.close(); await rm(directory, { recursive: true, force: true }); }
+});
