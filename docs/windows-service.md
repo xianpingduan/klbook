@@ -1,0 +1,73 @@
+# Windows 自动启动与电脑维护
+
+对应 [任务 #22](https://github.com/xianpingduan/klbook/issues/22)。沿用已选的 Windows 原生服务部署；SQLite 是随应用加载的本地库，不需要另启动数据库服务器。
+
+## 运行方式
+
+- `KlbookApp`：WinSW 包装 Node 后端，只监听本机回环地址。
+- `KlbookGateway`：WinSW 包装 Caddy，依赖 `KlbookApp`，提供原家庭局域网 HTTPS 入口。
+- 两者以无密码的 `NT AUTHORITY\LocalService` 运行，设置自动延迟启动。异常退出依次等 30、60、120 秒重试，之后每 120 秒重试；不会自动重启电脑或更改休眠策略。
+- 服务账号对程序只有读取/执行权限，只能修改指定数据目录、日志和证书状态目录。准备目录复制完整构建、生产依赖和运行时，后续运行无需打开开发工具或依赖源码目录。
+
+配置依据：[WinSW 2.12.0 配置文档](https://github.com/winsw/winsw/blob/v2.12.0/doc/xmlConfigFile.md)、[微软 LocalService 说明](https://learn.microsoft.com/en-us/windows/win32/services/localservice-account)。安装、启停系统服务需要 Windows 管理员权限。
+
+## 启动检查
+
+正式服务固定原数据目录及资料库身份，并启用 `KLBOOK_REQUIRE_EXISTING=1`。启动时先核对数据库、附件目录、写入权限、SQLite 完整性及外键、所有已登记原图和预览的 SHA-256，以及网页构建入口；通过后才开始监听业务端口。
+
+目录丢失、附件损坏或接错资料库会退出并写明原因，不新建空资料库。修复后可在维护工具中重新启动。`logs/startup.json` 记录 checking/ready/failed/stopped、时间和进程；不包含密码、服务密钥或题目内容。未启用常驻模式的首次手动启动仍支持原有家庭初始化流程。
+
+维护工具同时检查两个 Windows 服务、当前进程、后端接口和严格验证证书的 HTTPS 请求；只有全部就绪才显示可用，不能把端口监听或 SCM 的 Running 单独当作业务就绪。
+
+## 准备与安装
+
+先完成原家庭初始化及一次完整备份，构建当前版本。准备工具只接受独立且不存在的目标目录，保留原资料和原根证书，不覆盖已有服务目录。
+
+```powershell
+npm.cmd run build
+.\scripts\prepare-windows-service.ps1 `
+  -ServiceDir "$env:LOCALAPPDATA\klbook\service" `
+  -DataDir "$env:LOCALAPPDATA\klbook\data" `
+  -GatewayDir '<已有网关目录>' `
+  -NodeExe '<Node 24 的 node.exe>' `
+  -CaddyExe '<已验证的 caddy.exe>' `
+  -WinSWExe '<WinSW.NET461.exe>'
+```
+
+WinSW 使用官方 [2.12.0 发布](https://github.com/winsw/winsw/releases/tag/v2.12.0)的 `WinSW.NET461.exe`，SHA-256 为 `b5066b7bbdfba1293e5d15cda3caaea88fbeab35bd5b38c41c913d492aadfc4f`。该摘要是首次从官方 HTTPS 发布获取后固定的文件摘要，不冒称发布方签名；本机文件版本 2.12.0.0，Windows .NET Framework Release 值 534296。Node 与 Caddy 实际版本记录于准备目录的 `deployment.json`。
+
+核对生成的 `deployment.json`、两个 XML、`Caddyfile` 和维护脚本，停止已确认身份的旧临时应用及网关进程，再在管理员 PowerShell 执行：
+
+```powershell
+& '<ServiceDir>\scripts\install-windows-service.ps1' -ServiceDir '<ServiceDir>'
+```
+
+安装脚本会验证原资料库、拒绝覆盖已有同名服务或占用端口，授予限定目录权限，注册服务，并添加只允许本机局域网地址、HTTPS 端口、LocalSubnet 和新 Caddy 程序的防火墙规则 `Klbook-Service-HTTPS`。不开放后端回环端口、不安装系统信任根、不修改旧规则。启动失败时撤销本次新建服务和防火墙规则，保留目录、诊断与资料，便于修复后重新安装。
+
+## 电脑维护入口
+
+开始菜单搜索 **错题集电脑维护**，或打开安装目录中的 `maintenance.cmd`。窗口能刷新状态、查看日志、启动、停止和重新启动；后端已停止时仍可使用。启停需要管理员授权，停止/重启前提示保存当前编辑。普通查看状态不需要管理员权限。
+
+也可运行命令：
+
+```powershell
+& '<ServiceDir>\scripts\maintain-windows.ps1' -ServiceDir '<ServiceDir>' -Action Status
+# 管理员 PowerShell：Action 可选 Start、Stop、Restart
+```
+
+维护窗口显示实际运行版本、数据目录和局域网入口。日志位于 `logs`，各服务日志按大小轮换，保留五份；如服务未启动，先阅读 `startup.json` 和对应 wrapper/err 日志。端口占用时核对占用程序，工具不会结束其他程序。局域网 IP 改变需重新核对 Caddy 绑定、允许来源及防火墙规则；固定 DHCP 租约有助于维持原网页入口。
+
+## 证书与数据保护
+
+准备时复制原 Caddy 状态及公开根证书并核对摘要，保持已信任该根的手机连接方式。公开根在 `public/klbook-root.crt`；私钥只在 `gateway-state`。新设备仍需按[局域网采集步骤](lan-capture.md)信任根证书。维护探测显式使用该根，不关闭 TLS 校验。
+
+资料、服务凭据密钥仍保留在原 data 目录；程序文件和资料分开。停止服务不是删除资料。升级前停止两个服务并备份一致的 SQLite、附件、密钥及网关状态，换入经过验证的完整构建后再启动；不要把源码的 `dist` 更新当作独立运行副本已自动更新。完整备份/恢复及每天备份分别由 #23/#24 实施。
+
+## 实机验收
+
+1. 保存所有工作，用户手动重启电脑。验证未打开开发工具时两个服务自动启动，维护入口显示全部就绪。
+2. 同一 Wi-Fi 的手机使用原 HTTPS 地址登录/恢复会话，打开既有题目和原图，核对题目数量及内容。
+3. 电脑维护入口停止服务，确认手机提示无法连接并保留未同步材料；维护窗口仍能查看状态及重新启动。
+4. 重新启动后手机重试，确认材料可找回且不重复；记录设备、浏览器、时间、服务自动状态和手动启停结果。
+
+服务进程重启、隔离目录故障与桌面浏览器自动化均不能代替真实电脑重启和第二设备验收；未完成项在任务中保留开放。
