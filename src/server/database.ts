@@ -198,7 +198,11 @@ const migrations = [
   CREATE TABLE importIdentities (sourceLibraryId TEXT NOT NULL, kind TEXT NOT NULL, sourceId TEXT NOT NULL,
     targetId TEXT NOT NULL, sourceHash TEXT NOT NULL, localHash TEXT NOT NULL, PRIMARY KEY(sourceLibraryId, kind, sourceId));
   CREATE TABLE importReceipts (id TEXT PRIMARY KEY, libraryId TEXT NOT NULL, accountId TEXT NOT NULL, packageHash TEXT NOT NULL, previewToken TEXT NOT NULL, result TEXT NOT NULL);
-  CREATE TABLE importPendingPages (id TEXT PRIMARY KEY);`
+  CREATE TABLE importPendingPages (id TEXT PRIMARY KEY);`,
+  `CREATE TABLE importVersions (sourceLibraryId TEXT NOT NULL, kind TEXT NOT NULL, sourceId TEXT NOT NULL, versionHash TEXT NOT NULL,
+    targetId TEXT NOT NULL, sourceHash TEXT NOT NULL, localHash TEXT NOT NULL, PRIMARY KEY(sourceLibraryId, kind, sourceId, versionHash));
+  CREATE TABLE questionImportOrigins (questionId TEXT PRIMARY KEY REFERENCES questions(id) ON DELETE CASCADE,
+    sourceLibraryId TEXT NOT NULL, sourceId TEXT NOT NULL, sourceRevision INTEGER NOT NULL, learnerName TEXT NOT NULL, isCopy INTEGER NOT NULL);`
 ];
 
 export function openDatabase(dataDir: string) {

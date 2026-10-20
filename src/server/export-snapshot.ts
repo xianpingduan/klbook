@@ -8,9 +8,9 @@ import { fileHash } from './attachments.ts';
 import type { CollectionStore } from './collection-store.ts';
 
 /** Caller owns the short SQLite transaction; no file I/O occurs here. */
-export function exportSnapshot(db: Database.Database, collection: CollectionStore, home: Home, now: number) {
-  const questions = db.prepare<[string, string], { id: string }>(`SELECT id FROM questions WHERE libraryId = ? AND learnerId = ?
-    AND state = 'collected' AND cancelledAt IS NULL AND NOT EXISTS (SELECT 1 FROM questionDeletions WHERE id = questions.id) ORDER BY id`).all(home.library.id, home.library.learnerId).map(row => collection.get(home.library.id, row.id));
+export function exportSnapshot(db: Database.Database, collection: CollectionStore, home: Home, now: number, includeTrashed = false) {
+  const questions = db.prepare<[string, string, number], { id: string }>(`SELECT id FROM questions WHERE libraryId = ? AND learnerId = ?
+    AND state = 'collected' AND cancelledAt IS NULL AND (? OR NOT EXISTS (SELECT 1 FROM questionDeletions WHERE id = questions.id)) ORDER BY id`).all(home.library.id, home.library.learnerId, includeTrashed ? 1 : 0).map(row => collection.get(home.library.id, row.id, includeTrashed));
   const pages = new Map<string, StoredPage>();
   const part = (value: QuestionPart): PackagePart => {
     if (!pages.has(value.originalPage.id)) pages.set(value.originalPage.id, db.prepare<[string, string], StoredPage>('SELECT * FROM originalPages WHERE libraryId = ? AND id = ?').get(home.library.id, value.originalPage.id)!);

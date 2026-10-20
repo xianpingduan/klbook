@@ -40,6 +40,7 @@ async function exported(f: Family, headers: ReturnType<typeof auth>) {
 }
 const upload = (f: Family, headers: ReturnType<typeof auth>, id: string, bytes: Buffer) => f.app.inject({ method: 'PUT', url: `${root}/${id}`, headers: { ...headers, 'content-type': 'application/zip' }, payload: bytes });
 const confirm = (f: Family, headers: ReturnType<typeof auth>, id: string, token: string) => f.app.inject({ method: 'POST', url: `${root}/${id}/confirm`, headers, payload: { previewToken: token } });
+const decide = (f: Family, headers: ReturnType<typeof auth>, id: string, token: string, decisions: unknown) => f.app.inject({ method: 'PUT', url: `${root}/${id}/decisions`, headers, payload: { previewToken: token, decisions } });
 async function repack(bytes: Buffer, change: (files: Map<string, Buffer>, data: any, manifest: any) => void) {
   const files = await packageFiles(bytes), data = JSON.parse(files.get('data.json')!.toString()), manifest = JSON.parse(files.get('manifest.json')!.toString());
   change(files, data, manifest);
@@ -64,10 +65,17 @@ test('家长校验预览真实导出包，确认后完整入库；同一提交�
     assert.equal(response.statusCode, 200, response.body);
     const preview = response.json();
     assert.equal(preview.status, 'preview'); assert.equal(preview.added, 1); assert.equal(preview.skipped, 0); assert.deepEqual(preview.blockers, []);
+    const material = preview.questions[0].incoming.material;
+    const pictureUrl = `${root}/${id}/pages/${material.pageId}/preview`;
+    assert.equal((await target.app.inject({ url: pictureUrl })).statusCode, 401);
+    assert.equal((await target.app.inject({ url: pictureUrl, headers: auth(target.first.token) })).statusCode, 403);
+    const picture = await target.app.inject({ url: pictureUrl, headers }); assert.equal(picture.statusCode, 200, picture.body);
+    const meta = await sharp(picture.rawPayload).metadata(); assert.equal(meta.width, 120); assert.equal(meta.height, 180);
     assert.equal((await target.app.inject({ url: '/api/v1/collection/questions?state=collected', headers: auth(target.first.token) })).json().total, 0, '预览不能暴露资料');
     const payload = { previewToken: preview.token };
     const applied = await target.app.inject({ method: 'POST', url: `${root}/${id}/confirm`, headers, payload });
     assert.equal(applied.statusCode, 200, applied.body); assert.equal(applied.json().status, 'complete');
+    assert.equal((await target.app.inject({ url: pictureUrl, headers })).statusCode, 404, '完成后不再提供暂存包图片');
     assert.deepEqual((await target.app.inject({ method: 'POST', url: `${root}/${id}/confirm`, headers, payload })).json(), applied.json());
     const items = (await target.app.inject({ url: '/api/v1/collection/questions?state=collected', headers: auth(target.first.token) })).json();
     assert.equal(items.total, 1);
@@ -106,6 +114,13 @@ test('完整往返保留跨页顺序、答案、共享原文、识别更正和�
     let run;
     for (let i = 0; i < 100; i++) { run = (await source.app.inject({ url: `/api/v1/collection/pages/${pageId}/recognitions/${runId}`, headers })).json(); if (run.status !== 'running') break; await new Promise(resolve => setTimeout(resolve, 10)); }
     assert.equal(run.status, 'succeeded');
+    const unusedRunId = randomUUID();
+    await source.app.inject({ method: 'PUT', url: `/api/v1/collection/pages/${pageId}/recognitions/${unusedRunId}`, headers });
+    for (let i = 0; i < 100; i++) {
+      const unused = (await source.app.inject({ url: `/api/v1/collection/pages/${pageId}/recognitions/${unusedRunId}`, headers })).json();
+      if (unused.status !== 'running') { assert.equal(unused.status, 'succeeded'); break; }
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
     // Select the source while active, then retain it after deactivation.
     await source.app.inject({ method: 'PUT', url: `/api/v1/admin/sources/${sourceId}`, headers: sourceParent, payload: { operationId: randomUUID(), expectedRevision: 1, name: '自编练习', active: true } });
     const fields = { state: 'collected', subjectId, sourceId, region: whole, pageNumber: '12', questionNumber: '4', note: '从另页开始读', readingMaterialId: readingId };
@@ -119,7 +134,10 @@ test('完整往返保留跨页顺序、答案、共享原文、识别更正和�
     await source.app.inject({ method: 'PUT', url: `/api/v1/admin/sources/${sourceId}`, headers: sourceParent, payload: { operationId: randomUUID(), expectedRevision: 2, name: '自编练习（旧）', active: false } });
     const pack = await exported(source, sourceParent), id = randomUUID();
     const previewResponse = await upload(target, targetParent, id, pack); assert.equal(previewResponse.statusCode, 200, previewResponse.body);
-    const preview = previewResponse.json(); assert.deepEqual(preview.blockers, []); assert.equal(preview.added, 2);
+    assert.equal(previewResponse.json().subjects.find((s: any) => s.id === subjectId).action, 'blocked');
+    const mapped = await decide(target, targetParent, id, previewResponse.json().token, { questions: [], subjects: [{ id: subjectId, newName: '综合实践' }] });
+    assert.equal(mapped.statusCode, 200, mapped.body);
+    const preview = mapped.json(); assert.deepEqual(preview.blockers, []); assert.equal(preview.added, 2);
     assert.ok(preview.subjects.some((s: any) => s.name === '综合实践' && s.action === 'new'));
     const settingsBefore = await Promise.all(['ocr', 'speech', 'ai'].map(async name => (await target.app.inject({ url: `/api/v1/admin/${name}`, headers: targetParent })).json()));
     assert.ok(settingsBefore.every(s => s.config.enabled === false));
@@ -136,8 +154,36 @@ test('完整往返保留跨页顺序、答案、共享原文、识别更正和�
     const importedRun = (await target.app.inject({ url: `/api/v1/collection/pages/${q.parts[1].originalPage.id}/recognitions/${q.parts[1].recognition.runId}`, headers: auth(target.first.token) })).json();
     assert.equal(importedRun.lines[0].text, '1. 计算 12 × 3 ='); assert.equal(importedRun.provider, 'imported'); assert.equal(importedRun.attempts, 0);
     assert.equal(importedRun.candidates[0].id, q.parts[1].recognition.candidateId);
+    assert.equal((await target.app.inject({ url: `/api/v1/collection/pages/${q.parts[1].originalPage.id}/recognitions`, headers: auth(target.first.token) })).json().runs.length, 2, '保留页面上未被题目采用的识别记录');
     const again = (await upload(target, targetParent, randomUUID(), pack)).json(); assert.equal(again.skipped, 2); assert.deepEqual(again.blockers, []);
     assert.deepEqual(await Promise.all(['ocr', 'speech', 'ai'].map(async name => (await target.app.inject({ url: `/api/v1/admin/${name}`, headers: targetParent })).json())), settingsBefore);
+    assert.equal(supplierCalls, 0);
+    const peer = (await target.login('另一台设备')).json(), reading = q.readingMaterial;
+    const localSource = (await target.app.inject({ url: '/api/v1/admin/sources', headers: targetParent })).json().find((s: any) => s.id === q.sourceId);
+    assert.equal((await target.app.inject({ method: 'PUT', url: `/api/v1/admin/sources/${q.sourceId}`, headers: targetParent, payload: { operationId: randomUUID(), expectedRevision: localSource.revision, name: '本机已更正的来源', active: false } })).statusCode, 200);
+    const matchingSourceId = randomUUID();
+    assert.equal((await target.app.inject({ method: 'PUT', url: `/api/v1/admin/sources/${matchingSourceId}`, headers: targetParent, payload: { operationId: randomUUID(), expectedRevision: 0, name: '自编练习（旧）', active: true } })).statusCode, 200);
+    const update = await target.app.inject({ method: 'PUT', url: `/api/v1/collection/reading-materials/${reading.id}`, headers: auth(peer.token), payload: { operationId: randomUUID(), expectedRevision: reading.revision, title: '本机已经更正的原文', parts: reading.parts.map((p: any) => ({ id: p.id, pageId: p.originalPage.id, region: p.region })) } });
+    assert.equal(update.statusCode, 200, update.body);
+    // A shared material change affects both questions even when their own revisions did not change.
+    const copyId = randomUUID(), conflicts = (await upload(target, targetParent, copyId, pack)).json();
+    assert.equal(conflicts.conflicts, 2);
+    const choices = await decide(target, targetParent, copyId, conflicts.token, { questions: [{ id: first.question.id, action: 'copy' }], subjects: [] });
+    assert.equal(choices.statusCode, 200, choices.body);
+    const copied = await confirm(target, targetParent, copyId, choices.json().token); assert.equal(copied.statusCode, 200, copied.body); assert.equal(copied.json().copied, 1);
+    const copy = (await target.app.inject({ url: `/api/v1/collection/questions/${copied.json().questionIds[0]}`, headers: auth(peer.token) })).json();
+    assert.equal(copy.parts[0].transcription, '第二页在前'); assert.equal(copy.answerParts.length, 1); assert.equal(copy.readingMaterial.title, '共同原文');
+    assert.equal(copy.sourceId, matchingSourceId); assert.equal(copy.source, '自编练习（旧）');
+    assert.notEqual(copy.readingMaterial.id, reading.id); assert.deepEqual(copy.studyStage, q.studyStage); assert.equal(copy.collectedAt, q.collectedAt);
+    for (const p of [...copy.parts, ...copy.answerParts, ...copy.readingMaterial.parts]) assert.deepEqual((await target.app.inject({ url: `/api/v1/collection/pages/${p.originalPage.id}/original`, headers: auth(peer.token) })).rawPayload, first.bytes);
+    assert.equal((await target.app.inject({ url: `/api/v1/collection/questions/${q.id}`, headers: auth(peer.token) })).json().readingMaterial.title, '本机已经更正的原文');
+    const nextId = randomUUID(), next = (await upload(target, targetParent, nextId, pack)).json();
+    assert.equal(next.skipped, 1); assert.equal(next.conflicts, 1, '已有共享原文副本时，另一个原题仍需核对本机已改的原文');
+    const otherChoice = await decide(target, targetParent, nextId, next.token, { questions: [{ id: other.json().id, action: 'copy' }], subjects: [] });
+    assert.equal(otherChoice.statusCode, 200, otherChoice.body);
+    const both = await confirm(target, targetParent, nextId, otherChoice.json().token); assert.equal(both.statusCode, 200, both.body);
+    const all = (await target.app.inject({ url: '/api/v1/collection/questions?state=collected', headers: auth(peer.token) })).json(); assert.equal(all.total, 4);
+    assert.equal(all.items.filter((q: any) => q.readingMaterial.id === copy.readingMaterial.id).length, 2);
     assert.equal(supplierCalls, 0);
   } finally { await source.close(); await target.close(); }
 });
@@ -172,7 +218,7 @@ test('坏包、缺图、未知版本与非法关联不改变原资料；兼容�
   } finally { await source.close(); await target.close(); }
 });
 
-test('已有修改、回收站和同名异源学科阻止整批提交，预览后变化也不能覆盖', async () => {
+test('已有修改和回收站明确分类，未对应学科及陈旧预览不能静默提交', async () => {
   const source = await familyFixture(), target = await familyFixture();
   try {
     const first = await sample(source), pack = await exported(source, await parent(source)), headers = await parent(target);
@@ -184,11 +230,11 @@ test('已有修改、回收站和同名异源学科阻止整批提交，预览�
     const edited = await target.app.inject({ method: 'PUT', url: `/api/v1/collection/questions/${qid}`, headers: localHeaders, payload: { operationId: randomUUID(), expectedRevision: q.revision, state: q.state, subjectId: q.subjectId, sourceId: q.sourceId, region: q.region, pageNumber: q.pageNumber, questionNumber: q.questionNumber, note: '目标库的新修改' } });
     assert.equal(edited.statusCode, 200, edited.body);
     assert.equal((await confirm(target, headers, repeatId, old.token)).statusCode, 409);
-    const changed = (await target.app.inject({ url: `${root}/${repeatId}`, headers })).json(); assert.ok(changed.blockers.some((s: string) => /修改/.test(s)));
+    const changed = (await target.app.inject({ url: `${root}/${repeatId}`, headers })).json(); assert.equal(changed.conflicts, 1); assert.equal(changed.kept, 1);
     assert.equal((await target.app.inject({ url: `/api/v1/collection/questions/${qid}`, headers: localHeaders })).json().note, '目标库的新修改');
     await target.app.inject({ method: 'PUT', url: `/api/v1/admin/trash/${qid}`, headers, payload: { operationId: randomUUID(), expectedRevision: edited.json().revision, action: 'trash' } });
-    const trashed = (await target.app.inject({ url: `${root}/${repeatId}`, headers })).json(); assert.ok(trashed.blockers.some((s: string) => /回收站/.test(s)));
-    assert.equal((await confirm(target, headers, repeatId, trashed.token)).statusCode, 409);
+    const trashed = (await target.app.inject({ url: `${root}/${repeatId}`, headers })).json(); assert.equal(trashed.trashed, 1); assert.equal(trashed.kept, 1);
+    assert.equal((await confirm(target, headers, repeatId, trashed.token)).statusCode, 200);
     await target.app.inject({ method: 'DELETE', url: `${root}/${repeatId}`, headers });
     const conflicting = await repack(pack, (_files, data) => { data.subjects[0].id = randomUUID(); data.questions[0].subjectId = data.subjects[0].id; data.questions[0].id = randomUUID(); });
     const collisionId = randomUUID(), collision = (await upload(target, headers, collisionId, conflicting)).json();
@@ -201,7 +247,7 @@ test('已有修改、回收站和同名异源学科阻止整批提交，预览�
     const draft = (await source.app.inject({ method: 'POST', url: '/api/v1/collection/drafts', headers: { ...auth(source.first.token), 'content-type': 'image/png', 'idempotency-key': randomUUID() }, payload: first.bytes })).json();
     const colliding = await repack(pack, (_files, data) => { data.questions[0].id = draft.id; });
     const noOverwriteDraft = (await upload(source, nativeHeaders, randomUUID(), colliding)).json();
-    assert.ok(noOverwriteDraft.blockers.some((s: string) => /修改|状态/.test(s)), '资料包身份碰撞到现有草稿时，不能预览成新增');
+    assert.equal(noOverwriteDraft.kept, 1, '资料包身份碰撞到现有草稿时，不能预览成新增'); assert.equal(noOverwriteDraft.added, 0);
   } finally { await source.close(); await target.close(); }
 });
 
@@ -229,5 +275,169 @@ test('真实存储故障整批不可见，修复可重试；授权到期与重�
       assert.equal((await restarted.inject({ url: '/api/v1/collection/questions?state=collected', headers: auth(target.first.token) })).json().total, 2);
       assert.deepEqual(await readdir(join(target.dataDir, 'import-work')), []);
     } finally { await restarted.close(); }
+  } finally { await source.close(); await target.close(); }
+});
+
+test('导入修改冲突默认保留当前版本；明确另存副本且重导同版本不重复', async () => {
+  const source = await familyFixture(), target = await familyFixture();
+  try {
+    const original = await sample(source), pack = await exported(source, await parent(source)), headers = await parent(target);
+    const firstId = randomUUID(), first = (await upload(target, headers, firstId, pack)).json();
+    const saved = (await confirm(target, headers, firstId, first.token)).json();
+    const qid = saved.questionIds[0], peer = (await target.login('第二设备')).json();
+    const local = (await target.app.inject({ url: `/api/v1/collection/questions/${qid}`, headers: auth(peer.token) })).json();
+    const edit = await target.app.inject({ method: 'PUT', url: `/api/v1/collection/questions/${qid}`, headers: auth(peer.token), payload: {
+      operationId: randomUUID(), expectedRevision: local.revision, state: local.state, subjectId: local.subjectId, sourceId: local.sourceId,
+      region: local.region, pageNumber: local.pageNumber, questionNumber: local.questionNumber, note: '本机新的思考'
+    } });
+    assert.equal(edit.statusCode, 200, edit.body);
+    const keepId = randomUUID(), keep = (await upload(target, headers, keepId, pack)).json();
+    assert.equal(keep.conflicts, 1); assert.equal(keep.kept, 1); assert.deepEqual(keep.blockers, []);
+    assert.equal(keep.questions[0].action, 'keep'); assert.equal(keep.questions[0].current.note, '本机新的思考');
+    const kept = await confirm(target, headers, keepId, keep.token); assert.equal(kept.statusCode, 200, kept.body); assert.equal(kept.json().kept, 1);
+    const copyId = randomUUID(), preview = (await upload(target, headers, copyId, pack)).json();
+    const choice = await decide(target, headers, copyId, preview.token, { questions: [{ id: original.question.id, action: 'copy' }], subjects: [] });
+    assert.equal(choice.statusCode, 200, choice.body); assert.equal(choice.json().copied, 1);
+    const applied = await confirm(target, headers, copyId, choice.json().token); assert.equal(applied.statusCode, 200, applied.body);
+    assert.equal(applied.json().copied, 1); assert.equal(applied.json().added, 0);
+    assert.deepEqual((await confirm(target, headers, copyId, choice.json().token)).json(), applied.json());
+    const all = (await target.app.inject({ url: '/api/v1/collection/questions?state=collected', headers: auth(peer.token) })).json();
+    assert.equal(all.total, 2); assert.equal(all.items.find((q: any) => q.id === qid).note, '本机新的思考');
+    const copied = all.items.find((q: any) => q.id !== qid); assert.equal(copied.note, original.question.note);
+    assert.equal(copied.importedFrom.questionId, original.question.id); assert.equal(copied.importedFrom.libraryId, original.question.libraryId);
+    assert.equal(copied.importedFrom.copy, true); assert.equal(copied.importedFrom.revision, original.question.revision);
+    assert.equal(copied.collectedAt, original.question.collectedAt); assert.deepEqual(copied.studyStage, original.question.studyStage);
+    const againId = randomUUID(), again = (await upload(target, headers, againId, pack)).json();
+    assert.equal(again.skipped, 1); assert.equal(again.copied, 0); assert.deepEqual(again.blockers, []);
+    assert.equal((await confirm(target, headers, againId, again.token)).statusCode, 200);
+    assert.equal((await target.app.inject({ url: '/api/v1/collection/questions?state=collected', headers: auth(peer.token) })).json().total, 2);
+    const changedCopy = await target.app.inject({ method: 'PUT', url: `/api/v1/collection/questions/${copied.id}`, headers: auth(peer.token), payload: { operationId: randomUUID(), expectedRevision: copied.revision, state: copied.state, subjectId: copied.subjectId, sourceId: copied.sourceId, region: copied.region, pageNumber: copied.pageNumber, questionNumber: copied.questionNumber, note: '副本也继续整理了' } });
+    assert.equal(changedCopy.statusCode, 200, changedCopy.body);
+    const editedId = randomUUID(), editedCopy = (await upload(target, headers, editedId, pack)).json();
+    assert.equal(editedCopy.kept, 1); assert.equal(editedCopy.questions[0].canCopy, false);
+    const unsupported = await decide(target, headers, editedId, editedCopy.token, { questions: [{ id: original.question.id, action: 'copy' }], subjects: [] });
+    assert.equal((await confirm(target, headers, editedId, unsupported.json().token)).statusCode, 409, '不能因副本后续修改而反复创建同版本副本');
+    await target.app.inject({ method: 'DELETE', url: `${root}/${editedId}`, headers });
+    const originalQ = original.question;
+    const changedSource = await source.app.inject({ method: 'PUT', url: `/api/v1/collection/questions/${originalQ.id}`, headers: auth(source.first.token), payload: { operationId: randomUUID(), expectedRevision: originalQ.revision, state: originalQ.state, subjectId: originalQ.subjectId, sourceId: originalQ.sourceId, region: originalQ.region, pageNumber: originalQ.pageNumber, questionNumber: originalQ.questionNumber, note: '来源的新版本' } });
+    assert.equal(changedSource.statusCode, 200, changedSource.body);
+    const newer = await exported(source, await parent(source)), newId = randomUUID(), newPreview = (await upload(target, headers, newId, newer)).json();
+    assert.equal(newPreview.questions[0].canCopy, true);
+    const newChoice = await decide(target, headers, newId, newPreview.token, { questions: [{ id: originalQ.id, action: 'copy' }], subjects: [] });
+    assert.equal((await confirm(target, headers, newId, newChoice.json().token)).statusCode, 200);
+    const versions = (await target.app.inject({ url: '/api/v1/collection/questions?state=collected', headers: auth(peer.token) })).json(); assert.equal(versions.total, 3);
+    assert.ok(versions.items.some((q: any) => q.note === '副本也继续整理了')); assert.ok(versions.items.some((q: any) => q.note === '来源的新版本'));
+  } finally { await source.close(); await target.close(); }
+});
+
+test('回收站同源题默认保持删除，明确恢复保留回收站当前内容和关联', async () => {
+  const source = await familyFixture(), target = await familyFixture();
+  try {
+    const original = await sample(source), headers = await parent(target), pack = await exported(source, await parent(source));
+    const firstId = randomUUID(), first = (await upload(target, headers, firstId, pack)).json();
+    const qid = (await confirm(target, headers, firstId, first.token)).json().questionIds[0];
+    const q = (await target.app.inject({ url: `/api/v1/collection/questions/${qid}`, headers: auth(target.first.token) })).json();
+    const changed = (await target.app.inject({ method: 'PUT', url: `/api/v1/collection/questions/${qid}`, headers: auth(target.first.token), payload: { operationId: randomUUID(), expectedRevision: q.revision, state: q.state, subjectId: q.subjectId, sourceId: q.sourceId, region: q.region, pageNumber: q.pageNumber, questionNumber: q.questionNumber, note: '删除前已经更正' } })).json();
+    const deletion = await target.app.inject({ method: 'PUT', url: `/api/v1/admin/trash/${qid}`, headers, payload: { operationId: randomUUID(), expectedRevision: changed.revision, action: 'trash' } });
+    assert.equal(deletion.statusCode, 200, deletion.body);
+    const keepId = randomUUID(), keep = (await upload(target, headers, keepId, pack)).json();
+    assert.equal(keep.trashed, 1); assert.equal(keep.kept, 1); assert.equal(keep.questions[0].current.note, '删除前已经更正');
+    assert.deepEqual(keep.blockers, []); assert.equal((await confirm(target, headers, keepId, keep.token)).statusCode, 200);
+    assert.equal((await target.app.inject({ url: '/api/v1/collection/questions?state=collected', headers: auth(target.first.token) })).json().total, 0);
+    const id = randomUUID(), preview = (await upload(target, headers, id, pack)).json();
+    assert.equal(preview.questions[0].canRestore, true);
+    const chosen = await decide(target, headers, id, preview.token, { questions: [{ id: original.question.id, action: 'restore' }], subjects: [] });
+    assert.equal(chosen.statusCode, 200, chosen.body); assert.equal(chosen.json().restored, 1);
+    const restored = await confirm(target, headers, id, chosen.json().token); assert.equal(restored.statusCode, 200, restored.body); assert.equal(restored.json().restored, 1);
+    assert.deepEqual((await confirm(target, headers, id, chosen.json().token)).json(), restored.json());
+    const result = (await target.app.inject({ url: `/api/v1/collection/questions/${qid}`, headers: auth(target.first.token) })).json();
+    assert.equal(result.note, '删除前已经更正'); assert.equal(result.collectedAt, original.question.collectedAt); assert.deepEqual(result.studyStage, original.question.studyStage);
+    assert.ok(result.revision > deletion.json().revision);
+    assert.deepEqual((await target.app.inject({ url: `/api/v1/collection/pages/${result.originalPage.id}/original`, headers: auth(target.first.token) })).rawPayload, original.bytes);
+    const againId = randomUUID(), again = (await upload(target, headers, againId, pack)).json();
+    assert.equal(again.restored, 0); assert.equal(again.kept, 1); assert.equal((await confirm(target, headers, againId, again.token)).statusCode, 200);
+    assert.equal((await target.app.inject({ url: '/api/v1/collection/questions?state=collected', headers: auth(target.first.token) })).json().total, 1);
+  } finally { await source.close(); await target.close(); }
+});
+
+test('同名异源与未知学科都需确认对应或新增，导入后记住选择并保留实际学习阶段', async () => {
+  const source = await familyFixture(), target = await familyFixture();
+  try {
+    const sourceParent = await parent(source), headers = await parent(target), subjectA = randomUUID(), subjectB = randomUUID(), targetA = randomUUID();
+    for (const [id, name] of [[subjectA, '综合实践'], [subjectB, '信息技术']]) assert.equal((await source.app.inject({ method: 'PUT', url: `/api/v1/admin/subjects/${id}`, headers: sourceParent, payload: { name } })).statusCode, 200);
+    assert.equal((await target.app.inject({ method: 'PUT', url: `/api/v1/admin/subjects/${targetA}`, headers, payload: { name: '综合实践' } })).statusCode, 200);
+    for (const subjectId of [subjectA, subjectB]) {
+      const { question: q } = await sample(source);
+      assert.equal((await source.app.inject({ method: 'PUT', url: `/api/v1/collection/questions/${q.id}`, headers: auth(source.first.token), payload: { operationId: randomUUID(), expectedRevision: q.revision, state: q.state, subjectId, sourceId: q.sourceId, region: q.region, pageNumber: q.pageNumber, questionNumber: q.questionNumber, note: q.note } })).statusCode, 200);
+    }
+    const settingsBefore = (await target.app.inject({ url: '/api/v1/admin/study-settings', headers })).json(), pack = await exported(source, sourceParent), id = randomUUID();
+    const preview = (await upload(target, headers, id, pack)).json();
+    assert.equal(preview.subjects.filter((s: any) => s.action === 'blocked').length, 2);
+    assert.equal((await confirm(target, headers, id, preview.token)).statusCode, 409);
+    const choice = await decide(target, headers, id, preview.token, { questions: [], subjects: [{ id: subjectA, targetId: targetA }, { id: subjectB, newName: '信息科技' }] });
+    assert.equal(choice.statusCode, 200, choice.body); assert.deepEqual(choice.json().blockers, []);
+    const result = await confirm(target, headers, id, choice.json().token); assert.equal(result.statusCode, 200, result.body); assert.equal(result.json().added, 2);
+    const items = (await target.app.inject({ url: '/api/v1/collection/questions?state=collected', headers: auth(target.first.token) })).json().items;
+    assert.equal(items.filter((q: any) => q.subjectId === targetA).length, 1);
+    const options = (await target.app.inject({ url: '/api/v1/collection/subjects', headers: auth(target.first.token) })).json();
+    assert.ok(options.some((s: any) => s.name === '信息科技')); assert.equal(options.filter((s: any) => s.name === '综合实践').length, 1);
+    assert.ok(items.every((q: any) => q.studyStage.grade === '三年级'));
+    assert.deepEqual((await target.app.inject({ url: '/api/v1/admin/study-settings', headers })).json(), settingsBefore);
+    const again = (await upload(target, headers, randomUUID(), pack)).json(); assert.equal(again.skipped, 2); assert.deepEqual(again.blockers, []);
+  } finally { await source.close(); await target.close(); }
+});
+
+test('选择回执丢失可安全重试，另一会话更新后旧选择失效并重新核对', async () => {
+  const source = await familyFixture(), target = await familyFixture();
+  try {
+    const original = await sample(source), pack = await exported(source, await parent(source)), headers = await parent(target);
+    const firstId = randomUUID(), first = (await upload(target, headers, firstId, pack)).json();
+    const qid = (await confirm(target, headers, firstId, first.token)).json().questionIds[0], peer = (await target.login('另一设备')).json();
+    const edit = async (note: string) => {
+      const q = (await target.app.inject({ url: `/api/v1/collection/questions/${qid}`, headers: auth(peer.token) })).json();
+      const response = await target.app.inject({ method: 'PUT', url: `/api/v1/collection/questions/${qid}`, headers: auth(peer.token), payload: { operationId: randomUUID(), expectedRevision: q.revision, state: q.state, subjectId: q.subjectId, sourceId: q.sourceId, region: q.region, pageNumber: q.pageNumber, questionNumber: q.questionNumber, note } });
+      assert.equal(response.statusCode, 200, response.body);
+    };
+    await edit('第一次修改');
+    const id = randomUUID(), preview = (await upload(target, headers, id, pack)).json(), choices = { questions: [{ id: original.question.id, action: 'copy' }], subjects: [] };
+    const selected = await decide(target, headers, id, preview.token, choices); assert.equal(selected.statusCode, 200, selected.body);
+    const retry = await decide(target, headers, id, preview.token, choices); assert.equal(retry.statusCode, 200, retry.body); assert.equal(retry.json().token, selected.json().token);
+    await edit('另一设备再次修改');
+    assert.equal((await confirm(target, headers, id, selected.json().token)).statusCode, 409);
+    const refreshed = (await target.app.inject({ url: `${root}/${id}`, headers })).json();
+    assert.equal(refreshed.choicesReset, true); assert.equal(refreshed.copied, 0); assert.equal(refreshed.kept, 1);
+    assert.equal(refreshed.questions[0].current.note, '另一设备再次修改');
+    assert.equal((await decide(target, headers, id, preview.token, choices)).statusCode, 409);
+    const reselected = await decide(target, headers, id, refreshed.token, choices); assert.equal(reselected.statusCode, 200, reselected.body);
+    const result = await confirm(target, headers, id, reselected.json().token); assert.equal(result.statusCode, 200, result.body);
+    const all = (await target.app.inject({ url: '/api/v1/collection/questions?state=collected', headers: auth(peer.token) })).json(); assert.equal(all.total, 2); assert.equal(all.items.find((q: any) => q.id === qid).note, '另一设备再次修改');
+  } finally { await source.close(); await target.close(); }
+});
+
+test('恢复选择在 30 天期限跨过后失效，永久删除的同源记录不会重建', async () => {
+  const source = await familyFixture(), target = await familyFixture();
+  try {
+    const original = await sample(source), pack = await exported(source, await parent(source)), headers = await parent(target);
+    const firstId = randomUUID(), first = (await upload(target, headers, firstId, pack)).json();
+    const qid = (await confirm(target, headers, firstId, first.token)).json().questionIds[0];
+    const q = (await target.app.inject({ url: `/api/v1/collection/questions/${qid}`, headers: auth(target.first.token) })).json();
+    const deletion = (await target.app.inject({ method: 'PUT', url: `/api/v1/admin/trash/${qid}`, headers, payload: { operationId: randomUUID(), expectedRevision: q.revision, action: 'trash' } })).json();
+    target.advance(30 * 86400000 - 10 * 60000);
+    const peer = (await target.login('新登录设备')).json();
+    const unlock = async () => auth(peer.token, (await target.app.inject({ method: 'POST', url: '/api/v1/admin/grants', headers: auth(peer.token), payload: { password } })).json().token);
+    let renewed = await unlock();
+    const id = randomUUID(), before = (await upload(target, renewed, id, pack)).json(); assert.equal(before.questions[0].canRestore, true);
+    const selected = (await decide(target, renewed, id, before.token, { questions: [{ id: original.question.id, action: 'restore' }], subjects: [] })).json(); assert.equal(selected.restored, 1);
+    target.advance(11 * 60000); renewed = await unlock();
+    assert.equal((await confirm(target, renewed, id, selected.token)).statusCode, 409);
+    const after = (await target.app.inject({ url: `${root}/${id}`, headers: renewed })).json();
+    assert.equal(after.choicesReset, true); assert.equal(after.questions[0].canRestore, false); assert.equal(after.kept, 1);
+    assert.equal((await confirm(target, renewed, id, after.token)).statusCode, 200);
+    assert.equal((await target.app.inject({ method: 'PUT', url: `/api/v1/admin/trash/${qid}`, headers: renewed, payload: { operationId: randomUUID(), expectedRevision: deletion.revision, action: 'purge', confirm: true } })).statusCode, 200);
+    const purgedId = randomUUID(), purged = (await upload(target, renewed, purgedId, pack)).json();
+    assert.equal(purged.questions[0].status, 'deleted'); assert.equal(purged.questions[0].canRestore, false);
+    const invalid = await decide(target, renewed, purgedId, purged.token, { questions: [{ id: original.question.id, action: 'restore' }], subjects: [] });
+    assert.equal((await confirm(target, renewed, purgedId, invalid.json().token)).statusCode, 409);
+    assert.equal((await target.app.inject({ url: '/api/v1/collection/questions?state=collected', headers: auth(peer.token) })).json().total, 0);
   } finally { await source.close(); await target.close(); }
 });

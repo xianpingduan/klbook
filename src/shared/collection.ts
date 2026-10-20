@@ -22,6 +22,7 @@ export interface Question {
   sourceId: string | null; source: string; pageNumber: string; questionNumber: string; note: string;
   createdAt: number; updatedAt: number; collectedAt: number | null;
   importedAt?: number | null;
+  importedFrom?: { libraryId: string; questionId: string; revision: number; learnerName: string; copy: boolean };
   originalPage: OriginalPage;
   parts: QuestionPart[];
   readingMaterial: ReadingMaterial | null;

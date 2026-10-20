@@ -3,14 +3,15 @@ import type { Readable } from 'node:stream';
 import { mkdir, readdir, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import type { Home } from '../shared/contracts.ts';
-import type { ImportBatch, ImportReceipt } from '../shared/imports.ts';
+import type { ImportBatch, ImportReceipt, ImportDecisions } from '../shared/imports.ts';
 import { AccessError } from './family-access.ts';
 import { Attachments, type StoredPage } from './attachments.ts';
 import type { CollectionStore } from './collection-store.ts';
 import { preparedOriginal, receivePackage, type PreparedPackage } from './package-reader.ts';
 import { applyImport, importPlan } from './import-plan.ts';
+import { fingerprint, noDecisions } from './import-resolution.ts';
 
-interface Job { owner: string; prepared: PreparedPackage; expiresAt: number; targets: Map<string, string> }
+interface Job { owner: string; prepared: PreparedPackage; expiresAt: number; targets: Map<string, string>; decisions: ImportDecisions; choiceContext?: string; choicesReset?: boolean; choiceRequest?: { token: string; hash: string; resultToken: string } }
 interface ReceiptRow { accountId: string; libraryId: string; packageHash: string; previewToken: string; result: string }
 export class Imports {
   private db: Database.Database;
@@ -61,7 +62,40 @@ export class Imports {
     const home = authorize(), receipt = this.receipt(home, id);
     if (receipt) return JSON.parse(receipt.result);
     const job = this.job(home, id);
-    return importPlan(this.db, this.collection, home, job.prepared, id, job.expiresAt, job.targets).preview;
+    return this.plan(home, job, id).preview;
+  }
+  async previewImage(authorize: () => Home, id: string, pageId: string) {
+    const home = authorize(), job = this.job(home, id);
+    const page = job.prepared.data.pages.find(p => p.id === pageId);
+    if (!page) throw new AccessError(404, '资料包中没有这张图片');
+    const bytes = await new Attachments(job.prepared.directory).read(job.prepared.images.get(page.path)!, 'preview');
+    const fresh = authorize();
+    if (this.owner(fresh) !== this.owner(home) || this.job(fresh, id) !== job) throw new AccessError(409, '资料包已变化，请刷新预览');
+    return bytes;
+  }
+  private plan(home: Home, job: Job, id: string) {
+    let plan = importPlan(this.db, this.collection, home, job.prepared, id, job.expiresAt, job.targets, job.decisions, this.now());
+    if (job.choiceContext && job.choiceContext !== plan.contextToken) {
+      job.decisions = noDecisions(); job.choiceContext = undefined; job.choiceRequest = undefined; job.choicesReset = true;
+      plan = importPlan(this.db, this.collection, home, job.prepared, id, job.expiresAt, job.targets, job.decisions, this.now());
+    }
+    plan.preview.choicesReset = job.choicesReset;
+    return plan;
+  }
+  decide(authorize: () => Home, id: string, previewToken: string, decisions: ImportDecisions) {
+    if (this.work) throw new AccessError(409, '资料包正在处理，请等待后重试');
+    const home = authorize(), job = this.job(home, id), previous = this.plan(home, job, id);
+    const hash = fingerprint(decisions);
+    if (job.choiceRequest?.token === previewToken && job.choiceRequest.hash === hash && job.choiceRequest.resultToken === previous.preview.token) return previous.preview;
+    if (previewToken !== previous.preview.token) throw new AccessError(409, '家庭资料已变化，请刷新预览后重新选择');
+    for (const kind of ['questions', 'subjects'] as const) {
+      const values = decisions[kind];
+      if (new Set(values.map(v => v.id)).size !== values.length || values.some(v => !job.prepared.data[kind].some(e => e.id === v.id))) throw new AccessError(422, '所选记录不在当前资料包中');
+    }
+    job.decisions = decisions; job.choiceContext = previous.contextToken; job.choicesReset = false;
+    const preview = this.plan(home, job, id).preview;
+    job.choiceRequest = { token: previewToken, hash, resultToken: preview.token };
+    return preview;
   }
   private run<T>(task: () => Promise<T>) {
     if (this.work) throw new AccessError(409, '已有资料包正在处理，请等待结果后重试');
@@ -89,7 +123,7 @@ export class Imports {
           return JSON.parse(receipt.result) as ImportReceipt;
         }
         if (previous && previous.prepared.packageHash !== prepared.packageHash) throw new AccessError(409, '重试文件已改变，请重新选择并核对');
-        const job = { owner: this.owner(home), prepared, expiresAt: this.now() + 30 * 60000, targets: previous?.targets ?? new Map<string, string>() };
+        const job: Job = { owner: this.owner(home), prepared, expiresAt: this.now() + 30 * 60000, targets: previous?.targets ?? new Map<string, string>(), decisions: previous?.decisions ?? noDecisions(), choiceContext: previous?.choiceContext, choiceRequest: previous?.choiceRequest };
         this.jobs.set(id, job); keep = true;
         return this.status(authorize, id);
       } finally { if (!keep) await rm(directory, { recursive: true, force: true }); }
@@ -103,7 +137,7 @@ export class Imports {
         return JSON.parse(receipt.result);
       }
       const job = this.job(home, id);
-      const plan = importPlan(this.db, this.collection, home, job.prepared, id, job.expiresAt, job.targets);
+      const plan = this.plan(home, job, id);
       const check = (token: string, blockers: string[]) => {
         if (blockers.length) throw new AccessError(409, '本批包含修改、已删记录或待核对的学科对应，未导入任何资料；请刷新预览查看');
         if (token !== previewToken) throw new AccessError(409, '家庭资料已变化，请刷新预览后重新确认');
@@ -126,11 +160,11 @@ export class Imports {
           const fresh = authorize();
           if (this.owner(home) !== this.owner(fresh)) throw new AccessError(403, '账号已变化，请重新验证');
           this.job(fresh, id);
-          const latest = importPlan(this.db, this.collection, fresh, job.prepared, id, job.expiresAt, job.targets);
+          const latest = this.plan(fresh, job, id);
           check(latest.preview.token, latest.preview.blockers);
           const importedAt = this.now();
           applyImport(this.db, home, job.prepared, latest, importedAt);
-          const result: ImportReceipt = { id, status: 'complete', added: latest.preview.added, skipped: latest.preview.skipped, importedAt, questionIds: latest.entities.filter(e => e.kind === 'questions').map(e => e.targetId) };
+          const result: ImportReceipt = { id, status: 'complete', added: latest.preview.added, skipped: latest.preview.skipped, kept: latest.preview.kept, copied: latest.preview.copied, restored: latest.preview.restored, importedAt, questionIds: latest.entities.filter(e => e.kind === 'questions').map(e => e.targetId) };
           this.db.prepare('INSERT INTO importReceipts VALUES (?, ?, ?, ?, ?, ?)').run(id, home.library.id, home.account.id, job.prepared.packageHash, previewToken, JSON.stringify(result));
           for (const e of latest.entities.filter(e => e.kind === 'pages' && e.isNew)) this.db.prepare('DELETE FROM importPendingPages WHERE id = ?').run(e.targetId);
           return result;

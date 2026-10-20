@@ -48,12 +48,13 @@ export class CollectionStore {
     if (!row) throw new AccessError(404, '找不到这道题');
     if (row.cancelledAt !== null) throw new AccessError(409, '本次收集已取消，请到收集页撤销取消后继续');
     const { originalPageId, region, schoolYear, grade, term, cancelledAt: _cancelled, ...rest } = row;
+    const origin = this.db.prepare<[string], { libraryId: string; questionId: string; revision: number; learnerName: string; copy: number }>('SELECT sourceLibraryId AS libraryId, sourceId AS questionId, sourceRevision AS revision, learnerName, isCopy AS copy FROM questionImportOrigins WHERE questionId = ?').get(id);
     const parts = this.db.prepare<[string], { id: string; pageId: string; region: string | null; transcription: string; recognition: string | null }>('SELECT id, pageId, region, transcription, recognition FROM questionParts WHERE questionId = ? ORDER BY position').all(id)
       .map(part => ({ id: part.id, originalPage: this.publicPage(libraryId, part.pageId), region: part.region ? JSON.parse(part.region) as Region : null, transcription: part.transcription, recognition: part.recognition ? JSON.parse(part.recognition) : null }));
     const reading = this.db.prepare<[string], { materialId: string }>('SELECT materialId FROM questionReadings WHERE questionId = ?').get(id);
     const answerParts = this.db.prepare<[string], { id: string; pageId: string; region: string }>('SELECT id, pageId, region FROM answerParts WHERE questionId = ? ORDER BY position').all(id)
       .map(part => ({ id: part.id, originalPage: this.publicPage(libraryId, part.pageId), region: JSON.parse(part.region) as Region }));
-    return { ...rest, studyStage: { schoolYear, grade, term }, source: rest.sourceId ? this.sources.get(rest.sourceId).name : rest.source, region: region ? JSON.parse(region) as Region : null, originalPage: this.publicPage(libraryId, originalPageId), parts, answerParts, readingMaterial: reading ? this.readings.get(libraryId, reading.materialId) : null, syncState: 'synced' };
+    return { ...rest, ...(origin ? { importedFrom: { ...origin, copy: origin.copy === 1 } } : {}), studyStage: { schoolYear, grade, term }, source: rest.sourceId ? this.sources.get(rest.sourceId).name : rest.source, region: region ? JSON.parse(region) as Region : null, originalPage: this.publicPage(libraryId, originalPageId), parts, answerParts, readingMaterial: reading ? this.readings.get(libraryId, reading.materialId) : null, syncState: 'synced' };
   }
   filterOptions(libraryId: string): FilterOptions {
     const values = (column: 'schoolYear' | 'grade') => this.db.prepare<[string], { value: string }>(`SELECT DISTINCT ${column} AS value FROM questions WHERE libraryId = ? AND cancelledAt IS NULL AND NOT EXISTS (SELECT 1 FROM questionDeletions WHERE id = questions.id) AND ${column} IS NOT NULL ORDER BY ${column} DESC`).all(libraryId).map(row => row.value);

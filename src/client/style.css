@@ -334,3 +334,10 @@ select:focus-visible, textarea:focus-visible { outline: 3px solid #ceac53; outli
 .export-local-status { padding: 1rem; background: #f4f8f6; border-radius: 12px; margin-block: 1rem; }
 @media (max-width: 600px) { .app-surface .export-summary > div { grid-template-columns: minmax(0, 1fr); gap: .35rem; } }
 .import-manager .actions { display: flex; flex-wrap: wrap; gap: .75rem; }
+.import-subjects, .import-conflicts { display: grid; gap: 1rem; }
+.import-subject, .import-conflicts article { min-width: 0; padding: 1rem; border: 1px solid #dce5ed; border-radius: 10px; }
+.import-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.import-comparison section { min-width: 0; padding: .7rem; background: #f5f7fb; border-radius: 8px; overflow-wrap: anywhere; }
+.import-comparison h5 { font-size: 1rem; margin: 0 0 .5rem; }
+.import-outcome { margin-block: 1.3rem; }
+@media (max-width: 600px) { .import-comparison { grid-template-columns: minmax(0, 1fr); } }
