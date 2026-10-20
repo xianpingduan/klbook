@@ -17,7 +17,11 @@ $form.Controls.Add($statusBox)
 function Refresh-Status {
     try {
         $status = Get-KlbookStatus $config
-        $lines = @($status.message, '', "应用：$($status.services[0].state)    网关：$($status.services[1].state)", "开机自启：$($status.services[0].automatic -and $status.services[1].automatic)", "数据目录：$($config.dataDir)", "局域网入口：$($config.origin)", '', "Node $($config.nodeVersion)", "Caddy $($config.caddyVersion)", "WinSW $($config.winSWVersion)", '', '停止后可在此重新启动；电脑关机或休眠时无法同步。')
+        $labels=@{ Running='运行中'; Stopped='已停止'; NotInstalled='未安装'; 'Start Pending'='正在启动'; 'Stop Pending'='正在停止' }
+        $appLabel=$labels[$status.services[0].state]; if (!$appLabel) { $appLabel=$status.services[0].state }
+        $gatewayLabel=$labels[$status.services[1].state]; if (!$gatewayLabel) { $gatewayLabel=$status.services[1].state }
+        $auto=if ($status.services[0].automatic -and $status.services[1].automatic) { '已启用' } else { '未完整启用' }
+        $lines = @($status.message, '', "应用：$appLabel    网关：$gatewayLabel", "开机自启：$auto", "数据目录：$($config.dataDir)", "局域网入口：$($config.origin)", '', "Node $($config.nodeVersion)", "Caddy $($config.caddyVersion.Split(' ')[0])", "WinSW $($config.winSWVersion)", '', '停止后可在此重新启动；电脑关机或休眠时无法同步。')
         $statusBox.Text = $lines -join "`r`n"
     } catch { $statusBox.Text = $_.Exception.Message }
 }

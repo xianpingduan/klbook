@@ -4,7 +4,8 @@
     [Parameter(Mandatory=$true)][string]$GatewayDir,
     [Parameter(Mandatory=$true)][string]$NodeExe,
     [Parameter(Mandatory=$true)][string]$CaddyExe,
-    [Parameter(Mandatory=$true)][string]$WinSWExe
+    [Parameter(Mandatory=$true)][string]$WinSWExe,
+    [ValidateRange(1024,65535)][int]$CertificatePort=8080
 )
 $ErrorActionPreference = 'Stop'
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -36,6 +37,7 @@ $bytes = $address.GetAddressBytes()
 if ($bytes.Length -ne 4 -or !($bytes[0] -eq 10 -or ($bytes[0] -eq 172 -and $bytes[1] -ge 16 -and $bytes[1] -le 31) -or ($bytes[0] -eq 192 -and $bytes[1] -eq 168))) { throw 'Only a private IPv4 LAN address is supported.' }
 foreach ($port in @($settings.backendPort, $settings.port)) { if ($port -lt 1024 -or $port -gt 65535) { throw 'Invalid port.' } }
 if ($settings.backendPort -eq $settings.port) { throw 'Backend and gateway ports must differ.' }
+if ($CertificatePort -in @($settings.backendPort, $settings.port)) { throw 'Certificate download port must differ from application ports.' }
 $rootCertificate = Join-Path $gateway 'state\pki\authorities\local\root.crt'
 $rootHash = (Get-FileHash -LiteralPath $rootCertificate).Hash
 $npm = Join-Path (Split-Path $node) 'npm.cmd'
@@ -66,7 +68,7 @@ Copy-Item -LiteralPath (Join-Path $gateway 'state') -Destination (Join-Path $des
 Copy-Item -LiteralPath $rootCertificate -Destination (Join-Path $destination 'public\klbook-root.crt')
 foreach ($name in @('maintain-windows.ps1','install-windows-service.ps1','windows-service.psm1')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $destination 'scripts') }
 $origin = 'https://{0}:{1}' -f $settings.address, $settings.port
-$manifest = [ordered]@{ version=1; serviceDir=$destination; dataDir=$data; libraryId=$identity.libraryId; ownerSid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; backendPort=[int]$settings.backendPort; address=$settings.address; port=[int]$settings.port; origin=$origin;
+$manifest = [ordered]@{ version=1; serviceDir=$destination; dataDir=$data; libraryId=$identity.libraryId; ownerSid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; backendPort=[int]$settings.backendPort; address=$settings.address; port=[int]$settings.port; certificatePort=$CertificatePort; origin=$origin;
     rootCertificate=(Join-Path $destination 'public\klbook-root.crt'); rootSha256=$rootHash; nodeVersion=$nodeVersion; caddyVersion=$caddyVersion; winSWVersion='2.12.0'; sourceCommit=(& git -C $workspace rev-parse HEAD).Trim(); sourceModified=[bool](& git -C $workspace status --porcelain); preparedAt=(Get-Date).ToString('o') }
 $utf8 = [Text.UTF8Encoding]::new($false)
 [IO.File]::WriteAllText((Join-Path $destination 'deployment.json'), ($manifest | ConvertTo-Json), $utf8)
@@ -86,8 +88,31 @@ $origin {
     tls internal
     reverse_proxy 127.0.0.1:$($settings.backendPort)
 }
+http://$($settings.address):$CertificatePort {
+    bind $($settings.address)
+    @publicFiles path / /index.html /klbook-root.crt
+    handle @publicFiles {
+        root * "$((Join-Path $destination 'public').Replace('\','/'))"
+        header Cache-Control "no-store"
+        header /klbook-root.crt Content-Type "application/x-x509-ca-cert"
+        header /klbook-root.crt Content-Disposition "attachment; filename=klbook-root.crt"
+        file_server
+    }
+    handle {
+        respond "Not found" 404
+    }
+}
 "@
 [IO.File]::WriteAllText((Join-Path $destination 'Caddyfile'), $caddyConfig, $utf8)
+$certificatePage = @"
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>错题集 · 家庭连接</title><style>body{font:18px/1.7 system-ui;margin:24px auto;padding:0 20px;max-width:660px}a{display:block;margin:24px 0}code{word-break:break-all}</style>
+<h1>连接家庭错题集</h1><p>手机与电脑连接同一家庭 Wi-Fi。已信任这台电脑证书的设备可直接进入学习端。</p>
+<a href="$origin/learn">打开学习端</a><a href="/klbook-root.crt" download>下载家庭电脑证书</a>
+<p>新设备请先与电脑上保存的公开根证书核对，再按系统设置安装并信任。这里仅提供公开证书，账号登录与题目都使用 HTTPS。</p>
+<p>证书文件 SHA-256（应与电脑维护目录中的证书一致）：<code>$rootHash</code></p></html>
+"@
+[IO.File]::WriteAllText((Join-Path $destination 'public\index.html'), $certificatePage, $utf8)
 function XmlText([string]$text) { [Security.SecurityElement]::Escape($text) }
 foreach ($id in @('KlbookApp','KlbookGateway')) {
     $app = $id -eq 'KlbookApp'
@@ -123,6 +148,6 @@ foreach ($id in @('KlbookApp','KlbookGateway')) {
 if ($LASTEXITCODE -ne 0) { throw 'Prepared runtime failed. No system services were installed.' }
 & (Join-Path $destination 'bin\caddy.exe') validate --config (Join-Path $destination 'Caddyfile') --adapter caddyfile
 if ($LASTEXITCODE -ne 0) { throw 'Prepared gateway failed validation. No services installed.' }
-$maintenanceCmd = '@powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0scripts\maintain-windows.ps1" -ServiceDir "%~dp0"'
+$maintenanceCmd = '@powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0scripts\maintain-windows.ps1" -ServiceDir "%~dp0."'
 [IO.File]::WriteAllText((Join-Path $destination 'maintenance.cmd'), $maintenanceCmd, [Text.Encoding]::ASCII)
 Write-Output "PREPARED=$destination"

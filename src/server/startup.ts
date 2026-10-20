@@ -49,5 +49,6 @@ export async function checkExistingData(dataDir: string, expectedLibraryId?: str
         } catch { throw new Error(`附件缺失、不可读或内容校验失败：${page.id}/${variant}。请恢复原文件后重启`); }
       }
     }
+    return family;
   } finally { db.close(); }
 }

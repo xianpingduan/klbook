@@ -1,7 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { get } from 'node:https';
-import Database from 'better-sqlite3';
 import { checkExistingData } from './startup.ts';
 
 const [action, path] = process.argv.slice(2);
@@ -9,10 +7,7 @@ const ready = (info: unknown) => !!info && typeof info === 'object' && 'app' in 
 try {
   if (!path) throw new Error('请提供数据目录或维护配置文件');
   if (action === 'check') {
-    await checkExistingData(path);
-    const db = new Database(join(path, 'family.sqlite'), { readonly: true, fileMustExist: true });
-    try { console.log(JSON.stringify(db.prepare('SELECT libraryId FROM family WHERE singleton = 1').get())); }
-    finally { db.close(); }
+    console.log(JSON.stringify(await checkExistingData(path)));
   } else if (action === 'probe') {
     const config = JSON.parse(await readFile(path, 'utf8'));
     const result = { app: false, gateway: false, message: '' };

@@ -6,7 +6,6 @@ import { checkExistingData, StartupStatus } from './startup.ts';
 
 const dataDir = process.env.KLBOOK_DATA_DIR ?? join(process.env.LOCALAPPDATA ?? join(homedir(), '.local', 'share'), 'klbook', 'data');
 const port = Number(process.env.KLBOOK_PORT ?? 8787);
-if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('KLBOOK_PORT 必须为有效端口');
 const origins = (process.env.KLBOOK_ALLOWED_ORIGINS ?? 'http://127.0.0.1:5173').split(',').map(value => value.trim()).filter(Boolean);
 const here = dirname(fileURLToPath(import.meta.url));
 const staticDir = here.endsWith(join('src', 'server')) ? resolve(here, '../../dist/client') : resolve(here, '../../client');
@@ -14,6 +13,7 @@ const startup = new StartupStatus(process.env.KLBOOK_STARTUP_STATE);
 let app: ReturnType<typeof createApp> | undefined;
 try {
   await startup.report('checking', '正在检查本机资料与启动应用');
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('KLBOOK_PORT 必须为有效端口');
   if (process.env.KLBOOK_REQUIRE_EXISTING === '1') {
     await checkExistingData(dataDir, process.env.KLBOOK_EXPECTED_LIBRARY_ID);
     const { access } = await import('node:fs/promises');

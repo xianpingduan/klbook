@@ -4,7 +4,7 @@ Import-Module (Join-Path $PSScriptRoot 'windows-service.psm1') -Force
 Assert-KlbookAdmin
 $config = Read-KlbookDeployment $ServiceDir
 if (@(Get-Service -Name KlbookApp,KlbookGateway -ErrorAction SilentlyContinue).Count) { throw '服务已存在，未覆盖。请先核对原安装。' }
-if (@(Get-NetTCPConnection -State Listen -LocalPort $config.backendPort,$config.port -ErrorAction SilentlyContinue).Count) { throw '应用或网关端口仍占用，请先停止原临时进程。' }
+if (@(Get-NetTCPConnection -State Listen -LocalPort $config.backendPort,$config.port,$config.certificatePort -ErrorAction SilentlyContinue).Count) { throw '应用或网关端口仍占用，请先停止原临时进程。' }
 if ((Get-FileHash -LiteralPath $config.rootCertificate).Hash -ne $config.rootSha256) { throw '根证书与准备记录不符。' }
 $identityJson = & (Join-Path $config.serviceDir 'bin\node.exe') (Join-Path $config.serviceDir 'app\dist\node\server\maintenance-cli.js') check $config.dataDir
 if ($LASTEXITCODE -ne 0) { throw '原资料未通过检查，未安装服务。' }
@@ -29,7 +29,7 @@ try {
     # Limit the new program-specific rule to the existing private LAN address and subnet.
     $rule = 'Klbook-Service-HTTPS'
     if (Get-NetFirewallRule -Name $rule -ErrorAction SilentlyContinue) { throw '同名防火墙规则已存在，请人工核对。' }
-    New-NetFirewallRule -Name $rule -DisplayName 'Klbook family LAN HTTPS' -Direction Inbound -Action Allow -Protocol TCP -LocalAddress $config.address -LocalPort $config.port -RemoteAddress LocalSubnet -Program (Join-Path $config.serviceDir 'bin\caddy.exe') -Profile Any | Out-Null
+    New-NetFirewallRule -Name $rule -DisplayName 'Klbook family LAN HTTPS and public certificate' -Direction Inbound -Action Allow -Protocol TCP -LocalAddress $config.address -LocalPort $config.port,$config.certificatePort -RemoteAddress LocalSubnet -Program (Join-Path $config.serviceDir 'bin\caddy.exe') -Profile Any | Out-Null
     $ruleCreated = $true
     $status = Invoke-KlbookControl $config 'Start'
     $menu = Join-Path ([Environment]::GetFolderPath('CommonPrograms')) '错题集'

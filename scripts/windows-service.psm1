@@ -27,19 +27,25 @@ function Get-KlbookStatus($Config) {
         $raw = & (Join-Path $Config.serviceDir 'bin\node.exe') (Join-Path $Config.serviceDir 'app\dist\node\server\maintenance-cli.js') probe (Join-Path $Config.serviceDir 'deployment.json') 2>$null
         if ($LASTEXITCODE -eq 0) { $probe = $raw | ConvertFrom-Json }
     } catch { $probe.message='维护探测程序无法运行，请检查运行时文件' }
-    $phase = 'unavailable'; $message = [string]$probe.message
-    if (@($services | Where-Object state -EQ 'NotInstalled').Count) { $phase='not-installed'; $message='尚未安装 Windows 自动服务' }
-    elseif (@($services | Where-Object state -EQ 'Running').Count -eq 0) { $phase='stopped'; $message='服务已停止，可在此重新启动' }
-    if ($state -and $state.phase -eq 'failed' -and !$probe.app) { $phase='failed'; $message=$state.message }
     $processMatches = $false
-    if ($state -and $state.phase -eq 'ready') {
+    if ($state -and $state.phase -in @('checking','ready')) {
         $process = Get-Process -Id $state.pid -ErrorAction SilentlyContinue
         if ($process) {
-            $start = [DateTimeOffset]$process.StartTime.ToUniversalTime()
-            $processMatches = [Math]::Abs($start.ToUnixTimeMilliseconds() - [long]$state.startedAt) -lt 10000
+            try {
+                $start = [DateTimeOffset]$process.StartTime.ToUniversalTime()
+                $processMatches = [Math]::Abs($start.ToUnixTimeMilliseconds() - [long]$state.startedAt) -lt 10000
+            } catch { }
         }
     }
-    if (@($services | Where-Object state -EQ 'Running').Count -eq 2 -and $processMatches -and $probe.app -and $probe.gateway) { $phase='ready'; $message='应用与局域网 HTTPS 已就绪' }
+    $phase = 'unavailable'; $message = [string]$probe.message
+    if ($probe.app -and $probe.gateway) { $message='服务尚未全部就绪，请核对服务状态与启动记录' }
+    if (@($services | Where-Object state -EQ 'NotInstalled').Count) { $phase='not-installed'; $message='尚未安装 Windows 自动服务' }
+    elseif ($state -and $state.phase -eq 'failed' -and !$probe.app) { $phase='failed'; $message=$state.message }
+    elseif (@($services | Where-Object state -EQ 'Stopped').Count -eq 2) { $phase='stopped'; $message='服务已停止，可在此重新启动' }
+    elseif (@($services | Where-Object state -EQ 'Stop Pending').Count) { $phase='stopping'; $message='正在停止服务，请稍候' }
+    elseif ($processMatches -and $state.phase -eq 'checking') { $phase='starting'; $message='正在校验本机资料，完成前暂不能连接；资料较多时请稍候' }
+    elseif (@($services | Where-Object state -EQ 'Start Pending').Count) { $phase='starting'; $message='正在启动服务，请稍候' }
+    elseif (@($services | Where-Object state -EQ 'Running').Count -eq 2 -and $processMatches -and $state.phase -eq 'ready' -and $probe.app -and $probe.gateway) { $phase='ready'; $message='应用与局域网 HTTPS 已就绪' }
     return [pscustomobject]@{ phase=$phase; message=$message; services=$services; checkedAt=(Get-Date).ToString('o'); appReachable=[bool]$probe.app; gatewayReachable=[bool]$probe.gateway; dataDir=$Config.dataDir; origin=$Config.origin; nodeVersion=$Config.nodeVersion; caddyVersion=$Config.caddyVersion; winSWVersion=$Config.winSWVersion }
 }
 function Assert-KlbookAdmin {
@@ -57,6 +63,7 @@ function Invoke-KlbookControl($Config, [string]$Action) {
         }
     }
     if ($Action -eq 'Start' -or $Action -eq 'Restart') {
+        if ((Get-Service -Name KlbookApp).Status -eq 'Stopped') { Remove-Item -LiteralPath (Join-Path $Config.serviceDir 'logs\startup.json') -ErrorAction SilentlyContinue }
         foreach ($id in @('KlbookApp','KlbookGateway')) { Start-Service -Name $id }
         $deadline = (Get-Date).AddSeconds(40)
         do {
@@ -65,6 +72,8 @@ function Invoke-KlbookControl($Config, [string]$Action) {
             if ($status.phase -eq 'failed') { throw $status.message }
             Start-Sleep -Milliseconds 500
         } while ((Get-Date) -lt $deadline)
+        # A live data check is still making progress; keep services installed and let the window refresh.
+        if ($status.phase -eq 'starting') { return $status }
         throw $status.message
     }
     return Get-KlbookStatus $Config
