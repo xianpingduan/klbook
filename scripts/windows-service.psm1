@@ -32,14 +32,17 @@ function Get-KlbookStatus($Config) {
     } catch { $probe.message='维护探测程序无法运行，请检查运行时文件' }
     finally { [Console]::OutputEncoding = $probeEncoding }
     $processMatches = $false
-    if ($state -and $state.phase -in @('checking','ready')) {
-        $process = Get-Process -Id $state.pid -ErrorAction SilentlyContinue
-        if ($process) {
-            try {
-                $start = [DateTimeOffset]$process.StartTime.ToUniversalTime()
+    $applicationPid = 0
+    if ($state -and $state.phase -in @('checking','ready') -and [int]::TryParse([string]$state.pid, [ref]$applicationPid) -and $applicationPid -gt 0) {
+        try {
+            # CIM exposes creation time to ordinary users even when Get-Process
+            # cannot read StartTime for a LocalService-owned process.
+            $process = Get-CimInstance Win32_Process -Filter "ProcessId=$applicationPid" -ErrorAction Stop
+            if ($process -and $process.CreationDate) {
+                $start = [DateTimeOffset]$process.CreationDate.ToUniversalTime()
                 $processMatches = [Math]::Abs($start.ToUnixTimeMilliseconds() - [long]$state.startedAt) -lt 10000
-            } catch { }
-        }
+            }
+        } catch { }
     }
     $phase = 'unavailable'; $message = [string]$probe.message
     if ($probe.app -and $probe.gateway) { $message='服务尚未全部就绪，请核对服务状态与启动记录' }

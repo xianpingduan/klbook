@@ -2,6 +2,16 @@
 
 任务：[开机自动运行并提供电脑维护入口](https://github.com/xianpingduan/klbook/issues/22)。用户已确认审查基线 `e14670b`。沿用公开操作入口、真实隔离 SQLite/文件及独立系统演练的测试边界。
 
+## 当前结果（2026-10-20）
+
+20:11:50 完成迁移及正式 Windows 服务安装。`KlbookApp`、`KlbookGateway` 均以 LocalService 运行，设置为自动延迟启动，网关依赖应用服务。当前数据目录为 `C:\ProgramData\klbook\data`，运行目录为 `C:\ProgramData\klbook\service`，HTTPS 地址仍为 `https://192.168.3.208:8443`。以下较早失败与恢复记录均为历史过程。
+
+- 真实 Windows 服务演练通过：只停网关时报告未就绪；全部停止后仍可查看状态；启动、重新启动后 HTTP/HTTPS 恢复就绪。证据：`.scratch/issue-22/service-smoke.json`。
+- 切换及真实服务重启后对照备份，**47 张表的原记录、44 个附件文件、凭据密钥均一致**，SQLite 完整性及外键检查通过。原 EFS 加密资料、迁移前备份及之前的失败副本均保留。
+- 新目录 ACL 限于原用户、管理员、SYSTEM、LocalService；服务对程序只读，对专用资料可写。原根证书摘要未变；8080 仅提供证书及说明，业务 API 返回 404。
+- 普通用户维护状态误报已修正，Windows PowerShell 5.1 真实就绪断言在代码页 936/65001 均通过，见文末增量记录。
+- **尚未完成真实电脑重启和重启后手机读取。#22 保持开放、ready-for-human。** 上次系统启动时间仍为 2026-10-16 22:37:52；服务重启不能代替电脑重启。不自动重启电脑。
+
 ## 已完成的验证
 
 - 通过真实启动命令先复现数据目录丢失时误建空库，以及原图缺失时仍对外监听。增加常驻启动检查后拒绝提供业务接口，写入可由独立维护工具读取的原因；恢复原附件后连续两次重启，公开登录及原图字节读取保持完整。
@@ -25,7 +35,7 @@
 
 两轴分别结论：Standards 0 项遗留，Spec 0 项遗留。真实电脑重启及第二设备验收仍需单独完成。
 
-## 待补充
+## 初次安装前记录（历史）
 
 2026-10-20 已准备本机运行副本 `C:\Users\dcy\AppData\Local\klbook\service`，数据目录仍为 `C:\Users\dcy\AppData\Local\klbook\data`；局域网 HTTPS 地址保持 `https://192.168.3.208:8443`，公开证书下载为端口 8080。维护 GUI、准备配置及故障恢复脚本已就绪。
 
@@ -85,3 +95,17 @@
 - 维护模块现对 Node JSON 明确使用 UTF-8，并在 `finally` 恢复原编码。新增 `test/windows/service-probe.ps1`，通过真实端点验证两种代码页、调用方编码恢复，以及服务未安装时不能报就绪。红绿结果分别保存在 `.scratch/issue-22/service-probe-red.log`、`service-probe-green.log`。
 - 迁移 helper 另在安装尝试失败后、恢复旧端前比较新旧数据库及全部文件。只要出现分歧或核对失败，就保留两份资料并报告，拒绝自动恢复旧源。隔离合成资料验证一致副本接受、记录变化副本拒绝。
 - 两轴增量复查无遗留发现。此次短暂启动不算自动服务安装验收成功；当前仍由原手动服务提供访问，下一次安装及真实启停、电脑重启、手机验收待执行。
+
+## 正式安装与普通用户状态修正
+
+- 用户再次运行管理员迁移脚本后，20:11:50 成功安装并完成真实服务停止、启动和重启。最终状态及备份位置记录在 `.scratch/issue-22/migration-result.json`；数据对照在 `migration-data-after.json`。
+- 普通用户复核发现两个服务及 HTTP/HTTPS 均正常，但维护状态为 unavailable。对照确认：`.NET Get-Process.StartTime` 对 LocalService 的 Node 进程返回空，CIM `Win32_Process.CreationDate` 可正常读取；进程和启动记录的时间一致。
+- `test/windows/service-probe.ps1 -ServiceDir C:\ProgramData\klbook\service -RequireReady` 先复现“Installed healthy services were reported as unavailable”，改用 CIM 后通过。PID 必须为正整数，仍严格要求启动时间匹配、两个服务运行及 HTTP/HTTPS 成功；没有放宽就绪条件。红绿证据在 `service-normal-user-red.log`、`service-normal-user-green.log`。
+- 本次增量只修改维护模块及真实探测测试，不涉及业务程序或数据。Standards 0 项、Spec 0 项新增发现；不重复执行已通过且无关联改动的完整 API/浏览器套件。
+
+## 剩余实机步骤
+
+1. 保存其他工作，由用户手动重启 Windows。开机后等待自动延迟启动，不运行开发命令或原临时启动脚本。
+2. 开始菜单打开“错题集电脑维护”，确认“应用与局域网 HTTPS 已就绪”及开机自启已启用。
+3. 同一 Wi-Fi 下手机打开 `https://192.168.3.208:8443/learn`，读取既有错题及原图；会话过期时用原账号登录。
+4. 记录新系统启动时间、服务状态、手机型号/浏览器及读取结果后，复核尚未勾选的验收条件。
