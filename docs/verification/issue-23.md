@@ -22,8 +22,12 @@
 
 ## 本机部署
 
-正式运行仍为 #22 的独立 ProgramData 副本。已将 `bd9ccd5` 的构建以新文件写入独立暂存目录，并逐个核对 **67** 个文件，未切换服务。更新脚本的预检通过：原资料库身份一致、两个 Windows 服务运行，HTTP/HTTPS 均可达。
+用户在管理员 PowerShell 执行更新脚本后，**2026-10-20 21:54:18（北京时间）**正式切换成功。ProgramData 中的运行代码为 `bd9ccd5`；后续 `d8ddc32` 只增加测试与验收文档。
 
-回归与审查均已完成。更新脚本将短暂停服、保留完整切换前资料副本及旧程序，再启动新版并核对原记录、附件和密钥。预检脚本 `.scratch/issue-23/update-service.ps1 -CheckOnly` 已通过；当前自动化进程没有 Windows 管理员令牌，正式切换需在管理员 PowerShell 执行同一脚本（不带 `-CheckOnly`）。
+- 更新脚本核对原有 **47** 张表全部记录、**44** 个附件文件及服务密钥均未改变；数据库完整性和外键检查通过。
+- 旧程序保留于 `C:\ProgramData\klbook\service\app\dist-before-issue23-20261020-215410`，切换前完整资料副本保留于 `C:\ProgramData\klbook\backups\before-issue23-20261020-215410`。该切换副本不是页面生成的新版备份格式，不混记为已完成的备份功能验收。
+- 两个 Windows 服务均以 LocalService 运行，HTTP 和局域网 HTTPS 可达；更新后再次逐个核对 **67** 个程序文件与暂存清单相同。
+- 原 HTTPS 根证书摘要未改变。`/admin/backups` 页面返回 200，未登录访问备份 API 返回 401。
+- `C:\ProgramData\klbook\backups` 已创建并配置服务写入权限。待家长在后台保存该目录、生成实际家庭资料备份，再执行隔离恢复和登录核对。
 
-实际家庭资料备份及隔离恢复演练随后记录；当前不关闭 #23，不把合成测试替代本机验收。
+证据：`.scratch/issue-23/update-result.json` 与 `inspect-live.mjs`。实际家庭资料备份及隔离恢复演练仍待完成；当前不关闭 #23，不把合成测试替代本机验收。
