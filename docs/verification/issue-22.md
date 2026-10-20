@@ -44,3 +44,12 @@
 - 已核实 AppData、运行目录、WinSW EXE 和家庭数据库都有 EFS 加密属性。EXE 路径存在、权限已授予 LocalService RX，当前用户可执行 WinSW `version` 返回 2.12.0.0。EFS 是确认存在的服务部署阻碍；尚未在新目录执行成功启动对照，不能把推断写成已经完成的系统修复。
 - 新增 `CheckStorage` 公开维护命令及安装预检。真实 EFS 合成文件回归通过：普通目录接受；加密子文件、加密运行目录拒绝。当前真实加密部署在停服前被明确拒绝。测试命令：`powershell.exe -NoProfile -ExecutionPolicy Bypass -File test/windows/service-storage.ps1`。
 - 当前仍使用原手动服务，自动服务尚未安装。尚未解密或迁移原资料；ProgramData 专用目录方案待用户确认。
+
+## 迁移授权与执行前检查
+
+用户已明确同意迁到 `C:\ProgramData\klbook`：新副本不使用用户专属 EFS，限制目录访问权限，原加密目录及备份保留。迁移脚本已准备，待 Windows 执行授权后运行。
+
+- EFS 预检增量两轴复查：Standards 0 项，Spec 0 项。
+- 迁移复制专项使用隔离真实 SQLite、图片、合成密钥和待处理文件，47 张表、原图/预览与 `import-work`、`export-work` 均通过核对。
+- 迁移脚本只允许新建固定目标，先限制权限，解密范围限定为新资料副本。安装失败且新服务已撤回时恢复原端；新端已启用后若后续验证失败，尝试恢复新服务并记录实际状态，保留两份资料，避免回切旧库丢失新写入。
+- 发起迁移用的第二次 Windows 授权后，系统返回“操作已被用户取消”。迁移脚本未启动，`C:\ProgramData\klbook` 尚未创建，旧 HTTP/HTTPS 服务保持可用。用户对迁移方案的同意仍有效，待在本机管理员 PowerShell 运行已准备脚本；后续无需重新询问同一方案。

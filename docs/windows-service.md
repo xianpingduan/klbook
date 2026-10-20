@@ -28,8 +28,8 @@
 ```powershell
 npm.cmd run build
 .\scripts\prepare-windows-service.ps1 `
-  -ServiceDir "$env:LOCALAPPDATA\klbook\service" `
-  -DataDir "$env:LOCALAPPDATA\klbook\data" `
+  -ServiceDir "$env:ProgramData\klbook\service" `
+  -DataDir '<已初始化并确认可供服务访问的资料目录>' `
   -GatewayDir '<已有网关目录>' `
   -NodeExe '<Node 24 的 node.exe>' `
   -CaddyExe '<已验证的 caddy.exe>' `
@@ -77,7 +77,7 @@ WinSW 使用官方 [2.12.0 发布](https://github.com/winsw/winsw/releases/tag/v
 
 本机已发现用户 `AppData` 及其服务程序、家庭数据库采用 EFS。LocalService 与当前 Windows 用户身份不同，不能仅靠增加目录权限访问用户专属加密文件。[微软 EFS 说明](https://learn.microsoft.com/en-us/windows/win32/fileio/file-encryption)。
 
-待用户确认的迁移方案：服务程序使用 `C:\ProgramData\klbook\service`，资料使用 `C:\ProgramData\klbook\data`；先停服制作一致备份，再创建受限目录并复制，逐表逐附件核对后切换。新副本不使用用户专属 EFS 加密，以 Windows 目录权限限制为原用户、管理员、SYSTEM 与 LocalService；服务账号对程序只读，对专用资料目录可写。原加密目录和备份保留。该方案改变新副本的静态存储保护方式，必须取得用户同意，不能因用户允许安装服务就自动解密或迁移。
+迁移方案：服务程序使用 `C:\ProgramData\klbook\service`，资料使用 `C:\ProgramData\klbook\data`；先停服制作一致备份，再创建受限目录并复制，逐表逐附件核对后切换。新副本不使用用户专属 EFS 加密，以 Windows 目录权限限制为原用户、管理员、SYSTEM 与 LocalService；服务账号对程序只读，对专用资料目录可写。原加密目录和备份保留。该方案改变新副本的静态存储保护方式，必须取得用户同意，不能因用户允许安装服务就自动解密或迁移。当前用户已于 2026-10-20 明确同意此方案，实际执行结果见[验收记录](verification/issue-22.md)。
 
 如果用户希望继续保留原 EFS 保护，应保持现有手动运行方式，另行明确是否接受“登录 Windows 后启动”的需求调整。
 
