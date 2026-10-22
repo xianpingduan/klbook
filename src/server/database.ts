@@ -205,7 +205,14 @@ const migrations = [
     sourceLibraryId TEXT NOT NULL, sourceId TEXT NOT NULL, sourceRevision INTEGER NOT NULL, learnerName TEXT NOT NULL, isCopy INTEGER NOT NULL);`,
   `CREATE TABLE backupSettings (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), directory TEXT NOT NULL, revision INTEGER NOT NULL);
   INSERT INTO backupSettings VALUES (1, '', 0);
-  CREATE TABLE backupJobs (id TEXT PRIMARY KEY, status TEXT NOT NULL, createdAt INTEGER NOT NULL, finishedAt INTEGER, path TEXT NOT NULL, message TEXT NOT NULL, byteLength INTEGER);`
+  CREATE TABLE backupJobs (id TEXT PRIMARY KEY, status TEXT NOT NULL, createdAt INTEGER NOT NULL, finishedAt INTEGER, path TEXT NOT NULL, message TEXT NOT NULL, byteLength INTEGER);`,
+  `ALTER TABLE backupJobs ADD COLUMN trigger TEXT NOT NULL DEFAULT 'manual';
+  ALTER TABLE backupJobs ADD COLUMN snapshotDigest TEXT;
+  ALTER TABLE backupJobs ADD COLUMN ownerId TEXT NOT NULL DEFAULT '';
+  ALTER TABLE backupJobs ADD COLUMN removedAt INTEGER;
+  CREATE TABLE backupAutomation (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), ownerDataDir TEXT NOT NULL DEFAULT '', ownerId TEXT NOT NULL DEFAULT '',
+    baselineDigest TEXT, lastCheckedAt INTEGER, nextCheckAt INTEGER, status TEXT NOT NULL DEFAULT 'waiting', message TEXT NOT NULL DEFAULT '', cleanupMessage TEXT NOT NULL DEFAULT '');
+  INSERT INTO backupAutomation(singleton) VALUES (1);`
 ];
 
 export function openDatabase(dataDir: string) {

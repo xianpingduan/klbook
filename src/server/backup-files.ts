@@ -86,6 +86,9 @@ export async function verifyBackup(source: string): Promise<BackupManifest> {
     if (actual.size !== file.size || actual.sha256 !== file.sha256) throw Error('备份文件缺失、损坏或校验失败');
   }
   if (!seen.has('data/family.sqlite')) throw Error('备份缺少家庭数据库');
+  const wal = await lstat(join(root, 'data/family.sqlite-wal')).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+  const shared = await lstat(join(root, 'data/family.sqlite-shm')).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+  if (wal && (!wal.isFile() || wal.isSymbolicLink() || wal.size !== 0) || shared && (!shared.isFile() || shared.isSymbolicLink())) throw Error('备份数据库含有额外写入或异常日志，请核对完整性');
   await checkExistingData(join(root, 'data'), manifest.libraryId, { readOnly: true });
   const db = new Database(join(root, 'data/family.sqlite'), { readonly: true, fileMustExist: true });
   try {
@@ -126,6 +129,7 @@ export async function restoreBackup(source: string, target: string, withSystem: 
       if (copied.sha256 !== file.sha256 || copied.size !== file.size) throw Error('恢复文件校验失败');
     }
     await checkExistingData(destination, manifest.libraryId);
+    await writeFile(join(destination, 'backup-restore.json'), JSON.stringify({ backupId: manifest.id, automaticBackups: 'paused-until-directory-confirmed' }), { flag: 'wx', mode: 0o600, flush: true });
     return { status: 'restored', dataDir: destination, libraryId: manifest.libraryId, systemConfiguration: '运行配置保留于 system-restore，核对路径及证书后单独部署' };
   } catch {
     throw Error('恢复未完成，目标目录保留供检查；原资料和成功备份未改变，请选择另一个新目录重试');

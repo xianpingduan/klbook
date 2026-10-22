@@ -26,8 +26,9 @@ export function BackupManager({ api, grant, active, onAccessError }: { api: Fami
     return () => { current = false; };
   }, [api, active, grant, refresh]);
   useEffect(() => {
-    if (!active || !grant || settings?.latest?.status !== 'running') return;
-    const timer = window.setTimeout(() => setRefresh(value => value + 1), 1000);
+    if (!active || !grant || !settings?.automatic.enabled) return;
+    const checking = ['checking', 'running', 'pruning'].includes(settings.automatic.status);
+    const timer = window.setTimeout(() => setRefresh(value => value + 1), checking ? 1000 : 15_000);
     return () => window.clearTimeout(timer);
   }, [active, grant, settings, refresh]);
   async function save() {
@@ -51,7 +52,7 @@ export function BackupManager({ api, grant, active, onAccessError }: { api: Fami
       await failure(reason);
     } finally { if (alive.current) setBusy(false); }
   }
-  const running = settings?.latest?.status === 'running';
+  const running = settings?.latest?.status === 'running' || ['checking', 'running', 'pruning'].includes(settings?.automatic.status ?? '');
   return <section className="card backup-manager">
     <div className="section-heading"><h1>资料库备份</h1><button className="quiet" disabled={busy} onClick={() => { setError(''); initialized.current = false; setRefresh(value => value + 1); }}>刷新状态</button></div>
     <p>保存整个家庭资料库，包括账号、已同步资料、服务器草稿、回收站、归档及管理配置。其他设备尚未上传的内容不在备份内。</p>
@@ -66,13 +67,23 @@ export function BackupManager({ api, grant, active, onAccessError }: { api: Fami
           <button type="submit">保存备份目录</button>
         </fieldset>
       </form>
+      <h2>自动备份</h2>
+      <p>每日检查资料变化，成功后保留最近 7 份备份。</p>
+      <p>电脑停机错过时，下次启动补做当前资料的一份。只打开页面或登录不会增加备份；失败保留已有成功备份。</p>
+      <p role="status">{settings.automatic.message}</p>
+      {settings.automatic.nextCheckAt && <p className="hint">下次检查：{new Date(settings.automatic.nextCheckAt).toLocaleString('zh-CN')}，电脑需开机且服务运行。</p>}
+      {settings.automatic.cleanupMessage && <p className="message error" role="alert">{settings.automatic.cleanupMessage}</p>}
       <h2>生成备份</h2>
       <p>备份文件仅保存在家庭电脑，不通过网页下载。服务密钥和运行配置放在单独受限的区域；请妥善保管整个备份目录。</p>
       <button disabled={busy || running || !grant || !settings.directory || directory.trim() !== settings.directory} onClick={() => void start()}>{operation.current ? '重试本次备份' : running ? '正在备份…' : '立即备份'}</button>
       {settings.latest && <div className={`message ${settings.latest.status === 'failed' ? 'error' : ''}`} role={settings.latest.status === 'failed' ? 'alert' : 'status'}><p>{settings.latest.message}</p><p className="backup-path">{settings.latest.path}</p></div>}
       <dl><div><dt>最近成功备份</dt><dd>{settings.lastSuccess?.finishedAt ? new Date(settings.lastSuccess.finishedAt).toLocaleString('zh-CN') : '尚无成功备份'}</dd></div>
         {settings.lastSuccess && <div><dt>成功备份位置</dt><dd className="backup-path">{settings.lastSuccess.path}</dd></div>}</dl>
-      <details><summary>如何恢复</summary><p>先在家庭电脑使用备份恢复工具校验，再恢复到一个新的隔离目录，用原账号登录检查资料。确认完整后再切换正式服务；不要覆盖正在使用的数据目录。</p><p>必要系统配置需要单独确认恢复，运行路径和局域网证书须按电脑部署说明核对。当前提供手动备份，自动日备份和保留规则将在后续启用。</p></details>
+      {settings.successful.length > 0 && <section><h2>可用备份</h2><ul>{settings.successful.map(job => <li key={job.id}>
+        <p>{job.finishedAt && new Date(job.finishedAt).toLocaleString('zh-CN')} · <span>{job.trigger === 'automatic' ? '自动备份' : '手动备份'}</span></p>
+        <p className="backup-path">{job.path}</p>
+      </li>)}</ul></section>}
+      <details><summary>如何恢复</summary><p>先在家庭电脑使用备份恢复工具校验，再恢复到一个新的隔离目录，用备份时的账号密码登录检查资料。确认完整后再切换正式服务；不要覆盖正在使用的数据目录。</p><p>恢复副本会暂停自动备份。需要启用时，由家长设置独立备份目录，避免影响原资料库的备份。必要系统配置须单独确认恢复，运行路径和局域网证书按电脑部署说明核对。</p></details>
     </>}
   </section>;
 }

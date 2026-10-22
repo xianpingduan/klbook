@@ -60,10 +60,11 @@ export function createApp(options: { dataDir: string; now?: () => number; allowe
   const backups = new Backups(db, options.dataDir, options.now, options.serviceDir);
   let cleanupTimer: ReturnType<typeof setInterval> | undefined;
   app.addHook('onReady', async () => {
-    backups.initialize();
+    await backups.initialize();
     await exports.initialize();
     await imports.initialize();
     await trash.sweep();
+    backups.schedule();
     cleanupTimer = setInterval(() => { void exports.prune().then(() => imports.prune()).then(() => trash.sweep()).catch(() => {}); }, 60_000);
     cleanupTimer.unref();
   });

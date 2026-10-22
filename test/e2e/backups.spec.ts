@@ -21,8 +21,12 @@ test('家长设置电脑备份目录、生成和刷新状态，明确区分完�
     await page.getByLabel('家庭电脑上的备份目录').fill(backups);
     await page.getByRole('button', { name: '保存备份目录' }).click();
     await expect(page.getByText('备份目录已保存', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '自动备份', exact: true })).toBeVisible();
+    await expect(page.getByText('每日检查资料变化，成功后保留最近 7 份备份。', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: '立即备份' }).click();
     await expect(page.getByText('备份已生成并通过完整性校验', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '可用备份', exact: true })).toBeVisible();
+    await expect(page.getByText('手动备份', { exact: true })).toBeVisible();
     await page.reload();
     await page.getByLabel('家长密码', { exact: true }).fill(password);
     await page.getByRole('button', { name: '验证并进入管理' }).click();
