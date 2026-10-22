@@ -212,7 +212,9 @@ const migrations = [
   ALTER TABLE backupJobs ADD COLUMN removedAt INTEGER;
   CREATE TABLE backupAutomation (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), ownerDataDir TEXT NOT NULL DEFAULT '', ownerId TEXT NOT NULL DEFAULT '',
     baselineDigest TEXT, lastCheckedAt INTEGER, nextCheckAt INTEGER, status TEXT NOT NULL DEFAULT 'waiting', message TEXT NOT NULL DEFAULT '', cleanupMessage TEXT NOT NULL DEFAULT '');
-  INSERT INTO backupAutomation(singleton) VALUES (1);`
+  INSERT INTO backupAutomation(singleton) VALUES (1);`,
+  `ALTER TABLE backupJobs ADD COLUMN retiredAt INTEGER;
+  ALTER TABLE backupJobs ADD COLUMN cleanupFiles TEXT;`
 ];
 
 export function openDatabase(dataDir: string) {

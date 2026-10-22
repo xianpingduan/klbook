@@ -10,13 +10,13 @@ import { AccessError } from './family-access.ts';
 import { copyFileBytes, describeFile, finishBackup, localDirectory, overlaps, protectDirectory, requireSpace, verifyBackup } from './backup-files.ts';
 import type { BackupEntry } from './backup-files.ts';
 import { currentSignature, databaseSignature, snapshotSignature, systemFiles } from './backup-snapshot.ts';
-import { removeManagedBackup } from './backup-retention.ts';
+import { planBackupRemoval, removeRetiredBackup } from './backup-retention.ts';
 
 interface Automation {
   ownerDataDir: string; ownerId: string; baselineDigest: string | null; lastCheckedAt: number | null; nextCheckAt: number | null;
   status: string; message: string; cleanupMessage: string;
 }
-const jobFields = 'id,status,createdAt,finishedAt,path,message,byteLength,trigger,removedAt';
+const jobFields = 'id,status,createdAt,finishedAt,path,message,byteLength,trigger,removedAt,retiredAt';
 const nextDay = (now: number) => { const date = new Date(now); date.setHours(24, 0, 0, 0); return date.getTime(); };
 
 export class Backups {
@@ -26,6 +26,7 @@ export class Backups {
   private now: () => number;
   private work?: Promise<void>;
   private checking?: Promise<void>;
+  private configuring = false;
   private timer?: ReturnType<typeof setInterval>;
   private closed = false;
   constructor(db: Database.Database, dataDir: string, now = Date.now, serviceDir?: string) { this.db = db; this.dataDir = dataDir; this.serviceDir = serviceDir; this.now = now; }
@@ -59,7 +60,7 @@ export class Backups {
     void this.check();
   }
   private async check() {
-    if (this.closed || this.checking || this.work || !this.owned()) return;
+    if (this.closed || this.checking || this.work || this.configuring || !this.owned()) return;
     const settings = this.settings(), state = this.automation();
     const family = this.db.prepare<[], { libraryId: string }>('SELECT libraryId FROM family WHERE singleton=1').get();
     if (!family || !settings.directory || (state.nextCheckAt !== null && state.nextCheckAt > this.now())) return;
@@ -80,7 +81,7 @@ export class Backups {
   settings(): BackupSettings {
     const config = this.db.prepare<[], { directory: string; revision: number }>('SELECT directory, revision FROM backupSettings WHERE singleton = 1').get()!;
     const state = this.automation();
-    const successful = this.db.prepare<[string], BackupJob>(`SELECT ${jobFields} FROM backupJobs WHERE status='succeeded' AND removedAt IS NULL AND ownerId=? ORDER BY finishedAt DESC,rowid DESC`).all(state.ownerId);
+    const successful = this.db.prepare<[string], BackupJob>(`SELECT ${jobFields} FROM backupJobs WHERE status='succeeded' AND retiredAt IS NULL AND removedAt IS NULL AND ownerId=? ORDER BY finishedAt DESC,rowid DESC`).all(state.ownerId);
     const enabled = this.owned() && Boolean(config.directory);
     return { ...config, latest: this.db.prepare<[], BackupJob>(`SELECT ${jobFields} FROM backupJobs ORDER BY createdAt DESC, rowid DESC LIMIT 1`).get() ?? null,
       lastSuccess: successful[0] ?? null, successful,
@@ -102,21 +103,29 @@ export class Backups {
     authorize();
     const checked = await this.directory(directory);
     authorize();
-    if (this.work || this.checking) throw new AccessError(409, '正在检查或生成备份，请等待完成再修改目录');
+    if (this.work || this.checking || this.configuring) throw new AccessError(409, '正在检查、生成备份或保存设置，请等待完成再修改目录');
     const current = this.settings();
-    if (current.revision !== expectedRevision) {
-      if (current.revision === expectedRevision + 1 && current.directory === checked) return current;
-      throw new AccessError(409, '备份设置已更新，请刷新后核对');
-    }
-    if (!this.owned()) {
+    const replay = current.revision === expectedRevision + 1 && current.directory === checked;
+    if (current.revision !== expectedRevision && !replay) throw new AccessError(409, '备份设置已更新，请刷新后核对');
+    const rebind = !this.owned();
+    if (replay && !rebind) return current;
+    if (rebind) {
       const previous = this.db.prepare<[], { path: string }>('SELECT path FROM backupJobs').all();
       if (previous.some(job => overlaps(checked, dirname(resolve(job.path))))) throw new AccessError(422, '恢复副本请使用独立备份目录，不能与原备份目录相互包含');
-      this.db.prepare('UPDATE backupAutomation SET ownerDataDir=?, ownerId=? WHERE singleton=1').run(this.dataDir, randomUUID());
-      await unlink(join(this.dataDir, 'backup-restore.json')).catch(error => { if (error.code !== 'ENOENT') throw error; });
     }
-    if (current.directory !== checked || !current.automatic.enabled) this.db.prepare("UPDATE backupAutomation SET baselineDigest=NULL, nextCheckAt=NULL, status='waiting', message='将检查资料并生成备份' WHERE singleton=1").run();
-    this.db.prepare('UPDATE backupSettings SET directory = ?, revision = revision + 1 WHERE singleton = 1').run(checked);
-    return this.settings();
+    this.configuring = true;
+    try {
+      // Commit all settings together before removing the pause marker. A crash or failed unlink stays paused.
+      this.db.transaction(() => {
+        if (rebind) this.db.prepare('UPDATE backupAutomation SET ownerDataDir=?, ownerId=? WHERE singleton=1').run(this.dataDir, randomUUID());
+        if (current.directory !== checked || !current.automatic.enabled) this.db.prepare("UPDATE backupAutomation SET baselineDigest=NULL, nextCheckAt=NULL, status='waiting', message='将检查资料并生成备份' WHERE singleton=1").run();
+        if (!replay) this.db.prepare('UPDATE backupSettings SET directory = ?, revision = revision + 1 WHERE singleton = 1').run(checked);
+      })();
+      if (rebind) await unlink(join(this.dataDir, 'backup-restore.json')).catch(error => {
+        if (error.code !== 'ENOENT') throw new AccessError(422, '目录设置已保存，恢复副本仍暂停；请检查资料目录权限后重新保存设置');
+      });
+      return this.settings();
+    } finally { this.configuring = false; }
   }
   status(id: string): BackupJob {
     const job = this.db.prepare<[string], BackupJob>(`SELECT ${jobFields} FROM backupJobs WHERE id = ?`).get(id);
@@ -130,7 +139,7 @@ export class Backups {
     if (settings.revision !== expectedRevision) throw new AccessError(409, '备份设置已更新，请刷新后核对');
     if (!settings.directory) throw new AccessError(422, '请先设置备份目录');
     if (!this.owned()) throw new AccessError(422, '恢复副本请先设置独立备份目录');
-    if (this.work || this.checking) throw new AccessError(409, '已有备份正在检查或生成，请等待完成');
+    if (this.work || this.checking || this.configuring) throw new AccessError(409, '正在检查、生成备份或保存设置，请等待完成');
     this.launch(id, settings.directory, home.library.id, 'manual');
     return this.status(id);
   }
@@ -143,11 +152,15 @@ export class Backups {
   async close() { this.closed = true; clearInterval(this.timer); await this.checking; await this.work; }
   private async prune(libraryId: string) {
     this.db.prepare("UPDATE backupAutomation SET status='pruning', cleanupMessage='' WHERE singleton=1").run();
-    const old = this.settings().successful.slice(7);
+    const pending = this.db.prepare<[string], BackupJob & { cleanupFiles: string }>(`SELECT ${jobFields},cleanupFiles FROM backupJobs WHERE retiredAt IS NOT NULL AND removedAt IS NULL AND ownerId=? ORDER BY retiredAt,rowid`).all(this.automation().ownerId);
+    const old: (BackupJob & { cleanupFiles?: string })[] = [...pending, ...this.settings().successful.slice(7)];
     for (const job of old) {
       try {
-        await removeManagedBackup(job, libraryId, [this.dataDir, ...(this.serviceDir ? [this.serviceDir] : [])]);
-        this.db.prepare('UPDATE backupJobs SET removedAt=? WHERE id=?').run(this.now(), job.id);
+        const protectedDirs = [this.dataDir, ...(this.serviceDir ? [this.serviceDir] : [])];
+        const files: BackupEntry[] = job.cleanupFiles ? JSON.parse(job.cleanupFiles) : await planBackupRemoval(job, libraryId, protectedDirs);
+        if (job.retiredAt === null) this.db.prepare('UPDATE backupJobs SET retiredAt=?,cleanupFiles=? WHERE id=?').run(this.now(), JSON.stringify(files), job.id);
+        await removeRetiredBackup(job, files, protectedDirs);
+        this.db.prepare('UPDATE backupJobs SET removedAt=?,cleanupFiles=NULL WHERE id=?').run(this.now(), job.id);
       } catch (error) {
         const reason = error instanceof Error && !('code' in error) ? error.message : '旧目录不可读写，请检查目标盘和权限';
         this.db.prepare('UPDATE backupAutomation SET cleanupMessage=? WHERE singleton=1').run(`新备份已成功；${reason}。下次成功备份后再重试清理`);
@@ -202,11 +215,12 @@ export class Backups {
         this.db.prepare("UPDATE backupJobs SET status = 'succeeded', finishedAt = ?, message = '备份已生成并通过完整性校验', byteLength = ?, snapshotDigest=? WHERE id = ?").run(this.now(), files.reduce((sum, file) => sum + file.size, 0), signature, id);
         this.db.prepare("UPDATE backupAutomation SET baselineDigest=?, nextCheckAt=?, status='succeeded', message='备份成功，次日检查资料变化' WHERE singleton=1").run(signature, nextDay(this.now()));
       })();
-      await this.prune(libraryId);
     } catch (error) {
       const message = error instanceof AccessError ? error.message : error instanceof Error && !('code' in error) ? error.message : '备份未完成，请检查目标盘、可用空间、目录权限及原资料后重试';
       this.db.prepare("UPDATE backupJobs SET status = 'failed', finishedAt = ?, message = ? WHERE id = ?").run(this.now(), `${message}。已有成功备份保留。`, id);
       this.db.prepare("UPDATE backupAutomation SET status='failed', message='备份失败，一小时后自动重试；修复后也可立即手动备份', nextCheckAt=? WHERE singleton=1").run(this.now() + 60 * 60_000);
     } finally { snapshot?.close(); }
+    // Cleanup has its own result; it must never turn a verified new backup into a failed backup.
+    if (this.status(id).status === 'succeeded') await this.prune(libraryId);
   }
 }
